@@ -16,8 +16,9 @@ using namespace std;
 %}
 
 /* 空白符和注释 */
-WhiteSpace    [ \t\n\r]*
+WhiteSpace    [ \t\n\r]+
 LineComment   "//".*
+
 
 /* 标识符 */
 Identifier    [a-zA-Z_][a-zA-Z0-9_]*
@@ -27,7 +28,16 @@ Decimal       [1-9][0-9]*
 Octal         0[0-7]*
 Hexadecimal   0[xX][0-9a-fA-F]+
 
+/* 多行注释状态 */
+%x NOTECOMMENT
+
 %%
+
+"/*"                    {BEGIN(NOTECOMMENT); }
+<NOTECOMMENT>"*/"       {BEGIN(INITIAL); /* 遇到多行注释结尾 */}
+<NOTECOMMENT>([^*]|\n)+ {/* 吞掉所有非星字符和换行 */}
+<NOTECOMMENT>"*"        {/* 吞掉单独的星号 */}
+
 
 {WhiteSpace}    { /* 忽略, 不做任何操作 */ }
 {LineComment}   { /* 忽略, 不做任何操作 */ }

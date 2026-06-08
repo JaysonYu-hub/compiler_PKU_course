@@ -73,7 +73,7 @@ FuncDef
 
 FuncType
   : INT {
-    $$ = new FuncTypeAST("int");
+    $$ = new FuncTypeAST("i32");
   }
   ;
 

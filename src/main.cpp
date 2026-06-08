@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <iostream>
 #include <memory>
+#include <fstream>
 #include <string>
 #include "ast/ast.h"
 
@@ -31,9 +32,14 @@ int main(int argc, const char *argv[]) {
   unique_ptr<BaseAST> ast;
   auto ret = yyparse(ast);
   assert(!ret);
-
+   
+  //打开输出文件
+  ofstream file(output);
+  streambuf *coutbuf = cout.rdbuf(); // 保存原来的缓冲区
+  cout.rdbuf(file.rdbuf()); // 将 cout 的缓冲区切换到文件
   // 输出解析得到的 AST, 其实就是个字符串
   ast->Dump();
   cout << endl;
+  cout.rdbuf(coutbuf); // 恢复原来的缓冲区
   return 0;
 }
