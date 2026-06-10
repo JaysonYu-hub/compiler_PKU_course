@@ -36,7 +36,6 @@ class FuncDefAST : public BaseAST {
   }
 };
 
-// ...
 // FuncType ::= 'int'
 class FuncTypeAST : public BaseAST {
  public:
