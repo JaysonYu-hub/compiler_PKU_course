@@ -68,14 +68,11 @@ void IRVisitor::Visit(const koopa_raw_value_t &value) {
       break;
     case KOOPA_RVT_INTEGER:
       // 访问 integer 指令
-      int i = Visit(kind.data.integer);
-      if (i != 0) {
-        value_reg_map[value] = rc_builder.CurrentReg(); // 将指令对应的寄存器名字存储到 map 中
-      }
+      Visit(kind.data.integer, value);
       break;
     case KOOPA_RVT_BINARY:
       // 访问 binary 指令
-      Visit(kind.data.binary);
+      Visit(kind.data.binary, value);
       break;
     default:
       // 其他类型暂时遇不到
@@ -85,42 +82,41 @@ void IRVisitor::Visit(const koopa_raw_value_t &value) {
 
 // 访问对应类型指令的函数定义略
 // 视需求自行实现
-int IRVisitor::Visit(const koopa_raw_integer_t &integer) {
+void IRVisitor::Visit(const koopa_raw_integer_t &integer, koopa_raw_value_t value) {
   // 访问 integer 指令
-  if (integer.value == 0) {
-    return 0;
+  if (integer.value != 0) {
+    string reg = rc_builder.NewReg();
+    std::cout << "li "<< reg <<", " << integer.value << std::endl;
+    value_reg_map[value] = reg;
   }
-  string reg = rc_builder.NewReg();
-  std::cout << "li "<< reg <<", " << integer.value << std::endl;
-  return integer.value;
 }
 
 void IRVisitor::Visit(const koopa_raw_return_t &ret) {
   // 访问 return 指令
-  string reg = value_reg_map[ret.value];
+  string reg = GetReg(ret.value);
   std::cout << "mv a0, " << reg << std::endl;
   std::cout << "ret" << std::endl;
 }
 
-void IRVisitor::Visit(const koopa_raw_binary_t &binary) {
+void IRVisitor::Visit(const koopa_raw_binary_t &binary, koopa_raw_value_t value) {
   // 访问 binary 指令
-  string lhs_reg = value_reg_map[binary.lhs];
-  string rhs_reg = value_reg_map[binary.rhs];
+  string lhs_reg = GetReg(binary.lhs);
+  string rhs_reg = GetReg(binary.rhs);
   string dest_reg = rc_builder.NewReg();
   switch (binary.op) {
-    case KOOPA_RBO_NOT_EQ:
+    case KOOPA_RBO_EQ:
       std::cout << "xor " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
-      std::cout << "snez " << dest_reg << ", " << dest_reg << std::endl;
+      std::cout << "seqz " << dest_reg << ", " << dest_reg << std::endl;
       break;
     case KOOPA_RBO_ADD:
-      std::cout << "add" << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
+      std::cout << "add " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
       break;
     case KOOPA_RBO_SUB:
-      std::cout << "sub" << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
+      std::cout << "sub " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
       break;
     default:
       // 其他操作符暂时遇不到
       assert(false);
   }
-  return dest_reg;
+  value_reg_map[value] = dest_reg;
 }

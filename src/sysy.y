@@ -1,7 +1,7 @@
 %code requires {
   #include <memory>
   #include <string>
-  #include "ast/ast.h"
+  #include "ast/ast.hpp"
 }
 
 %{
@@ -9,7 +9,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
-#include "ast/ast.h"
+#include "ast/ast.hpp"
 
 int yylex();
 void yyerror(std::unique_ptr<BaseAST> &ast, const char *s);
