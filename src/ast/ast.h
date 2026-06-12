@@ -1,83 +1,148 @@
 #pragma once
 #include <memory>
 #include <string>
-#include <iostream>
+
+class IRBuilder {
+private:
+    int reg_counter = 0; // 临时寄存器计数器
+
+public:
+    // 生成下一个可用的寄存器名字（例如 "%0", "%1"）
+    std::string NewReg() {
+        return "%" + std::to_string(reg_counter++);
+    }
+
+    // 仅查看当前计数器值
+    std::string CurrentReg() const {
+        return "%" + std::to_string(reg_counter);
+    }
+
+    // 每当开始解析一个新函数时清零计数器
+    void Reset() {
+        reg_counter = 0;
+    }
+};
+
+class UnaryExpAST;
+class UnaryOPAST;
 
 class BaseAST {
- public:
-  virtual ~BaseAST() = default;
-
-  virtual void Dump() const = 0;
+public:
+    virtual ~BaseAST() = default;
+    virtual std::string Dump(IRBuilder& builder) const = 0;
 };
 
+// CompUnit ::= FuncDef
 class CompUnitAST : public BaseAST {
- public:
-  std::unique_ptr<BaseAST> func_def;
+public:
+    std::unique_ptr<BaseAST> func_def;
 
-  void Dump() const override {
-    func_def->Dump();
-  }
+    CompUnitAST() = default; 
+    std::string Dump(IRBuilder& builder) const override;
 };
 
+// FuncDef ::= FuncType IDENT '(' ')' Block
 class FuncDefAST : public BaseAST {
- public:
-  std::unique_ptr<BaseAST> func_type;
-  std::string ident;
-  std::unique_ptr<BaseAST> block;
-  
-  FuncDefAST() = default;
-  void Dump() const override {
-    std::cout << "fun @";
-    std::cout << ident << "(): ";
-    func_type->Dump();
-    std::cout << "{ ";
-    block->Dump();
-    std::cout << " }";
-  }
+public:
+    std::unique_ptr<BaseAST> func_type;
+    std::unique_ptr<std::string> ident;
+    std::unique_ptr<BaseAST> block;
+    
+    FuncDefAST() = default; 
+
+    std::string Dump(IRBuilder& builder) const override;
 };
 
 // FuncType ::= 'int'
 class FuncTypeAST : public BaseAST {
- public:
-  std::string type_name; // 存 "int"
-  
-  FuncTypeAST(const std::string &type) : type_name(type) {}
+public:
+    std::string type_name; 
+    
+    FuncTypeAST() = default; 
 
-  void Dump() const override {
-    std::cout << type_name;
-  }
+    std::string Dump(IRBuilder& builder) const override;
 };
 
 // Block ::= '{' Stmt '}'
 class BlockAST : public BaseAST {
- public:
-  std::unique_ptr<BaseAST> stmt;
+public:
+    std::unique_ptr<BaseAST> stmt;
 
-  BlockAST() = default;
-  void Dump() const override {
-    std::cout << "\%entry: ";
-    if (stmt) stmt->Dump();
-  }
+    BlockAST() = default;
+
+    std::string Dump(IRBuilder& builder) const override;
 };
 
+// Stmt ::= 'return' Exp ';'
 class StmtAST : public BaseAST {
- public:
-  std::unique_ptr<BaseAST> number;
+public:
+    std::unique_ptr<BaseAST> exp;
 
-  StmtAST() = default;
-  void Dump() const override {
-    std::cout << "ret ";
-    if (number) number->Dump();
-  }
+    StmtAST() = default; 
+
+    std::string Dump(IRBuilder& builder) const override;
 };
 
-class NumberAST : public BaseAST {
- public:
-  int value;
+// Exp ::= UnaryExp
+class ExpAST : public BaseAST {
+public:
+    std::unique_ptr<BaseAST> unary_exp;
 
-  NumberAST(int val) : value(val) {}
+    ExpAST() = default; 
 
-  void Dump() const override {
-    std::cout << value;
-  }
+    std::string Dump(IRBuilder& builder) const override;
+};
+
+// 中间抽象层：UnaryExp 基类
+class UnaryExpAST : public BaseAST {
+public:
+    virtual ~UnaryExpAST() = default;
+    std::string Dump(IRBuilder& builder) const override = 0; 
+};
+
+// UnaryExp ::= UnaryOP UnaryExp
+class UnaryOPExpAST : public UnaryExpAST {
+public:
+    std::unique_ptr<UnaryOPAST> unary_op;
+    std::unique_ptr<UnaryExpAST> unary_exp;
+
+    UnaryOPExpAST() = default; 
+    std::string Dump(IRBuilder& builder) const override;
+};
+
+// 中间抽象层：PrimaryExp 基类
+class PrimaryExpAST : public UnaryExpAST {
+public:
+    virtual ~PrimaryExpAST() = default;
+    std::string Dump(IRBuilder& builder) const override = 0;
+};
+
+// PrimaryExp ::= '(' Exp ')'
+class ParenExprAST : public PrimaryExpAST {
+public:
+    std::unique_ptr<BaseAST> exp;
+  
+    ParenExprAST() = default; 
+
+    std::string Dump(IRBuilder& builder) const override;
+};
+
+// PrimaryExp ::= Number
+class NumberExpAST : public PrimaryExpAST {
+public:
+    int value;
+
+    NumberExpAST() = default; 
+
+    std::string Dump(IRBuilder& builder) const override;
+};
+
+//UnaryOP ::= '+' | '-' | '!'
+class UnaryOPAST : public BaseAST {
+public:
+    std::string unary_op;
+
+    UnaryOPAST() = default; 
+
+    std::string Dump(IRBuilder& builder) const override;
 };
