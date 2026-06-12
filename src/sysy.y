@@ -30,9 +30,11 @@ using namespace std;
 %token <str_val> IDENT
 %token <int_val> INT_CONST
 
-%token ADD SUB NOT
+%token ADD SUB NOT MUL MOD DIV
 
 %type <ast_val> FuncDef FuncType Block Stmt Exp UnaryExp PrimaryExp UnaryOp
+%type <ast_val> MulExp AddExp
+%type <ast_val> AddOp MulOp
 %type <int_val> Number
 
 %%
@@ -45,7 +47,6 @@ CompUnit
   }
   ;
 
-// FuncDef ::= FuncType IDENT '(' ')' Block;
 FuncDef
   : FuncType IDENT '(' ')' Block {
     auto func_def = new FuncDefAST();
@@ -92,16 +93,16 @@ UnaryExp
   | UnaryOp UnaryExp { 
     auto unary_op_exp = new UnaryOPExpAST();
     // 使用 static_cast 确保指针转换到对应的子类安全级别
-    unary_op_exp->unary_op = unique_ptr<UnaryOPAST>(static_cast<UnaryOPAST*>($1));
+    unary_op_exp->op = unique_ptr<OpAST>(static_cast<OpAST*>($1));
     unary_op_exp->unary_exp = unique_ptr<UnaryExpAST>(static_cast<UnaryExpAST*>($2));
     $$ = unary_op_exp; 
   }
   ;
 
 Exp 
-  : UnaryExp {
+  : AddExp {
     auto exp = new ExpAST();
-    exp->unary_exp = unique_ptr<BaseAST>($1);
+    exp->add_exp = unique_ptr<BaseAST>($1);
     $$ = exp;
   }
   ;
@@ -119,12 +120,50 @@ PrimaryExp
   }
   ;
 
-UnaryOp
-  : ADD { auto op = new UnaryOPAST(); op->unary_op = "+"; $$ = op; }
-  | SUB { auto op = new UnaryOPAST(); op->unary_op = "-"; $$ = op; }
-  | NOT { auto op = new UnaryOPAST(); op->unary_op = "!"; $$ = op; }
+
+MulExp
+  : UnaryExp {
+    $$ = $1;
+  }
+  | MulExp MulOp UnaryExp {
+    auto three_mul_exp = new ThreeMulExpAST();
+    three_mul_exp->mul_exp = unique_ptr<MulExpAST>(static_cast<MulExpAST*>($1));
+    three_mul_exp->op = unique_ptr<OpAST>(static_cast<OpAST*>($2));
+    three_mul_exp->unary_exp = unique_ptr<UnaryExpAST>(static_cast<UnaryExpAST*>($3));
+    $$ = three_mul_exp;
+  }
   ;
 
+AddExp
+  : MulExp {
+    auto mul_add_exp = new MulAddExpAST();
+    mul_add_exp->mul_exp = unique_ptr<MulExpAST>(static_cast<MulExpAST*>($1));
+    $$ = mul_add_exp;
+  }
+  | AddExp AddOp MulExp {
+    auto three_add_exp = new ThreeAddExpAST();
+    three_add_exp->add_exp = unique_ptr<AddExpAST>(static_cast<AddExpAST*>($1));
+    three_add_exp->op = unique_ptr<OpAST>(static_cast<OpAST*>($2));
+    three_add_exp->mul_exp = unique_ptr<MulExpAST>(static_cast<MulExpAST*>($3));
+    $$ = three_add_exp;
+  }
+  ;
+
+UnaryOp
+  : AddOp { $$ = $1; }
+  | NOT   { auto op_ast = new OpAST(); op_ast->op = "!"; $$ = op_ast; }
+  ;
+
+AddOp
+  : ADD { auto op_ast = new OpAST(); op_ast->op = "+"; $$ = op_ast; }
+  | SUB { auto op_ast = new OpAST(); op_ast->op = "-"; $$ = op_ast; }
+  ;
+
+MulOp
+  : MUL { auto op_ast = new OpAST(); op_ast->op = "*"; $$ = op_ast; }
+  | DIV { auto op_ast = new OpAST(); op_ast->op = "/"; $$ = op_ast; }
+  | MOD { auto op_ast = new OpAST(); op_ast->op = "%"; $$ = op_ast; }
+  ;
 %%
 
 void yyerror(std::unique_ptr<BaseAST> &ast, const char *s) {

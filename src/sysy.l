@@ -38,7 +38,6 @@ Hexadecimal   0[xX][0-9a-fA-F]+
 <NOTECOMMENT>([^*]|\n)+ {/* 吞掉所有非星字符和换行 */}
 <NOTECOMMENT>"*"        {/* 吞掉单独的星号 */}
 
-
 {WhiteSpace}    { /* 忽略, 不做任何操作 */ }
 {LineComment}   { /* 忽略, 不做任何操作 */ }
 
@@ -51,11 +50,12 @@ Hexadecimal   0[xX][0-9a-fA-F]+
 {Octal}         { yylval.int_val = strtol(yytext, nullptr, 0); return INT_CONST; }
 {Hexadecimal}   { yylval.int_val = strtol(yytext, nullptr, 0); return INT_CONST; }
 
-
-
 "+" { return ADD; }
 "-" { return SUB; }
 "!" { return NOT; }
+"*" { return MUL; }
+"/" { return DIV; }
+"%" { return MOD; }
 
 .               { return yytext[0]; }
 

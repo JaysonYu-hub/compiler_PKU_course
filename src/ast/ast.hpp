@@ -5,18 +5,15 @@
 class IRBuilder {
 private:
   int reg_counter = 0; // 临时寄存器计数器
-
 public:
   // 生成下一个可用的寄存器名字（例如 "%0", "%1"）
   std::string NewReg() {
     return "%" + std::to_string(reg_counter++);
   }
-
   // 仅查看当前计数器值
   std::string CurrentReg() const {
     return "%" + std::to_string(reg_counter);
   }
-
   // 每当开始解析一个新函数时清零计数器
   void Reset() {
     reg_counter = 0;
@@ -24,7 +21,7 @@ public:
 };
 
 class UnaryExpAST;
-class UnaryOPAST;
+class OpAST;
 
 class BaseAST {
 public:
@@ -83,12 +80,12 @@ public:
   std::string Dump(IRBuilder& builder) const override;
 };
 
-// Exp ::= UnaryExp
+// Exp ::= AddExp
 class ExpAST : public BaseAST {
 public:
-  std::unique_ptr<BaseAST> unary_exp;
+  std::unique_ptr<BaseAST> add_exp;
 
-  ExpAST() = default; 
+  ExpAST() = default;
 
   std::string Dump(IRBuilder& builder) const override;
 };
@@ -103,7 +100,7 @@ public:
 // UnaryExp ::= UnaryOP UnaryExp
 class UnaryOPExpAST : public UnaryExpAST {
 public:
-  std::unique_ptr<UnaryOPAST> unary_op;
+  std::unique_ptr<OpAST> op;
   std::unique_ptr<UnaryExpAST> unary_exp;
 
   UnaryOPExpAST() = default; 
@@ -137,12 +134,69 @@ public:
   std::string Dump(IRBuilder& builder) const override;
 };
 
-//UnaryOP ::= '+' | '-' | '!'
-class UnaryOPAST : public BaseAST {
+//'+' | '-' | '!' | '*' | '/' | '%'
+class OpAST : public BaseAST {
 public:
-  std::string unary_op;
+  std::string op;
 
-  UnaryOPAST() = default; 
+  OpAST() = default; 
 
   std::string Dump(IRBuilder& builder) const override;
+};
+
+// MulExp ::= UnaryExp | MulExp ('*' | '/' | '%') UnaryExp
+// 中间抽象层：MulExp 基类
+class MulExpAST : public UnaryExpAST {
+public:
+  virtual ~MulExpAST() = default;
+  std::string Dump(IRBuilder& builder) const override = 0;
+}
+;
+
+class UnaryMulExpAST : public MulExpAST {
+public:
+  std::unique_ptr<UnaryExpAST> unary_exp;
+
+  UnaryMulExpAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+class ThreeMulExpAST : public MulExpAST {
+public:
+  std::unique_ptr<MulExpAST> mul_exp;
+  std::unique_ptr<OpAST> op; // '*' | '/' | '%'
+  std::unique_ptr<UnaryExpAST> unary_exp;
+
+  ThreeMulExpAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+// AddExp ::= MulExp | AddExp ('+' | '-') MulExp
+// 中间抽象层：AddExp 基类
+class AddExpAST : public UnaryExpAST {
+public:
+  virtual ~AddExpAST() = default;
+  std::string Dump(IRBuilder& builder) const override = 0;
+};
+
+class MulAddExpAST : public AddExpAST {
+public:
+  std::unique_ptr<MulExpAST> mul_exp;
+
+  MulAddExpAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+class ThreeAddExpAST : public AddExpAST {
+public:
+  std::unique_ptr<AddExpAST> add_exp;
+  std::unique_ptr<OpAST> op; // '+' or '-'
+  std::unique_ptr<MulExpAST> mul_exp;
+
+  ThreeAddExpAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override; 
 };
