@@ -1,48 +1,21 @@
-#include "IRvisit.h"
+#include "IRvisit.hpp"
 #include "iostream"
 #include "cassert"
-
-void handle_raw_program(koopa_raw_program_t raw) {
-  std::cout << ".text" << std::endl;
-  for (size_t i = 0; i < raw.funcs.len; i++) {
-    assert(raw.funcs.kind == KOOPA_RSIK_FUNCTION);
-    koopa_raw_function_t func = (koopa_raw_function_t)raw.funcs.buffer[i];
-    std::string func_name(func->name);
-    func_name = func_name.substr(1); // 去掉前缀 '_'
-    std::cout << ".global " << func_name << std::endl;
-    std::cout << func_name << ":" << std::endl;
-
-    for (size_t j = 0; j < func->bbs.len; ++j) {
-      assert(func->bbs.kind == KOOPA_RSIK_BASIC_BLOCK);
-      koopa_raw_basic_block_t bb = (koopa_raw_basic_block_t) func->bbs.buffer[j];
-
-      for (size_t k = 0; k < bb->insts.len; ++k) {
-        assert(bb->insts.kind == KOOPA_RSIK_VALUE);
-        koopa_raw_value_t value = (koopa_raw_value_t) bb->insts.buffer[k];
-        assert(value->kind.tag == KOOPA_RVT_RETURN);
-        koopa_raw_value_t ret_value = value->kind.data.ret.value;
-        assert(ret_value->kind.tag == KOOPA_RVT_INTEGER);
-        int32_t int_val = ret_value->kind.data.integer.value;
-        std::cout << "li a0, " << int_val << std::endl;
-        std::cout << "ret" << std::endl;
-      }
-    }
-  }
-}
-
+using namespace std;
 
 // 访问 raw program
-void Visit(const koopa_raw_program_t &program) {
+string IRVisitor::Visit(const koopa_raw_program_t &program) {
   // 执行一些其他的必要操作
   // 访问所有全局变量
   Visit(program.values);
   std::cout << ".text" << std::endl;
   // 访问所有函数
   Visit(program.funcs);
+  return "";
 }
 
 // 访问 raw slice
-void Visit(const koopa_raw_slice_t &slice) {
+string IRVisitor::Visit(const koopa_raw_slice_t &slice) {
   for (size_t i = 0; i < slice.len; ++i) {
     auto ptr = slice.buffer[i];
     // 根据 slice 的 kind 决定将 ptr 视作何种元素
@@ -67,18 +40,19 @@ void Visit(const koopa_raw_slice_t &slice) {
 }
 
 // 访问函数
-void Visit(const koopa_raw_function_t &func) {
+string IRVisitor::Visit(const koopa_raw_function_t &func) {
   // 执行一些其他的必要操作
   std::string func_name(func->name);
-  func_name = func_name.substr(1); // 去掉前缀 '_'
+  func_name = func_name.substr(1); // 去掉前缀
   std::cout << ".global " << func_name << std::endl;
   std::cout << func_name << ":" << std::endl;
   // 访问所有基本块
   Visit(func->bbs);
+  return "";
 }
 
 // 访问基本块
-void Visit(const koopa_raw_basic_block_t &bb) {
+string IRVisitor::Visit(const koopa_raw_basic_block_t &bb) {
   // 执行一些其他的必要操作
   // ...
   // 访问所有指令
@@ -86,7 +60,7 @@ void Visit(const koopa_raw_basic_block_t &bb) {
 }
 
 // 访问指令
-void Visit(const koopa_raw_value_t &value) {
+string IRVisitor::Visit(const koopa_raw_value_t &value) {
   // 根据指令类型判断后续需要如何访问
   const auto &kind = value->kind;
   switch (kind.tag) {
@@ -98,22 +72,54 @@ void Visit(const koopa_raw_value_t &value) {
       // 访问 integer 指令
       Visit(kind.data.integer);
       break;
+    case KOOPA_RVT_BINARY:
+      // 访问 binary 指令
+      // Visit(kind.data.binary);
+      break;
     default:
       // 其他类型暂时遇不到
       assert(false);
   }
 }
 
+
 // 访问对应类型指令的函数定义略
 // 视需求自行实现
 // ...
-void Visit(const koopa_raw_integer_t &integer) {
+string IRVisitor::Visit(const koopa_raw_integer_t &integer) {
   // 访问 integer 指令
-  std::cout << "li a0, " << integer.value << std::endl;
+  if (integer.value == 0) {
+    return;
+  }
+  string reg = rc_builder.NewReg();
+  std::cout << "li "<< reg <<", " << integer.value << std::endl;
 }
 
-void Visit(const koopa_raw_return_t &ret) {
+string IRVisitor::Visit(const koopa_raw_return_t &ret) {
   // 访问 return 指令
   Visit(ret.value);
   std::cout << "ret" << std::endl;
+}
+
+string IRVisitor::Visit(const koopa_raw_binary_t &binary) {
+  // 访问 binary 指令
+  if (binary.lhs->kind.tag == KOOPA_RVT_INTEGER && binary.lhs->kind.data.integer.value != 0) {
+      Visit(binary.lhs->kind.data.integer);
+  } else {
+      Visit(binary.rhs->kind.data.integer);
+  }
+  switch (binary.op) {
+    case KOOPA_RBO_NOT_EQ:
+      std::cout << "ne";
+      break;
+    case KOOPA_RBO_ADD:
+      std::cout << "add";
+      break;
+    case KOOPA_RBO_SUB:
+      std::cout << "sub";
+      break;
+    default:
+      // 其他操作符暂时遇不到
+      assert(false);
+  }
 }

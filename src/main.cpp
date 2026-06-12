@@ -4,9 +4,9 @@
 #include <memory>
 #include <fstream>
 #include <string>
-#include "ast/ast.h"
+#include "ast/ast.hpp"
 #include "koopa.h"
-#include "IR/IRvisit.h"
+#include "IR/IRvisit.hpp"
 
 using namespace std;
 
@@ -21,6 +21,7 @@ extern int yyparse(unique_ptr<BaseAST> &ast);
 
 int main(int argc, const char *argv[]) {
   IRBuilder builder;  
+  IRVisitor ir_visitor;
   // 解析命令行参数. 测试脚本/评测平台要求你的编译器能接收如下参数:
   // compiler 模式 输入文件 -o 输出文件
   assert(argc == 5);
@@ -58,7 +59,7 @@ int main(int argc, const char *argv[]) {
     streambuf *coutbuf = cout.rdbuf(); // 保存原来的缓冲区
     cout.rdbuf(file.rdbuf()); // 将 cout 的缓冲区切换到文件
     //处理raw program
-    Visit(raw);
+    ir_visitor.HandleRawProgram(raw);
     cout.rdbuf(coutbuf); // 恢复原来的缓冲区
 
     koopa_delete_raw_program_builder(builder);
