@@ -4,18 +4,17 @@
 using namespace std;
 
 // 访问 raw program
-string IRVisitor::Visit(const koopa_raw_program_t &program) {
+void IRVisitor::Visit(const koopa_raw_program_t &program) {
   // 执行一些其他的必要操作
   // 访问所有全局变量
   Visit(program.values);
   std::cout << ".text" << std::endl;
   // 访问所有函数
   Visit(program.funcs);
-  return "";
 }
 
 // 访问 raw slice
-string IRVisitor::Visit(const koopa_raw_slice_t &slice) {
+void IRVisitor::Visit(const koopa_raw_slice_t &slice) {
   for (size_t i = 0; i < slice.len; ++i) {
     auto ptr = slice.buffer[i];
     // 根据 slice 的 kind 决定将 ptr 视作何种元素
@@ -40,7 +39,7 @@ string IRVisitor::Visit(const koopa_raw_slice_t &slice) {
 }
 
 // 访问函数
-string IRVisitor::Visit(const koopa_raw_function_t &func) {
+void IRVisitor::Visit(const koopa_raw_function_t &func) {
   // 执行一些其他的必要操作
   std::string func_name(func->name);
   func_name = func_name.substr(1); // 去掉前缀
@@ -48,11 +47,10 @@ string IRVisitor::Visit(const koopa_raw_function_t &func) {
   std::cout << func_name << ":" << std::endl;
   // 访问所有基本块
   Visit(func->bbs);
-  return "";
 }
 
 // 访问基本块
-string IRVisitor::Visit(const koopa_raw_basic_block_t &bb) {
+void IRVisitor::Visit(const koopa_raw_basic_block_t &bb) {
   // 执行一些其他的必要操作
   // ...
   // 访问所有指令
@@ -60,7 +58,7 @@ string IRVisitor::Visit(const koopa_raw_basic_block_t &bb) {
 }
 
 // 访问指令
-string IRVisitor::Visit(const koopa_raw_value_t &value) {
+void IRVisitor::Visit(const koopa_raw_value_t &value) {
   // 根据指令类型判断后续需要如何访问
   const auto &kind = value->kind;
   switch (kind.tag) {
@@ -70,11 +68,14 @@ string IRVisitor::Visit(const koopa_raw_value_t &value) {
       break;
     case KOOPA_RVT_INTEGER:
       // 访问 integer 指令
-      Visit(kind.data.integer);
+      int i = Visit(kind.data.integer);
+      if (i != 0) {
+        value_reg_map[value] = rc_builder.CurrentReg(); // 将指令对应的寄存器名字存储到 map 中
+      }
       break;
     case KOOPA_RVT_BINARY:
       // 访问 binary 指令
-      // Visit(kind.data.binary);
+      Visit(kind.data.binary);
       break;
     default:
       // 其他类型暂时遇不到
@@ -82,44 +83,44 @@ string IRVisitor::Visit(const koopa_raw_value_t &value) {
   }
 }
 
-
 // 访问对应类型指令的函数定义略
 // 视需求自行实现
-// ...
-string IRVisitor::Visit(const koopa_raw_integer_t &integer) {
+int IRVisitor::Visit(const koopa_raw_integer_t &integer) {
   // 访问 integer 指令
   if (integer.value == 0) {
-    return;
+    return 0;
   }
   string reg = rc_builder.NewReg();
   std::cout << "li "<< reg <<", " << integer.value << std::endl;
+  return integer.value;
 }
 
-string IRVisitor::Visit(const koopa_raw_return_t &ret) {
+void IRVisitor::Visit(const koopa_raw_return_t &ret) {
   // 访问 return 指令
-  Visit(ret.value);
+  string reg = value_reg_map[ret.value];
+  std::cout << "mv a0, " << reg << std::endl;
   std::cout << "ret" << std::endl;
 }
 
-string IRVisitor::Visit(const koopa_raw_binary_t &binary) {
+void IRVisitor::Visit(const koopa_raw_binary_t &binary) {
   // 访问 binary 指令
-  if (binary.lhs->kind.tag == KOOPA_RVT_INTEGER && binary.lhs->kind.data.integer.value != 0) {
-      Visit(binary.lhs->kind.data.integer);
-  } else {
-      Visit(binary.rhs->kind.data.integer);
-  }
+  string lhs_reg = value_reg_map[binary.lhs];
+  string rhs_reg = value_reg_map[binary.rhs];
+  string dest_reg = rc_builder.NewReg();
   switch (binary.op) {
     case KOOPA_RBO_NOT_EQ:
-      std::cout << "ne";
+      std::cout << "xor " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
+      std::cout << "snez " << dest_reg << ", " << dest_reg << std::endl;
       break;
     case KOOPA_RBO_ADD:
-      std::cout << "add";
+      std::cout << "add" << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
       break;
     case KOOPA_RBO_SUB:
-      std::cout << "sub";
+      std::cout << "sub" << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
       break;
     default:
       // 其他操作符暂时遇不到
       assert(false);
   }
+  return dest_reg;
 }

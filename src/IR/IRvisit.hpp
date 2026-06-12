@@ -1,6 +1,7 @@
 #pragma once
 #include "koopa.h"
 #include "string"
+#include "unordered_map"
 using namespace std;
 
 class RCBuilder {
@@ -33,18 +34,19 @@ public:
 class IRVisitor {
 private:
   RCBuilder rc_builder;
+  unordered_map<koopa_raw_value_t, string> value_reg_map; // 存储指令对应的寄存器名字
 public:
   void HandleRawProgram(const koopa_raw_program_t &program) {
     // 访问 raw program
     Visit(program);
   }
 private:
-  string Visit(const koopa_raw_program_t &program);
-  string Visit(const koopa_raw_slice_t &slice);
-  string Visit(const koopa_raw_function_t &func);
-  string Visit(const koopa_raw_basic_block_t &bb);
-  string Visit(const koopa_raw_value_t &value);
-  string Visit(const koopa_raw_integer_t &integer);
-  string Visit(const koopa_raw_return_t &aggregate);
-  string Visit(const koopa_raw_binary_t &binary);
+  void Visit(const koopa_raw_program_t &program);
+  void Visit(const koopa_raw_slice_t &slice);
+  void Visit(const koopa_raw_function_t &func);
+  void Visit(const koopa_raw_basic_block_t &bb);
+  void Visit(const koopa_raw_value_t &value);
+  int Visit(const koopa_raw_integer_t &integer);
+  void Visit(const koopa_raw_return_t &aggregate);
+  void Visit(const koopa_raw_binary_t &binary);
 };
