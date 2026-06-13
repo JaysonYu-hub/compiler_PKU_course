@@ -155,7 +155,7 @@ public:
 
 class UnaryMulExpAST : public MulExpAST {
 public:
-  std::unique_ptr<UnaryExpAST> unary_exp;
+  std::unique_ptr<BaseAST> unary_exp;
 
   UnaryMulExpAST() = default; 
 
@@ -183,7 +183,7 @@ public:
 
 class MulAddExpAST : public AddExpAST {
 public:
-  std::unique_ptr<MulExpAST> mul_exp;
+  std::unique_ptr<BaseAST> mul_exp;
 
   MulAddExpAST() = default; 
 

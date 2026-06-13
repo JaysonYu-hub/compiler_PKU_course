@@ -123,7 +123,9 @@ PrimaryExp
 
 MulExp
   : UnaryExp {
-    $$ = $1;
+    auto unary_mul = new UnaryMulExpAST();
+    unary_mul->unary_exp = unique_ptr<BaseAST>($1);
+    $$ = unary_mul;
   }
   | MulExp MulOp UnaryExp {
     auto three_mul_exp = new ThreeMulExpAST();
@@ -137,7 +139,7 @@ MulExp
 AddExp
   : MulExp {
     auto mul_add_exp = new MulAddExpAST();
-    mul_add_exp->mul_exp = unique_ptr<MulExpAST>(static_cast<MulExpAST*>($1));
+    mul_add_exp->mul_exp = unique_ptr<BaseAST>($1);
     $$ = mul_add_exp;
   }
   | AddExp AddOp MulExp {

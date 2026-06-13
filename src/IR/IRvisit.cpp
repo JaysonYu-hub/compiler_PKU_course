@@ -114,6 +114,15 @@ void IRVisitor::Visit(const koopa_raw_binary_t &binary, koopa_raw_value_t value)
     case KOOPA_RBO_SUB:
       std::cout << "sub " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
       break;
+    case KOOPA_RBO_MUL:
+      std::cout << "mul " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
+      break;
+    case KOOPA_RBO_DIV:
+      std::cout << "div " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
+      break;
+    case KOOPA_RBO_MOD:
+      std::cout << "rem " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
+      break;
     default:
       // 其他操作符暂时遇不到
       assert(false);
