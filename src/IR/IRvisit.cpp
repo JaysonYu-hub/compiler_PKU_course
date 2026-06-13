@@ -108,6 +108,10 @@ void IRVisitor::Visit(const koopa_raw_binary_t &binary, koopa_raw_value_t value)
       std::cout << "xor " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
       std::cout << "seqz " << dest_reg << ", " << dest_reg << std::endl;
       break;
+    case KOOPA_RBO_NOT_EQ:
+      std::cout << "xor " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
+      std::cout << "snez " << dest_reg << ", " << dest_reg << std::endl;
+      break;
     case KOOPA_RBO_ADD:
       std::cout << "add " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
       break;
@@ -122,6 +126,24 @@ void IRVisitor::Visit(const koopa_raw_binary_t &binary, koopa_raw_value_t value)
       break;
     case KOOPA_RBO_MOD:
       std::cout << "rem " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
+      break;
+    case KOOPA_RBO_AND:
+      std::cout << "and " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
+      break;
+    case KOOPA_RBO_OR:
+      std::cout << "or " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
+      break;
+    case KOOPA_RBO_LT:
+      std::cout << "slt " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
+      break;
+    case KOOPA_RBO_LE:
+      std::cout << "sgt " << dest_reg << ", " << rhs_reg << ", " << lhs_reg << std::endl;
+      break;
+    case KOOPA_RBO_GT:
+      std::cout << "sgt " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;
+      break;
+    case KOOPA_RBO_GE:
+      std::cout << "slt " << dest_reg << ", " << rhs_reg << ", " << lhs_reg << std::endl;
       break;
     default:
       // 其他操作符暂时遇不到

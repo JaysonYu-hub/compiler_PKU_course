@@ -80,10 +80,10 @@ public:
   std::string Dump(IRBuilder& builder) const override;
 };
 
-// Exp ::= AddExp
+// Exp ::= LOrExp
 class ExpAST : public BaseAST {
 public:
-  std::unique_ptr<BaseAST> add_exp;
+  std::unique_ptr<BaseAST> lor_exp;
 
   ExpAST() = default;
 
@@ -200,3 +200,115 @@ public:
 
   std::string Dump(IRBuilder& builder) const override; 
 };
+
+// RelExp ::= AddExp | RelExp ('<' | '>' | '<=' | '>=') AddExp
+// 中间抽象层：RelExp 基类
+class RelExpAST : public AddExpAST {
+public:
+  virtual ~RelExpAST() = default;
+  std::string Dump(IRBuilder& builder) const override = 0;
+};
+
+class AddRelExpAST : public RelExpAST {
+public:
+  std::unique_ptr<BaseAST> add_exp;
+
+  AddRelExpAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+class ThreeRelExpAST : public RelExpAST {
+public: 
+  std::unique_ptr<RelExpAST> rel_exp;
+  std::unique_ptr<OpAST> op; // '<' | '>' | '<=' | '>='
+  std::unique_ptr<AddExpAST> add_exp;
+
+  ThreeRelExpAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override; 
+};
+
+// EqExp ::= RelExp | EqExp ('==' | '!=') RelExp
+// 中间抽象层：EqExp 基类
+class EqExpAST : public RelExpAST {
+public:
+  virtual ~EqExpAST() = default;
+  std::string Dump(IRBuilder& builder) const override = 0;
+};
+
+class RelEqExpAST : public EqExpAST {
+public:
+  std::unique_ptr<BaseAST> rel_exp;
+
+  RelEqExpAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+class ThreeEqExpAST : public EqExpAST {
+public:
+  std::unique_ptr<EqExpAST> eq_exp;
+  std::unique_ptr<OpAST> op; // '==' | '!='
+  std::unique_ptr<RelExpAST> rel_exp;
+
+  ThreeEqExpAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override; 
+};
+
+// LAndExp ::= EqExp | LAndExp '&&' EqExp
+// 中间抽象层：LAndExp 基类
+class LAndExpAST : public EqExpAST {
+public:
+  virtual ~LAndExpAST() = default;
+  std::string Dump(IRBuilder& builder) const override = 0;
+};
+
+class EqLAndExpAST : public LAndExpAST {
+public:
+  std::unique_ptr<BaseAST> eq_exp;
+
+  EqLAndExpAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+class ThreeLAndExpAST : public LAndExpAST {
+public:
+  std::unique_ptr<LAndExpAST> land_exp;
+  std::unique_ptr<OpAST> op; // '&&'
+  std::unique_ptr<EqExpAST> eq_exp;
+
+  ThreeLAndExpAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override; 
+};
+
+// LOrExp ::= LAndExp | LOrExp '||' LAndExp
+// 中间抽象层：LOrExp 基类
+class LOrExpAST : public LAndExpAST {
+public:
+  virtual ~LOrExpAST() = default;
+  std::string Dump(IRBuilder& builder) const override = 0;
+};
+
+class LAndLOrExpAST : public LOrExpAST {
+public:
+  std::unique_ptr<BaseAST> land_exp;
+
+  LAndLOrExpAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+class ThreeLOrExpAST : public LOrExpAST {
+public:
+  std::unique_ptr<LOrExpAST> lor_exp;
+  std::unique_ptr<OpAST> op; // '||'
+  std::unique_ptr<LAndExpAST> land_exp;
+
+  ThreeLOrExpAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;  
+};  

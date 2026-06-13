@@ -57,6 +57,15 @@ Hexadecimal   0[xX][0-9a-fA-F]+
 "/" { return DIV; }
 "%" { return MOD; }
 
+"<"  { return LT; }
+">"  { return GT; }
+"<=" { return LE; }
+">=" { return GE; }
+"==" { return EQ; }
+"!=" { return NE; }
+"&&" { return L_AND; }
+"||" { return L_OR; }
+
 .               { return yytext[0]; }
 
 %%

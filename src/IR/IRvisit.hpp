@@ -13,16 +13,20 @@ public:
   std::string NewReg() {
     if (reg_counter < 8) {
       return "a" + std::to_string(reg_counter++);
-    } else {
+    } else if (reg_counter < 15) {
       return "t" + std::to_string(reg_counter++ - 8);
+    } else {
+      return "s" + std::to_string(reg_counter++ - 15);
     }
   }
   // 仅查看当前计数器值
   std::string CurrentReg() const {
     if (reg_counter < 8) {
       return "a" + std::to_string(reg_counter);
-    } else {
+    } else if (reg_counter < 15) {
       return "t" + std::to_string(reg_counter - 8);
+    } else {
+      return "s" + std::to_string(reg_counter - 15);
     }
   }
   // 每当开始解析一个新函数时清零计数器
