@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <vector>
 
 class IRBuilder {
 private:
@@ -60,15 +61,40 @@ public:
   std::string Dump(IRBuilder& builder) const override;
 };
 
-// Block ::= '{' Stmt '}'
-class BlockAST : public BaseAST {
+// BlockItem ::= Decl | Stmt
+// 中间抽象层：BlockItem 基类
+class BlockItemAST : public BaseAST {
 public:
-  std::unique_ptr<BaseAST> stmt;
+  virtual ~BlockItemAST() = default;
+  std::string Dump(IRBuilder& builder) const override = 0;
+};
 
-  BlockAST() = default;
+class DeclBloAST : public BlockItemAST {
+public:
+  std::unique_ptr<BaseAST> decl;
+  DeclBloAST() = default; 
 
   std::string Dump(IRBuilder& builder) const override;
 };
+
+class StmtBloAST : public BlockItemAST {
+public:
+  std::unique_ptr<StmtAST> stmt;
+  StmtBloAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+// Block ::= '{' {BlockItem} '}'
+class BlockAST : public BaseAST {
+public:
+  std::vector<unique_ptr<BaseAST>> block_items;
+
+  BlockAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
 
 // Stmt ::= 'return' Exp ';'
 class StmtAST : public BaseAST {
@@ -114,25 +140,32 @@ public:
   std::string Dump(IRBuilder& builder) const override = 0;
 };
 
-// PrimaryExp ::= '(' Exp ')'
-class ParenExprAST : public PrimaryExpAST {
+// PrimaryExp ::= '(' Exp ')' | LVal | Number
+class ThreePriAST : public PrimaryExpAST {
 public:
   std::unique_ptr<BaseAST> exp;
-  
-  ParenExprAST() = default; 
+  ThreePriAST() = default; 
 
   std::string Dump(IRBuilder& builder) const override;
 };
 
-// PrimaryExp ::= Number
-class NumberExpAST : public PrimaryExpAST {
+class LValPriAST : public PrimaryExpAST {
+public:
+  std::unique_ptr<std::string> ident;
+  LValPriAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+class NumberPriAST : public PrimaryExpAST {
 public:
   int value;
-
-  NumberExpAST() = default; 
+  NumberPriAST() = default; 
 
   std::string Dump(IRBuilder& builder) const override;
 };
+
+
 
 //'+' | '-' | '!' | '*' | '/' | '%'
 class OpAST : public BaseAST {
@@ -312,3 +345,59 @@ public:
 
   std::string Dump(IRBuilder& builder) const override;  
 };  
+
+// ConstExp ::= Exp
+class ConstExpAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> exp;
+  ConstExpAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+
+// ConstInitVal ::= ConstExp
+class ConstInitValAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> const_exp;
+  ConstInitValAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+// ConstDef ::= IDENT '=' ConstInitVal
+class ConstDefAST : public BaseAST {
+public:
+  std::unique_ptr<std::string> ident;
+  std::unique_ptr<BaseAST> const_init_val;
+  ConstDefAST() = default;
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+// Decl ::= ConstDecl
+class DeclAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> const_decl;
+  DeclAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+// ConstDecl ::= 'const' BType ConstDef { ',' ConstDef } ';'
+class ConstDeclAST : public BaseAST {
+public:
+  std::unique_ptr<string> b_type;
+  std::unique_ptr<BaseAST> const_def_list;
+  ConstDeclAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};
+
+class ConstDefListAST : public BaseAST {
+public:
+  std::vector<std::unique_ptr<BaseAST>> const_defs;
+  ConstDefListAST() = default; 
+
+  std::string Dump(IRBuilder& builder) const override;
+};

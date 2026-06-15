@@ -32,9 +32,24 @@ std::string FuncTypeAST::Dump(IRBuilder& builder) const {
   return "";
 }
 
-// Block ::= '{' Stmt '}'
+// Block ::= '{' {BlockItem} '}'
 std::string BlockAST::Dump(IRBuilder& builder) const {
   std::cout << "\%entry:\n";
+  for (auto& item : block_items) {
+    item->Dump(builder);
+  }
+  return "";
+}
+
+// BlockItem ::= Decl | Stmt
+std::string DeclBloAST::Dump(IRBuilder& builder) const {
+  if (decl) {
+    decl->Dump(builder);
+  }
+  return "";
+}
+
+std::string StmtBloAST::Dump(IRBuilder& builder) const {
   if (stmt) {
     stmt->Dump(builder);
   }
@@ -77,17 +92,22 @@ std::string UnaryOPExpAST::Dump(IRBuilder& builder) const {
   return "";
 }
 
-// PrimaryExp ::= '(' Exp ')'
-std::string ParenExprAST::Dump(IRBuilder& builder) const {
+// PrimaryExp ::= '(' Exp ')' | LVal | Number
+std::string ThreePriAST::Dump(IRBuilder& builder) const {
   if (exp) {
     return exp->Dump(builder);
   }
   return "";
 }
 
-// PrimaryExp ::= Number
-std::string NumberExpAST::Dump(IRBuilder& builder) const {
+std::string NumberPriAST::Dump(IRBuilder& builder) const {
   return std::to_string(value);
+}
+
+//TODO
+std::string LValPriAST::Dump(IRBuilder& builder) const {
+
+  return *ident;
 }
 
 // '+' | '-' | '!' | '*' | '/' | '%'
@@ -225,4 +245,40 @@ string ThreeLOrExpAST::Dump(IRBuilder& builder) const {
     std::cout << "  " << dest_reg << " = or " << lhs_reg_new << ", " << rhs_reg_new << "\n";
   }
   return dest_reg;
+}
+
+// ConstExp ::= Exp
+string ConstExpAST::Dump(IRBuilder& builder) const { 
+  if (exp) {
+    return exp->Dump(builder);
+  }
+  return "";
+};
+
+// ConstInitVal ::= ConstExp
+string ConstInitValAST::Dump(IRBuilder& builder) const { 
+  if (const_exp) {
+    return const_exp->Dump(builder);
+  }
+  return "";
+};
+
+// ConstDef ::= IDENT '=' ConstInitVal
+// TODO
+string ConstDefAST::Dump(IRBuilder& builder) const { 
+  return "";
+};
+
+// Decl ::= ConstDecl
+string DeclAST::Dump(IRBuilder& builder) const {
+  if (const_decl) {
+    return const_decl->Dump(builder);
+  }
+  return "";
+}
+
+// ConstDecl ::= 'const' BType ConstDef { ',' ConstDef } ';'
+//TODO
+string ConstDeclAST::Dump(IRBuilder& builder) const {
+  return "";
 }
