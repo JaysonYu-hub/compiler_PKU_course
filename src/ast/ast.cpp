@@ -1,5 +1,6 @@
 #include "ast/ast.hpp"
 #include <iostream>
+#include <assert.h>
 using namespace std;
 
 // CompUnit ::= FuncDef
@@ -72,7 +73,9 @@ std::string ExpAST::Dump(IRBuilder& builder) const {
   }
   return "";
 }
-
+int ExpAST::getValue() const {
+  return lor_exp->getValue();
+}
 // UnaryExp ::= UnaryOP UnaryExp
 std::string UnaryOPExpAST::Dump(IRBuilder& builder) const {
   std::string src_reg = unary_exp->Dump(builder);
@@ -91,6 +94,15 @@ std::string UnaryOPExpAST::Dump(IRBuilder& builder) const {
   }
   return "";
 }
+int UnaryOPExpAST::getValue() const {
+  if (op->op == "+") {
+    return unary_exp->getValue();
+  } else if (op->op == "-") {
+    return -unary_exp->getValue();
+  } else if (op->op == "!") {
+    return unary_exp->getValue() == 0 ? 1 : 0;
+  }
+}
 
 // PrimaryExp ::= '(' Exp ')' | LVal | Number
 std::string ThreePriAST::Dump(IRBuilder& builder) const {
@@ -100,8 +112,15 @@ std::string ThreePriAST::Dump(IRBuilder& builder) const {
   return "";
 }
 
+int ThreePriAST::getValue() const {
+  return exp->getValue();
+}
+
 std::string NumberPriAST::Dump(IRBuilder& builder) const {
   return std::to_string(value);
+}
+int NumberPriAST::getValue() const {
+  return value;
 }
 
 //TODO
@@ -122,6 +141,9 @@ string MulAddExpAST::Dump(IRBuilder& builder) const {
   }
   return "";
 }
+int MulAddExpAST::getValue() const {
+  return mul_exp->getValue();
+}
 
 string ThreeAddExpAST::Dump(IRBuilder& builder) const {
   string lhs_reg = add_exp->Dump(builder);
@@ -134,6 +156,13 @@ string ThreeAddExpAST::Dump(IRBuilder& builder) const {
   }
   return dest_reg;
 }
+int ThreeAddExpAST::getValue() const {
+  if (op->op == "+") {
+    return add_exp->getValue() + mul_exp->getValue();
+  } else if (op->op == "-") {
+    return add_exp->getValue() - mul_exp->getValue();
+  }
+}
 
 // MulExp ::= UnaryExp | MulExp ('*' | '/' | '%') UnaryExp
 string UnaryMulExpAST::Dump(IRBuilder& builder) const {
@@ -141,6 +170,10 @@ string UnaryMulExpAST::Dump(IRBuilder& builder) const {
     return unary_exp->Dump(builder);
   }
   return "";
+}
+
+int UnaryMulExpAST::getValue() const {
+  return unary_exp->getValue();
 }
 
 string ThreeMulExpAST::Dump(IRBuilder& builder) const {
@@ -157,6 +190,16 @@ string ThreeMulExpAST::Dump(IRBuilder& builder) const {
   return dest_reg;
 }
 
+int ThreeMulExpAST::getValue() const {
+  if (op->op == "*") {
+    return mul_exp->getValue() * unary_exp->getValue();
+  } else if (op->op == "/") {
+    return mul_exp->getValue() / unary_exp->getValue();
+  } else if (op->op == "%") {
+    return mul_exp->getValue() % unary_exp->getValue();
+  }
+}
+
 // RelExp ::= AddExp | RelExp ('<' | '>' | '<=' | '>=') AddExp
 string AddRelExpAST::Dump(IRBuilder& builder) const {
   if (add_exp) {
@@ -164,7 +207,9 @@ string AddRelExpAST::Dump(IRBuilder& builder) const {
   }
   return "";
 }
-
+int AddRelExpAST::getValue() const {
+  return add_exp->getValue();
+}
 string ThreeRelExpAST::Dump(IRBuilder& builder) const {
   string lhs_reg = rel_exp->Dump(builder);
   string rhs_reg = add_exp->Dump(builder);
@@ -180,6 +225,17 @@ string ThreeRelExpAST::Dump(IRBuilder& builder) const {
   }
   return dest_reg;
 }
+int ThreeRelExpAST::getValue() const {
+  if (op->op == "<") {
+    return rel_exp->getValue() < add_exp->getValue();
+  } else if (op->op == ">") {
+    return rel_exp->getValue() > add_exp->getValue();
+  } else if (op->op == "<=") {
+    return rel_exp->getValue() <= add_exp->getValue();
+  } else if (op->op == ">=") {
+    return rel_exp->getValue() >= add_exp->getValue();
+  }
+}
 
 // EqExp ::= RelExp | EqExp ('==' | '!=') RelExp
 string RelEqExpAST::Dump(IRBuilder& builder) const {
@@ -187,6 +243,9 @@ string RelEqExpAST::Dump(IRBuilder& builder) const {
     return rel_exp->Dump(builder);
   }
   return "";
+}
+int RelEqExpAST::getValue() const {
+  return rel_exp->getValue();
 }
 
 string ThreeEqExpAST::Dump(IRBuilder& builder) const {
@@ -200,13 +259,22 @@ string ThreeEqExpAST::Dump(IRBuilder& builder) const {
   }
   return dest_reg;
 }
-
+int ThreeEqExpAST::getValue() const {
+  if (op->op == "==") {
+    return eq_exp->getValue() == rel_exp->getValue();
+  } else if (op->op == "!=") {
+    return eq_exp->getValue() != rel_exp->getValue();
+  }
+}
 // LAndExp ::= EqExp | LAndExp '&&' EqExp
 string EqLAndExpAST::Dump(IRBuilder& builder) const {
   if (eq_exp) {
     return eq_exp->Dump(builder);
   }
   return "";
+}
+int EqLAndExpAST::getValue() const {
+  return eq_exp->getValue();
 }
 
 string ThreeLAndExpAST::Dump(IRBuilder& builder) const {
@@ -223,6 +291,11 @@ string ThreeLAndExpAST::Dump(IRBuilder& builder) const {
   }
   return dest_reg;
 }
+int ThreeLAndExpAST::getValue() const {
+  if (op->op == "&&") {
+    return land_exp->getValue() && eq_exp->getValue();
+  }
+}
 
 // LOrExp ::= LAndExp | LOrExp '||' LAndExp
 string LAndLOrExpAST::Dump(IRBuilder& builder) const {
@@ -231,7 +304,9 @@ string LAndLOrExpAST::Dump(IRBuilder& builder) const {
   }
   return "";
 }
-
+int LAndLOrExpAST::getValue() const {
+  return land_exp->getValue();
+}
 string ThreeLOrExpAST::Dump(IRBuilder& builder) const {
   string lhs_reg = lor_exp->Dump(builder);
   string rhs_reg = land_exp->Dump(builder);
@@ -246,7 +321,11 @@ string ThreeLOrExpAST::Dump(IRBuilder& builder) const {
   }
   return dest_reg;
 }
-
+int ThreeLOrExpAST::getValue() const {
+  if (op->op == "||") {
+    return lor_exp->getValue() || land_exp->getValue();
+  }
+}
 // ConstExp ::= Exp
 string ConstExpAST::Dump(IRBuilder& builder) const { 
   if (exp) {
@@ -254,7 +333,9 @@ string ConstExpAST::Dump(IRBuilder& builder) const {
   }
   return "";
 };
-
+int ConstExpAST::getValue() const { 
+  return exp->getValue();
+}
 // ConstInitVal ::= ConstExp
 string ConstInitValAST::Dump(IRBuilder& builder) const { 
   if (const_exp) {
@@ -262,10 +343,15 @@ string ConstInitValAST::Dump(IRBuilder& builder) const {
   }
   return "";
 };
-
+int ConstInitValAST::getValue() const { 
+  return const_exp->getValue();
+}
 // ConstDef ::= IDENT '=' ConstInitVal
 // TODO
 string ConstDefAST::Dump(IRBuilder& builder) const { 
+  string constinit_val = const_init_val->Dump(builder);
+  int val = std::stoi(constinit_val);
+  CompilerState::GetInstance().set_const_var(*ident, val);
   return "";
 };
 
@@ -280,5 +366,14 @@ string DeclAST::Dump(IRBuilder& builder) const {
 // ConstDecl ::= 'const' BType ConstDef { ',' ConstDef } ';'
 //TODO
 string ConstDeclAST::Dump(IRBuilder& builder) const {
+  assert(*b_type == "int");
+  const_def_list->Dump(builder);
+  return "";
+}
+
+string ConstDefListAST::Dump(IRBuilder& builder) const { 
+  for (auto& const_def : const_defs) {
+    const_def->Dump(builder);
+  }
   return "";
 }

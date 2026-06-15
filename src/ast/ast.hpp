@@ -21,6 +21,71 @@ public:
   }
 };
 
+//符号表
+enum class SymbolKind { CONSTANT };
+
+class Symbol { 
+public:
+  string name;
+  SymbolKind kind;
+  int const_value;
+  Symbol(string name, SymbolKind kind, int const_value) : name(name), kind(kind), const_value(const_value) {}
+};
+
+class Scope {
+private:
+  unordered_map<string, shared_ptr<Symbol>> symbols;
+  shared_ptr<Scope> parentScope;
+public:
+  Scope(shared_ptr<Scope> parentScope) : parentScope(parentScope) {}
+
+  shared_ptr<Scope> getParentScope() const { return parentScope; }
+
+  bool define(shared_ptr<Symbol> symbol) {
+    if (symbols.find(symbol->name) != symbols.end()) {
+      return false;
+    }
+    symbols[symbol->name] = symbol;
+    return true;
+  }
+  shared_ptr<Symbol> lookup(string name) {
+    auto current = symbols.find(name);
+    if (current != symbols.end()) {
+      return current->second;
+    }
+    if (parentScope != nullptr) {
+      return parentScope->lookup(name);
+    }
+    return nullptr;
+  }
+
+  shared_ptr<Symbol> lookupLocal(string name) {
+    auto it = symbols.find(name);
+    if (it != symbols.end()) {
+      return it->second;
+    }
+    return nullptr;
+  }
+};
+
+// 用于处理局部变量 
+class CompilerState {
+private: 
+  CompilerState() = default;
+public:
+  static CompilerState& GetInstance() { 
+    static CompilerState instance;
+    return instance;
+  }
+  unordered_map<string, int> const_var_map;
+  int get_const_var(string const_ident) {
+    return const_var_map[const_ident];
+  }
+  void set_const_var(string const_ident, int const_value) {
+    const_var_map[const_ident] = const_value;
+  }
+};
+
 class UnaryExpAST;
 class OpAST;
 
@@ -28,6 +93,13 @@ class BaseAST {
 public:
   virtual ~BaseAST() = default;
   virtual std::string Dump(IRBuilder& builder) const = 0;
+};
+
+class ValueAST : public BaseAST {
+public:
+  virtual ~ValueAST() = default;
+  virtual std::string Dump(IRBuilder& builder) const = 0;
+  virtual int getValue() const = 0;
 };
 
 // CompUnit ::= FuncDef
@@ -107,65 +179,53 @@ public:
 };
 
 // Exp ::= LOrExp
-class ExpAST : public BaseAST {
+class ExpAST : public ValueAST {
 public:
-  std::unique_ptr<BaseAST> lor_exp;
+  std::unique_ptr<ValueAST> lor_exp;
 
   ExpAST() = default;
-
   std::string Dump(IRBuilder& builder) const override;
+  int getValue() const override;
 };
 
-// 中间抽象层：UnaryExp 基类
-class UnaryExpAST : public BaseAST {
-public:
-  virtual ~UnaryExpAST() = default;
-  std::string Dump(IRBuilder& builder) const override = 0; 
-};
-
-// UnaryExp ::= UnaryOP UnaryExp
-class UnaryOPExpAST : public UnaryExpAST {
+// UnaryExp ::= UnaryOP UnaryExp | PrimaryExp
+class UnaryOPExpAST : public ValueAST {
 public:
   std::unique_ptr<OpAST> op;
-  std::unique_ptr<UnaryExpAST> unary_exp;
+  std::unique_ptr<ValueAST> unary_exp;
 
   UnaryOPExpAST() = default; 
   std::string Dump(IRBuilder& builder) const override;
-};
-
-// 中间抽象层：PrimaryExp 基类
-class PrimaryExpAST : public UnaryExpAST {
-public:
-  virtual ~PrimaryExpAST() = default;
-  std::string Dump(IRBuilder& builder) const override = 0;
+  int getValue() const override;
 };
 
 // PrimaryExp ::= '(' Exp ')' | LVal | Number
-class ThreePriAST : public PrimaryExpAST {
+class ThreePriAST : public ValueAST {
 public:
-  std::unique_ptr<BaseAST> exp;
+  std::unique_ptr<ValueAST> exp;
   ThreePriAST() = default; 
 
   std::string Dump(IRBuilder& builder) const override;
+  int getValue() const override;
 };
 
-class LValPriAST : public PrimaryExpAST {
+class LValPriAST : public ValueAST {
 public:
   std::unique_ptr<std::string> ident;
   LValPriAST() = default; 
 
   std::string Dump(IRBuilder& builder) const override;
+  int getValue() const override;
 };
 
-class NumberPriAST : public PrimaryExpAST {
+class NumberPriAST : public ValueAST {
 public:
   int value;
   NumberPriAST() = default; 
 
   std::string Dump(IRBuilder& builder) const override;
+  int getValue() const override;
 };
-
-
 
 //'+' | '-' | '!' | '*' | '/' | '%'
 class OpAST : public BaseAST {
@@ -173,196 +233,153 @@ public:
   std::string op;
 
   OpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override;
 };
 
 // MulExp ::= UnaryExp | MulExp ('*' | '/' | '%') UnaryExp
-// 中间抽象层：MulExp 基类
-class MulExpAST : public UnaryExpAST {
+class UnaryMulExpAST : public ValueAST {
 public:
-  virtual ~MulExpAST() = default;
-  std::string Dump(IRBuilder& builder) const override = 0;
-}
-;
-
-class UnaryMulExpAST : public MulExpAST {
-public:
-  std::unique_ptr<BaseAST> unary_exp;
+  std::unique_ptr<ValueAST> unary_exp;
 
   UnaryMulExpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override;
+  int getValue() const override;
 };
 
-class ThreeMulExpAST : public MulExpAST {
+class ThreeMulExpAST : public ValueAST {
 public:
-  std::unique_ptr<MulExpAST> mul_exp;
+  std::unique_ptr<ValueAST> mul_exp;
   std::unique_ptr<OpAST> op; // '*' | '/' | '%'
-  std::unique_ptr<UnaryExpAST> unary_exp;
+  std::unique_ptr<ValueAST> unary_exp;
 
   ThreeMulExpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override;
+  int getValue() const override;
 };
 
 // AddExp ::= MulExp | AddExp ('+' | '-') MulExp
-// 中间抽象层：AddExp 基类
-class AddExpAST : public UnaryExpAST {
+class MulAddExpAST : public ValueAST {
 public:
-  virtual ~AddExpAST() = default;
-  std::string Dump(IRBuilder& builder) const override = 0;
-};
-
-class MulAddExpAST : public AddExpAST {
-public:
-  std::unique_ptr<BaseAST> mul_exp;
+  std::unique_ptr<ValueAST> mul_exp;
 
   MulAddExpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override;
+  int getValue() const override;
 };
 
-class ThreeAddExpAST : public AddExpAST {
+class ThreeAddExpAST : public ValueAST {
 public:
-  std::unique_ptr<AddExpAST> add_exp;
+  std::unique_ptr<ValueAST> add_exp;
   std::unique_ptr<OpAST> op; // '+' or '-'
-  std::unique_ptr<MulExpAST> mul_exp;
+  std::unique_ptr<ValueAST> mul_exp;
 
   ThreeAddExpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override; 
+  int getValue() const override;
 };
 
 // RelExp ::= AddExp | RelExp ('<' | '>' | '<=' | '>=') AddExp
-// 中间抽象层：RelExp 基类
-class RelExpAST : public AddExpAST {
+class AddRelExpAST : public ValueAST {
 public:
-  virtual ~RelExpAST() = default;
-  std::string Dump(IRBuilder& builder) const override = 0;
-};
-
-class AddRelExpAST : public RelExpAST {
-public:
-  std::unique_ptr<BaseAST> add_exp;
+  std::unique_ptr<ValueAST> add_exp;
 
   AddRelExpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override;
+  int getValue() const override;
 };
 
-class ThreeRelExpAST : public RelExpAST {
+class ThreeRelExpAST : public ValueAST {
 public: 
-  std::unique_ptr<RelExpAST> rel_exp;
+  std::unique_ptr<ValueAST> rel_exp;
   std::unique_ptr<OpAST> op; // '<' | '>' | '<=' | '>='
-  std::unique_ptr<AddExpAST> add_exp;
+  std::unique_ptr<ValueAST> add_exp;
 
   ThreeRelExpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override; 
+  int getValue() const override;
 };
 
 // EqExp ::= RelExp | EqExp ('==' | '!=') RelExp
-// 中间抽象层：EqExp 基类
-class EqExpAST : public RelExpAST {
+class RelEqExpAST : public ValueAST {
 public:
-  virtual ~EqExpAST() = default;
-  std::string Dump(IRBuilder& builder) const override = 0;
-};
-
-class RelEqExpAST : public EqExpAST {
-public:
-  std::unique_ptr<BaseAST> rel_exp;
+  std::unique_ptr<ValueAST> rel_exp;
 
   RelEqExpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override;
+  int getValue() const override;
 };
 
-class ThreeEqExpAST : public EqExpAST {
+class ThreeEqExpAST : public ValueAST {
 public:
-  std::unique_ptr<EqExpAST> eq_exp;
+  std::unique_ptr<ValueAST> eq_exp;
   std::unique_ptr<OpAST> op; // '==' | '!='
-  std::unique_ptr<RelExpAST> rel_exp;
+  std::unique_ptr<ValueAST> rel_exp;
 
   ThreeEqExpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override; 
+  int getValue() const override;
 };
 
 // LAndExp ::= EqExp | LAndExp '&&' EqExp
-// 中间抽象层：LAndExp 基类
-class LAndExpAST : public EqExpAST {
+class EqLAndExpAST : public ValueAST {
 public:
-  virtual ~LAndExpAST() = default;
-  std::string Dump(IRBuilder& builder) const override = 0;
-};
-
-class EqLAndExpAST : public LAndExpAST {
-public:
-  std::unique_ptr<BaseAST> eq_exp;
+  std::unique_ptr<ValueAST> eq_exp;
 
   EqLAndExpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override;
+  int getValue() const override;
 };
 
-class ThreeLAndExpAST : public LAndExpAST {
+class ThreeLAndExpAST : public ValueAST {
 public:
-  std::unique_ptr<LAndExpAST> land_exp;
+  std::unique_ptr<ValueAST> land_exp;
   std::unique_ptr<OpAST> op; // '&&'
-  std::unique_ptr<EqExpAST> eq_exp;
+  std::unique_ptr<ValueAST> eq_exp;
 
   ThreeLAndExpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override; 
+  int getValue() const override;
 };
 
 // LOrExp ::= LAndExp | LOrExp '||' LAndExp
-// 中间抽象层：LOrExp 基类
-class LOrExpAST : public LAndExpAST {
+class LAndLOrExpAST : public ValueAST {
 public:
-  virtual ~LOrExpAST() = default;
-  std::string Dump(IRBuilder& builder) const override = 0;
-};
-
-class LAndLOrExpAST : public LOrExpAST {
-public:
-  std::unique_ptr<BaseAST> land_exp;
+  std::unique_ptr<ValueAST> land_exp;
 
   LAndLOrExpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override;
+  int getValue() const override;
 };
 
-class ThreeLOrExpAST : public LOrExpAST {
+class ThreeLOrExpAST : public ValueAST {
 public:
-  std::unique_ptr<LOrExpAST> lor_exp;
+  std::unique_ptr<ValueAST> lor_exp;
   std::unique_ptr<OpAST> op; // '||'
-  std::unique_ptr<LAndExpAST> land_exp;
+  std::unique_ptr<ValueAST> land_exp;
 
   ThreeLOrExpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override;  
+  int getValue() const override;
 };  
 
 // ConstExp ::= Exp
-class ConstExpAST : public BaseAST {
+class ConstExpAST : public ValueAST {
 public:
-  std::unique_ptr<BaseAST> exp;
+  std::unique_ptr<ValueAST> exp;
   ConstExpAST() = default; 
-
   std::string Dump(IRBuilder& builder) const override;
+  int getValue() const override;
 };
 
 
 // ConstInitVal ::= ConstExp
-class ConstInitValAST : public BaseAST {
+class ConstInitValAST : public ValueAST {
 public:
-  std::unique_ptr<BaseAST> const_exp;
+  std::unique_ptr<ValueAST> const_exp;
   ConstInitValAST() = default; 
 
   std::string Dump(IRBuilder& builder) const override;
+  int getValue() const override;
 };
 
 // ConstDef ::= IDENT '=' ConstInitVal

@@ -24,6 +24,8 @@ using namespace std;
   std::string *str_val;
   int int_val;
   BaseAST *ast_val;
+  ValueAST *value_ast;
+  OpAST *op_ast;
 }
 
 %token INT RETURN 
@@ -35,13 +37,13 @@ using namespace std;
 %token <str_val> ASSIGN LVal BType
 %token LT LE GT GE EQ NE L_AND L_OR
 
-%type <ast_val> FuncDef FuncType Block Stmt Exp UnaryExp PrimaryExp UnaryOp
-%type <ast_val> MulExp AddExp
-%type <ast_val> RelExp EqExp LAndExp LOrExp
-%type <ast_val> AddOp MulOp
-%type <ast_val> ComOp EquOp LOrOp LAndOp
+%type <ast_val> FuncDef FuncType Block Stmt 
+%type <value_val> Exp UnaryExp PrimaryExp UnaryOpMulExp AddExp ConstExp
+%type <value_val> RelExp EqExp LAndExp LOrExp ConstInitVal
+%type <op_val> AddOp MulOp
+%type <op_val> ComOp EquOp LOrOp LAndOp
 %type <int_val> Number
-%type <ast_val> Decl ConstDecl ConstInitVal BlockItem ConstExp block_item_list const_def_list
+%type <ast_val> Decl ConstDecl BlockItem block_item_list const_def_list
 
 %%
 
@@ -122,9 +124,8 @@ UnaryExp
   }
   | UnaryOp UnaryExp { 
     auto unary_op_exp = new UnaryOPExpAST();
-    // 使用 static_cast 确保指针转换到对应的子类安全级别
-    unary_op_exp->op = unique_ptr<OpAST>(static_cast<OpAST*>($1));
-    unary_op_exp->unary_exp = unique_ptr<UnaryExpAST>(static_cast<UnaryExpAST*>($2));
+    unary_op_exp->op = unique_ptr<OpAST>($1);
+    unary_op_exp->unary_exp = unique_ptr<ValueAST>($2);
     $$ = unary_op_exp; 
   }
   ;
@@ -132,7 +133,7 @@ UnaryExp
 Exp 
   : LOrExp {
     auto exp = new ExpAST();
-    exp->lor_exp = unique_ptr<BaseAST>($1);
+    exp->lor_exp = unique_ptr<ValueAST>($1);
     $$ = exp;
   }
   ;
@@ -140,7 +141,7 @@ Exp
 PrimaryExp 
   : '(' Exp ')' {
     auto paren_expr = new ParenExprAST();
-    paren_expr->exp = unique_ptr<BaseAST>($2);
+    paren_expr->exp = unique_ptr<ValueAST>($2);
     $$ = paren_expr;
   }
   | Number {
@@ -159,14 +160,14 @@ PrimaryExp
 MulExp
   : UnaryExp {
     auto unary_mul = new UnaryMulExpAST();
-    unary_mul->unary_exp = unique_ptr<BaseAST>($1);
+    unary_mul->unary_exp = unique_ptr<ValueAST>($1);
     $$ = unary_mul;
   }
   | MulExp MulOp UnaryExp {
     auto three_mul_exp = new ThreeMulExpAST();
-    three_mul_exp->mul_exp = unique_ptr<MulExpAST>(static_cast<MulExpAST*>($1));
-    three_mul_exp->op = unique_ptr<OpAST>(static_cast<OpAST*>($2));
-    three_mul_exp->unary_exp = unique_ptr<UnaryExpAST>(static_cast<UnaryExpAST*>($3));
+    three_mul_exp->mul_exp = unique_ptr<ValueAST>($1);
+    three_mul_exp->op = unique_ptr<OpAST>($2);
+    three_mul_exp->unary_exp = unique_ptr<ValueAST>($3);
     $$ = three_mul_exp;
   }
   ;
@@ -174,14 +175,14 @@ MulExp
 AddExp
   : MulExp {
     auto mul_add_exp = new MulAddExpAST();
-    mul_add_exp->mul_exp = unique_ptr<BaseAST>($1);
+    mul_add_exp->mul_exp = unique_ptr<ValueAST>($1);
     $$ = mul_add_exp;
   }
   | AddExp AddOp MulExp {
     auto three_add_exp = new ThreeAddExpAST();
-    three_add_exp->add_exp = unique_ptr<AddExpAST>(static_cast<AddExpAST*>($1));
-    three_add_exp->op = unique_ptr<OpAST>(static_cast<OpAST*>($2));
-    three_add_exp->mul_exp = unique_ptr<MulExpAST>(static_cast<MulExpAST*>($3));
+    three_add_exp->add_exp = unique_ptr<ValueAST>($1);
+    three_add_exp->op = unique_ptr<OpAST>($2);
+    three_add_exp->mul_exp = unique_ptr<ValueAST>($3);
     $$ = three_add_exp;
   }
   ;
@@ -189,14 +190,14 @@ AddExp
 RelExp
   : AddExp {
     auto add_rel_exp = new AddRelExpAST();
-    add_rel_exp->add_exp = unique_ptr<BaseAST>($1);
+    add_rel_exp->add_exp = unique_ptr<ValueAST>($1);
     $$ = add_rel_exp;
   }
   | RelExp ComOp AddExp {
     auto three_rel_exp = new ThreeRelExpAST();
-    three_rel_exp->rel_exp = unique_ptr<RelExpAST>(static_cast<RelExpAST*>($1));
-    three_rel_exp->op = unique_ptr<OpAST>(static_cast<OpAST*>($2));
-    three_rel_exp->add_exp = unique_ptr<AddExpAST>(static_cast<AddExpAST*>($3));
+    three_rel_exp->rel_exp = unique_ptr<ValueAST>($1);
+    three_rel_exp->op = unique_ptr<OpAST>($2);
+    three_rel_exp->add_exp = unique_ptr<ValueAST>($3);
     $$ = three_rel_exp;
   }
   ;
@@ -204,14 +205,14 @@ RelExp
 EqExp
   : RelExp {
     auto rel_eq_exp = new RelEqExpAST();
-    rel_eq_exp->rel_exp = unique_ptr<BaseAST>($1);
+    rel_eq_exp->rel_exp = unique_ptr<ValueAST>($1);
     $$ = rel_eq_exp;
   }
   | EqExp EquOp RelExp {
     auto three_eq_exp = new ThreeEqExpAST();
-    three_eq_exp->eq_exp = unique_ptr<EqExpAST>(static_cast<EqExpAST*>($1));
-    three_eq_exp->op = unique_ptr<OpAST>(static_cast<OpAST*>($2));
-    three_eq_exp->rel_exp = unique_ptr<RelExpAST>(static_cast<RelExpAST*>($3));
+    three_eq_exp->eq_exp = unique_ptr<ValueAST>($1);
+    three_eq_exp->op = unique_ptr<OpAST>($2);
+    three_eq_exp->rel_exp = unique_ptr<ValueAST>($3);
     $$ = three_eq_exp;
   }
   ;
@@ -219,14 +220,14 @@ EqExp
 LAndExp
   : EqExp {
     auto eq_land_exp = new EqLAndExpAST();
-    eq_land_exp->eq_exp = unique_ptr<BaseAST>($1);
+    eq_land_exp->eq_exp = unique_ptr<ValueAST>($1);
     $$ = eq_land_exp;
   }
   | LAndExp LAndOp EqExp {
     auto three_land_exp = new ThreeLAndExpAST();
-    three_land_exp->land_exp = unique_ptr<LAndExpAST>(static_cast<LAndExpAST*>($1));
-    three_land_exp->op = unique_ptr<OpAST>(static_cast<OpAST*>($2));
-    three_land_exp->eq_exp = unique_ptr<EqExpAST>(static_cast<EqExpAST*>($3));
+    three_land_exp->land_exp = unique_ptr<ValueAST>($1);
+    three_land_exp->op = unique_ptr<OpAST>($2);
+    three_land_exp->eq_exp = unique_ptr<ValueAST>($3);
     $$ = three_land_exp;
   }
   ;
@@ -234,14 +235,14 @@ LAndExp
 LOrExp
   : LAndExp {
     auto land_lor_exp = new LAndLOrExpAST();
-    land_lor_exp->land_exp = unique_ptr<BaseAST>($1);
+    land_lor_exp->land_exp = unique_ptr<ValueAST>($1);
     $$ = land_lor_exp;
   }
   | LOrExp LOrOp LAndExp {
     auto three_lor_exp = new ThreeLOrExpAST();
-    three_lor_exp->lor_exp = unique_ptr<LOrExpAST>(static_cast<LOrExpAST*>($1));
-    three_lor_exp->op = unique_ptr<OpAST>(static_cast<OpAST*>($2));
-    three_lor_exp->land_exp = unique_ptr<LAndExpAST>(static_cast<LAndExpAST*>($3));
+    three_lor_exp->lor_exp = unique_ptr<ValueAST>($1);
+    three_lor_exp->op = unique_ptr<OpAST>($2);
+    three_lor_exp->land_exp = unique_ptr<ValueAST>($3);
     $$ = three_lor_exp;
   }
   ;
@@ -279,7 +280,7 @@ ConstDef
   : IDENT '=' ConstInitVal { 
     auto const_def = new ConstDefAST();
     const_def->ident = unique_ptr<string>($1);
-    const_def->const_init_val = unique_ptr<BaseAST>($3);
+    const_def->const_init_val = unique_ptr<ValueAST>($3);
     $$ = const_def;
    }
   ;
@@ -287,7 +288,7 @@ ConstDef
 ConstInitVal
   : ConstExp { 
     auto constinit_val = new ConstInitValAST(); 
-    constinit_val->const_exp = unique_ptr<BaseAST>($1); 
+    constinit_val->const_exp = unique_ptr<ValueAST>($1); 
     $$ = constinit_val;
   }
   ;
@@ -297,7 +298,7 @@ LVal
   ;
 
 ConstExp
-  : Exp { auto const_exp = new ConstExpAST(); const_exp->exp = unique_ptr<BaseAST>($1); $$ = const_exp; }
+  : Exp { auto const_exp = new ConstExpAST(); const_exp->exp = unique_ptr<ValueAST>($1); $$ = const_exp; }
   ;
 
 UnaryOp
