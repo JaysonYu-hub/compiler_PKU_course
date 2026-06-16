@@ -20,7 +20,9 @@ extern int yyparse(unique_ptr<BaseAST> &ast);
 
 
 int main(int argc, const char *argv[]) {
-  IRBuilder builder;  
+  RegBuilder reg_builder;
+  Context context = Context(reg_builder);  
+
   IRVisitor ir_visitor;
   // 解析命令行参数. 测试脚本/评测平台要求你的编译器能接收如下参数:
   // compiler 模式 输入文件 -o 输出文件
@@ -43,7 +45,7 @@ int main(int argc, const char *argv[]) {
   streambuf *coutbuf = cout.rdbuf(); // 保存原来的缓冲区
   cout.rdbuf(file.rdbuf()); // 将 cout 的缓冲区切换到文件
   // 输出解析得到的 AST, 其实就是个字符串
-  ast->Dump(builder);
+  ast->Dump(context);
   cout << endl;
   cout.rdbuf(coutbuf); // 恢复原来的缓冲区
 

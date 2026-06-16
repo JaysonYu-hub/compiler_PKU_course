@@ -1,3 +1,4 @@
+%define parse.error verbose
 %code requires {
   #include <memory>
   #include <string>
@@ -10,8 +11,10 @@
 #include <memory>
 #include <string>
 #include "ast/ast.hpp"
+#include <vector>
 
 int yylex();
+extern int yylineno;
 void yyerror(std::unique_ptr<BaseAST> &ast, const char *s);
 
 using namespace std;
@@ -34,16 +37,16 @@ using namespace std;
 %token <int_val> INT_CONST
 
 %token ADD SUB NOT MUL MOD DIV
-%token <str_val> ASSIGN LVal BType
+%token <str_val> ASSIGN
 %token LT LE GT GE EQ NE L_AND L_OR
 
 %type <ast_val> FuncDef FuncType Block Stmt 
-%type <value_val> Exp UnaryExp PrimaryExp UnaryOpMulExp AddExp ConstExp
-%type <value_val> RelExp EqExp LAndExp LOrExp ConstInitVal
-%type <op_val> AddOp MulOp
-%type <op_val> ComOp EquOp LOrOp LAndOp
+%type <value_ast> Exp UnaryExp PrimaryExp AddExp ConstExp
+%type <value_ast> RelExp EqExp LAndExp LOrExp ConstInitVal MulExp 
+%type <op_ast> ComOp EquOp LOrOp LAndOp UnaryOp AddOp MulOp
 %type <int_val> Number
-%type <ast_val> Decl ConstDecl BlockItem block_item_list const_def_list
+%type <ast_val> Decl ConstDecl BlockItem block_item_list const_def_list ConstDef
+%type <str_val> LVal BType
 
 %%
 
@@ -82,13 +85,13 @@ Block
 
 block_item_list 
   : { 
-    auto block_ast = new unique_ptr<BlockAST>(); 
-    block_ast->block_items = new vector<unique_ptr<BaseAST>>(); 
+    auto block_ast = new BlockAST(); 
+    block_ast->block_items.clear(); 
     $$ = block_ast; 
   }
-  | block_item_list Block_item { 
+  | block_item_list BlockItem { 
     auto block_ast = (static_cast<BlockAST*>($1));
-    block_ast->block_items.push_back($2); 
+    block_ast->block_items.push_back(unique_ptr<BaseAST>($2)); 
     $$ = block_ast; 
   }
   ;
@@ -109,7 +112,7 @@ BlockItem
 Stmt
   : RETURN Exp ';' {
     auto stmt = new StmtAST();
-    stmt->exp = unique_ptr<BaseAST>($2);
+    stmt->exp = unique_ptr<ValueAST>($2);
     $$ = stmt;
   }
   ;
@@ -120,7 +123,9 @@ Number
 
 UnaryExp
   : PrimaryExp { 
-    $$ = $1; 
+    auto primary_unary_exp = new PrimaryUnaryExpAST();
+    primary_unary_exp->primary_exp = unique_ptr<ValueAST>($1);
+    $$ = primary_unary_exp;
   }
   | UnaryOp UnaryExp { 
     auto unary_op_exp = new UnaryOPExpAST();
@@ -140,18 +145,18 @@ Exp
 
 PrimaryExp 
   : '(' Exp ')' {
-    auto paren_expr = new ParenExprAST();
+    auto paren_expr = new ThreePriAST();
     paren_expr->exp = unique_ptr<ValueAST>($2);
     $$ = paren_expr;
   }
   | Number {
-    auto number_exp = new NumberExpAST();
+    auto number_exp = new NumberPriAST();
     number_exp->value = $1;
     $$ = number_exp;  
   }
   | LVal {
-    auto lval_exp = new LValExpAST();
-    lval_exp->lval = unique_ptr<string>($1);
+    auto lval_exp = new LValPriAST();
+    lval_exp->ident = unique_ptr<string>($1);
     $$ = lval_exp;
   }
   ;
@@ -263,7 +268,8 @@ ConstDecl
 const_def_list
   : ConstDef {
     auto const_def_list_ast = new ConstDefListAST();
-    const_def_list_ast->const_defs = vector<unique_ptr<BaseAST>>($1);
+    const_def_list_ast->const_defs = vector<unique_ptr<BaseAST>>();
+    const_def_list_ast->const_defs.push_back(unique_ptr<BaseAST>($1));
     $$ = const_def_list_ast;
   }
   | const_def_list ',' ConstDef {
@@ -271,13 +277,14 @@ const_def_list
     const_def_list_ast->const_defs.push_back(unique_ptr<BaseAST>($3));
     $$ = const_def_list_ast;
   }
+  ;
 
 BType
-  : INT { $$ = $1 }
+  : INT { $$ = new string("int"); }
   ;
 
 ConstDef
-  : IDENT '=' ConstInitVal { 
+  : IDENT ASSIGN ConstInitVal { 
     auto const_def = new ConstDefAST();
     const_def->ident = unique_ptr<string>($1);
     const_def->const_init_val = unique_ptr<ValueAST>($3);
@@ -339,5 +346,5 @@ LAndOp
 %%
 
 void yyerror(std::unique_ptr<BaseAST> &ast, const char *s) {
-  cerr << "error: " << s << endl;
+  cerr << "Parser Error ad line: " << yylineno << ":" << s << endl;
 }

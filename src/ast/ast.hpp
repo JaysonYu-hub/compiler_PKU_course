@@ -2,8 +2,11 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_map>
+#include <iostream>
+using namespace std;
 
-class IRBuilder {
+class RegBuilder {
 private:
   int reg_counter = 0; // 临时寄存器计数器
 public:
@@ -66,40 +69,74 @@ public:
     }
     return nullptr;
   }
-};
 
-// 用于处理局部变量 
-class CompilerState {
-private: 
-  CompilerState() = default;
+  void print(int depth = 0) const {
+    std::string indent(depth * 2, ' ');
+    std::clog << indent << "=== [Scope 层级 " << depth << "] 地址: " << this << " ===" << std::endl;
+    if (symbols.empty()) {
+      std::clog << indent << "  (当前层没有符号)" << std::endl;
+    } else {
+      // 打印当前层的所有符号
+      for (const auto& pair : symbols) {
+        const auto& name = pair.first;
+        const auto& sym = pair.second;
+            
+        std::clog << indent << "  -> 名字: " << name;
+            
+        // 打印符号类型 (假设你的 SymbolKind 是枚举)
+        std::clog << " | 类型: ";
+        if (sym->kind == SymbolKind::CONSTANT) {
+          std::clog << "CONSTANT (值: " << sym->const_value << ")";
+        }
+        std::clog << std::endl;
+      }
+    }
+
+    // 如果有父作用域，递归打印父作用域
+    if (parentScope != nullptr) {
+      std::clog << indent << "  --> 指向父作用域..." << std::endl;
+      parentScope->print(depth + 1);
+    } else {
+      std::clog << indent << "=== [Scope 根节点结束] ===" << std::endl;
+    }
+  }
+};
+// 上下文：用于传递RegBuilder和作用域符号表
+class Context { 
 public:
-  static CompilerState& GetInstance() { 
-    static CompilerState instance;
-    return instance;
+  RegBuilder reg_builder;
+  shared_ptr<Scope> scope;
+
+  Context(RegBuilder reg_builder) {
+    this->reg_builder = reg_builder;
+    this->scope = make_shared<Scope>(nullptr);
   }
-  unordered_map<string, int> const_var_map;
-  int get_const_var(string const_ident) {
-    return const_var_map[const_ident];
+
+  void enterNewScope() {
+    scope = make_shared<Scope>(scope);
   }
-  void set_const_var(string const_ident, int const_value) {
-    const_var_map[const_ident] = const_value;
+  void exitScope() {
+    if (scope->getParentScope() != nullptr) {
+      scope = scope->getParentScope();
+    } else {
+      cout << "Cannot exit global scope";
+      return;
+    }
   }
 };
 
-class UnaryExpAST;
 class OpAST;
-
 class BaseAST {
 public:
   virtual ~BaseAST() = default;
-  virtual std::string Dump(IRBuilder& builder) const = 0;
+  virtual std::string Dump(Context& context) const = 0;
 };
 
 class ValueAST : public BaseAST {
 public:
   virtual ~ValueAST() = default;
-  virtual std::string Dump(IRBuilder& builder) const = 0;
-  virtual int getValue() const = 0;
+  virtual std::string Dump(Context& context) const = 0;
+  virtual int getValue(Context& context) const = 0;
 };
 
 // CompUnit ::= FuncDef
@@ -108,7 +145,7 @@ public:
   std::unique_ptr<BaseAST> func_def;
 
   CompUnitAST() = default; 
-  std::string Dump(IRBuilder& builder) const override;
+  std::string Dump(Context& context) const override;
 };
 
 // FuncDef ::= FuncType IDENT '(' ')' Block
@@ -120,7 +157,7 @@ public:
     
   FuncDefAST() = default; 
 
-  std::string Dump(IRBuilder& builder) const override;
+  std::string Dump(Context& context) const override;
 };
 
 // FuncType ::= 'int'
@@ -130,7 +167,7 @@ public:
     
   FuncTypeAST() = default; 
 
-  std::string Dump(IRBuilder& builder) const override;
+  std::string Dump(Context& context) const override;
 };
 
 // BlockItem ::= Decl | Stmt
@@ -138,7 +175,7 @@ public:
 class BlockItemAST : public BaseAST {
 public:
   virtual ~BlockItemAST() = default;
-  std::string Dump(IRBuilder& builder) const override = 0;
+  std::string Dump(Context& context) const override = 0;
 };
 
 class DeclBloAST : public BlockItemAST {
@@ -146,25 +183,25 @@ public:
   std::unique_ptr<BaseAST> decl;
   DeclBloAST() = default; 
 
-  std::string Dump(IRBuilder& builder) const override;
+  std::string Dump(Context& context) const override;
 };
 
 class StmtBloAST : public BlockItemAST {
 public:
-  std::unique_ptr<StmtAST> stmt;
+  std::unique_ptr<BaseAST> stmt;
   StmtBloAST() = default; 
 
-  std::string Dump(IRBuilder& builder) const override;
+  std::string Dump(Context& context) const override;
 };
 
 // Block ::= '{' {BlockItem} '}'
 class BlockAST : public BaseAST {
 public:
-  std::vector<unique_ptr<BaseAST>> block_items;
+  std::vector<unique_ptr<BaseAST>> block_items; 
 
   BlockAST() = default; 
 
-  std::string Dump(IRBuilder& builder) const override;
+  std::string Dump(Context& context) const override;
 };
 
 
@@ -175,7 +212,7 @@ public:
 
   StmtAST() = default; 
 
-  std::string Dump(IRBuilder& builder) const override;
+  std::string Dump(Context& context) const override;
 };
 
 // Exp ::= LOrExp
@@ -184,8 +221,8 @@ public:
   std::unique_ptr<ValueAST> lor_exp;
 
   ExpAST() = default;
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 // UnaryExp ::= UnaryOP UnaryExp | PrimaryExp
@@ -195,8 +232,18 @@ public:
   std::unique_ptr<ValueAST> unary_exp;
 
   UnaryOPExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
+};
+
+class PrimaryUnaryExpAST : public ValueAST {
+public:
+  std::unique_ptr<ValueAST> primary_exp;
+
+  PrimaryUnaryExpAST() = default; 
+
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 // PrimaryExp ::= '(' Exp ')' | LVal | Number
@@ -205,8 +252,8 @@ public:
   std::unique_ptr<ValueAST> exp;
   ThreePriAST() = default; 
 
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 class LValPriAST : public ValueAST {
@@ -214,8 +261,8 @@ public:
   std::unique_ptr<std::string> ident;
   LValPriAST() = default; 
 
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 class NumberPriAST : public ValueAST {
@@ -223,8 +270,8 @@ public:
   int value;
   NumberPriAST() = default; 
 
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 //'+' | '-' | '!' | '*' | '/' | '%'
@@ -233,7 +280,7 @@ public:
   std::string op;
 
   OpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override;
+  std::string Dump(Context& context) const override;
 };
 
 // MulExp ::= UnaryExp | MulExp ('*' | '/' | '%') UnaryExp
@@ -242,8 +289,8 @@ public:
   std::unique_ptr<ValueAST> unary_exp;
 
   UnaryMulExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 class ThreeMulExpAST : public ValueAST {
@@ -253,8 +300,8 @@ public:
   std::unique_ptr<ValueAST> unary_exp;
 
   ThreeMulExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 // AddExp ::= MulExp | AddExp ('+' | '-') MulExp
@@ -263,8 +310,8 @@ public:
   std::unique_ptr<ValueAST> mul_exp;
 
   MulAddExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 class ThreeAddExpAST : public ValueAST {
@@ -274,8 +321,8 @@ public:
   std::unique_ptr<ValueAST> mul_exp;
 
   ThreeAddExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override; 
-  int getValue() const override;
+  std::string Dump(Context& context) const override; 
+  int getValue(Context& context) const override;
 };
 
 // RelExp ::= AddExp | RelExp ('<' | '>' | '<=' | '>=') AddExp
@@ -284,8 +331,8 @@ public:
   std::unique_ptr<ValueAST> add_exp;
 
   AddRelExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 class ThreeRelExpAST : public ValueAST {
@@ -295,8 +342,8 @@ public:
   std::unique_ptr<ValueAST> add_exp;
 
   ThreeRelExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override; 
-  int getValue() const override;
+  std::string Dump(Context& context) const override; 
+  int getValue(Context& context) const override;
 };
 
 // EqExp ::= RelExp | EqExp ('==' | '!=') RelExp
@@ -305,8 +352,8 @@ public:
   std::unique_ptr<ValueAST> rel_exp;
 
   RelEqExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 class ThreeEqExpAST : public ValueAST {
@@ -316,8 +363,8 @@ public:
   std::unique_ptr<ValueAST> rel_exp;
 
   ThreeEqExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override; 
-  int getValue() const override;
+  std::string Dump(Context& context) const override; 
+  int getValue(Context& context) const override;
 };
 
 // LAndExp ::= EqExp | LAndExp '&&' EqExp
@@ -326,8 +373,8 @@ public:
   std::unique_ptr<ValueAST> eq_exp;
 
   EqLAndExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 class ThreeLAndExpAST : public ValueAST {
@@ -337,8 +384,8 @@ public:
   std::unique_ptr<ValueAST> eq_exp;
 
   ThreeLAndExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override; 
-  int getValue() const override;
+  std::string Dump(Context& context) const override; 
+  int getValue(Context& context) const override;
 };
 
 // LOrExp ::= LAndExp | LOrExp '||' LAndExp
@@ -347,8 +394,8 @@ public:
   std::unique_ptr<ValueAST> land_exp;
 
   LAndLOrExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 class ThreeLOrExpAST : public ValueAST {
@@ -358,8 +405,8 @@ public:
   std::unique_ptr<ValueAST> land_exp;
 
   ThreeLOrExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override;  
-  int getValue() const override;
+  std::string Dump(Context& context) const override;  
+  int getValue(Context& context) const override;
 };  
 
 // ConstExp ::= Exp
@@ -367,8 +414,8 @@ class ConstExpAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> exp;
   ConstExpAST() = default; 
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 
@@ -378,18 +425,18 @@ public:
   std::unique_ptr<ValueAST> const_exp;
   ConstInitValAST() = default; 
 
-  std::string Dump(IRBuilder& builder) const override;
-  int getValue() const override;
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
 };
 
 // ConstDef ::= IDENT '=' ConstInitVal
 class ConstDefAST : public BaseAST {
 public:
   std::unique_ptr<std::string> ident;
-  std::unique_ptr<BaseAST> const_init_val;
+  std::unique_ptr<ValueAST> const_init_val;
   ConstDefAST() = default;
 
-  std::string Dump(IRBuilder& builder) const override;
+  std::string Dump(Context& context) const override;
 };
 
 // Decl ::= ConstDecl
@@ -398,7 +445,7 @@ public:
   std::unique_ptr<BaseAST> const_decl;
   DeclAST() = default; 
 
-  std::string Dump(IRBuilder& builder) const override;
+  std::string Dump(Context& context) const override;
 };
 
 // ConstDecl ::= 'const' BType ConstDef { ',' ConstDef } ';'
@@ -408,7 +455,7 @@ public:
   std::unique_ptr<BaseAST> const_def_list;
   ConstDeclAST() = default; 
 
-  std::string Dump(IRBuilder& builder) const override;
+  std::string Dump(Context& context) const override;
 };
 
 class ConstDefListAST : public BaseAST {
@@ -416,5 +463,5 @@ public:
   std::vector<std::unique_ptr<BaseAST>> const_defs;
   ConstDefListAST() = default; 
 
-  std::string Dump(IRBuilder& builder) const override;
+  std::string Dump(Context& context) const override;
 };
