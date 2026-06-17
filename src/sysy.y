@@ -42,10 +42,10 @@ using namespace std;
 
 %type <ast_val> FuncDef FuncType Block Stmt 
 %type <value_ast> Exp UnaryExp PrimaryExp AddExp ConstExp
-%type <value_ast> RelExp EqExp LAndExp LOrExp ConstInitVal MulExp 
+%type <value_ast> RelExp EqExp LAndExp LOrExp ConstInitVal MulExp InitVal
 %type <op_ast> ComOp EquOp LOrOp LAndOp UnaryOp AddOp MulOp
 %type <int_val> Number
-%type <ast_val> Decl ConstDecl BlockItem block_item_list const_def_list ConstDef
+%type <ast_val> Decl ConstDecl VarDecl BlockItem block_item_list const_def_list var_def_list ConstDef VarDef
 %type <str_val> LVal BType
 
 %%
@@ -111,10 +111,16 @@ BlockItem
 
 Stmt
   : RETURN Exp ';' {
-    auto stmt = new StmtAST();
+    auto stmt = new ReturnStmtAST();
     stmt->exp = unique_ptr<ValueAST>($2);
     $$ = stmt;
   }
+  | LVal ASSIGN Exp ';' { 
+    auto assign_stmt = new AssignStmtAST();
+    assign_stmt->lval = unique_ptr<BaseAST>($1);
+    assign_stmt->exp = unique_ptr<ValueAST>($3);
+    $$ = assign_stmt;
+   }
   ;
 
 Number
@@ -253,7 +259,8 @@ LOrExp
   ;
 
 Decl
-  : ConstDecl { auto decl = new DeclAST(); decl->const_decl = unique_ptr<BaseAST>($1); $$ = decl; }
+  : ConstDecl { auto decl = new ConstDeclDecAST(); decl->const_decl = unique_ptr<BaseAST>($1); $$ = decl; }
+  | VarDecl   { auto decl = new VarDeclDecAST(); decl->var_decl = unique_ptr<BaseAST>($1); $$ = decl; }
   ;
 
 ConstDecl
@@ -297,6 +304,50 @@ ConstInitVal
     auto constinit_val = new ConstInitValAST(); 
     constinit_val->const_exp = unique_ptr<ValueAST>($1); 
     $$ = constinit_val;
+  }
+  ;
+
+VarDecl
+  : BType var_def_list ';' { 
+    auto var_decl = new VarDeclAST();
+    var_decl->b_type = unique_ptr<string>($1);
+    var_decl->var_def_list = unique_ptr<BaseAST>($2);
+    $$ = var_decl;
+  }
+  ;
+
+var_def_list
+  : VarDef {
+    auto var_def_list_ast = new VarDefListAST();
+    var_def_list_ast->var_defs = vector<unique_ptr<BaseAST>>();
+    var_def_list_ast->var_defs.push_back(unique_ptr<BaseAST>($1));
+    $$ = var_def_list_ast;
+  }
+  | var_def_list ',' VarDef {
+    auto var_def_list_ast = (static_cast<VarDefListAST*>($1));
+    var_def_list_ast->var_defs.push_back(unique_ptr<BaseAST>($3));
+    $$ = var_def_list_ast;
+  }
+  ;
+
+VarDef
+  : IDENT { 
+    auto var_def = new IDENTVarAST();
+    var_def->ident = unique_ptr<string>($1);
+    $$ = var_def;
+  }
+  | IDENT ASSIGN InitVal { 
+    auto var_def = new ThreeVarAST();
+    var_def->ident = unique_ptr<string>($1);
+    var_def->const_exp = unique_ptr<ValueAST>($3);
+  }
+  ;
+
+InitVal
+  : Exp { 
+    auto init_val = new InitValAST();
+    init_val->exp = unique_ptr<ValueAST>($1);
+    $$ = init_val;
   }
   ;
 

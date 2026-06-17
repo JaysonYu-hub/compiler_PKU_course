@@ -25,14 +25,21 @@ public:
 };
 
 //符号表
-enum class SymbolKind { CONSTANT };
+enum class SymbolKind { CONSTANT , VARIABLE };
 
-class Symbol { 
+struct Symbol { 
 public:
   string name;
   SymbolKind kind;
-  int const_value;
-  Symbol(string name, SymbolKind kind, int const_value) : name(name), kind(kind), const_value(const_value) {}
+  union {
+    int const_value; // 符号的值（对于常量）
+  } value;
+  Symbol(string name, SymbolKind kind, int const_value) : name(name), kind(kind) {
+    value.const_value = const_value;
+  }
+  Symbol(string name, SymbolKind kind) : name(name), kind(kind) {
+    value.const_value = 0;
+  }
 };
 
 class Scope {
@@ -86,7 +93,7 @@ public:
         // 打印符号类型 (假设你的 SymbolKind 是枚举)
         std::clog << " | 类型: ";
         if (sym->kind == SymbolKind::CONSTANT) {
-          std::clog << "CONSTANT (值: " << sym->const_value << ")";
+          std::clog << "CONSTANT (值: " << sym->value.const_value << ")";
         }
         std::clog << std::endl;
       }
@@ -101,6 +108,7 @@ public:
     }
   }
 };
+
 // 上下文：用于传递RegBuilder和作用域符号表
 class Context { 
 public:
@@ -205,12 +213,22 @@ public:
 };
 
 
-// Stmt ::= 'return' Exp ';'
-class StmtAST : public BaseAST {
+// Stmt ::= 'return' Exp ';' | LVal '=' Exp ';'
+class ReturnStmtAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> exp;
 
-  StmtAST() = default; 
+  ReturnStmtAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+class AssignStmtAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> lval;
+  std::unique_ptr<ValueAST> exp;
+
+  AssignStmtAST() = default; 
 
   std::string Dump(Context& context) const override;
 };
@@ -439,11 +457,19 @@ public:
   std::string Dump(Context& context) const override;
 };
 
-// Decl ::= ConstDecl
-class DeclAST : public BaseAST {
+// Decl ::= ConstDecl | VarDecl
+class ConstDeclDecAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> const_decl;
-  DeclAST() = default; 
+  ConstDeclDecAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+class VarDeclDecAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> var_decl;
+  VarDeclDecAST() = default; 
 
   std::string Dump(Context& context) const override;
 };
@@ -465,3 +491,51 @@ public:
 
   std::string Dump(Context& context) const override;
 };
+
+// VarDecl ::= BType VarDef { ',' VarDef } ';'
+class VarDeclAST : public BaseAST {
+public:
+  std::unique_ptr<string> b_type;
+  std::unique_ptr<BaseAST> var_def_list;
+  VarDeclAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+class VarDefListAST : public BaseAST {
+public:
+  std::vector<std::unique_ptr<BaseAST>> var_defs;
+  VarDefListAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+// VarDef ::= IDENT | IDENT '=`' InitVal;
+// 这里单独的IDENT也被称为变量声明
+class IDENTVarAST : public BaseAST {
+public:
+  std::unique_ptr<std::string> ident;
+  IDENTVarAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+class ThreeVarAST : public BaseAST {
+public:
+  std::unique_ptr<std::string> ident;
+  std::unique_ptr<ValueAST> init_val;
+  ThreeVarAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+// InitVal ::= Exp
+class InitValAST : public ValueAST {
+public:
+  std::unique_ptr<ValueAST> exp;
+  InitValAST() = default; 
+
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
+};
+

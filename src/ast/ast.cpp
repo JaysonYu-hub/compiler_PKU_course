@@ -149,14 +149,14 @@ std::string LValPriAST::Dump(Context& context) const {
     context.scope->print(0);
   }
   if (symbol) {
-    return to_string(symbol->const_value);
+    return to_string(symbol->value.const_value);
   }
   return "";
 }
 
 int LValPriAST::getValue(Context& context) const {
   if (context.scope->lookup(*ident)) {
-    return context.scope->lookup(*ident)->const_value;
+    return context.scope->lookup(*ident)->value.const_value;
   }
   return 0;
 }
