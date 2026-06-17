@@ -1,7 +1,6 @@
 #include "IRvisit.hpp"
-#include "iostream"
-#include "cassert"
-using namespace std;
+#include <iostream>
+#include <cassert>
 
 // 访问 raw program
 void IRVisitor::Visit(const koopa_raw_program_t &program) {
@@ -85,7 +84,7 @@ void IRVisitor::Visit(const koopa_raw_value_t &value) {
 void IRVisitor::Visit(const koopa_raw_integer_t &integer, koopa_raw_value_t value) {
   // 访问 integer 指令
   if (integer.value != 0) {
-    string reg = rc_builder.NewReg();
+    std::string reg = rc_builder.NewReg();
     std::cout << "li "<< reg <<", " << integer.value << std::endl;
     value_reg_map[value] = reg;
   }
@@ -93,16 +92,16 @@ void IRVisitor::Visit(const koopa_raw_integer_t &integer, koopa_raw_value_t valu
 
 void IRVisitor::Visit(const koopa_raw_return_t &ret) {
   // 访问 return 指令
-  string reg = GetReg(ret.value);
+  std::string reg = GetReg(ret.value);
   std::cout << "mv a0, " << reg << std::endl;
   std::cout << "ret" << std::endl;
 }
 
 void IRVisitor::Visit(const koopa_raw_binary_t &binary, koopa_raw_value_t value) {
   // 访问 binary 指令
-  string lhs_reg = GetReg(binary.lhs);
-  string rhs_reg = GetReg(binary.rhs);
-  string dest_reg = rc_builder.NewReg();
+  std::string lhs_reg = GetReg(binary.lhs);
+  std::string rhs_reg = GetReg(binary.rhs);
+  std::string dest_reg = rc_builder.NewReg();
   switch (binary.op) {
     case KOOPA_RBO_EQ:
       std::cout << "xor " << dest_reg << ", " << lhs_reg << ", " << rhs_reg << std::endl;

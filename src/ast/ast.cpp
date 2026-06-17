@@ -1,7 +1,6 @@
 #include "ast/ast.hpp"
 #include <iostream>
 #include <assert.h>
-using namespace std;
 
 // CompUnit ::= FuncDef
 std::string CompUnitAST::Dump(Context& context) const {
@@ -68,7 +67,7 @@ std::string ReturnStmtAST::Dump(Context& context) const {
   return "";
 }
 
-string AssignStmtAST::Dump(Context& context) const {
+std::string AssignStmtAST::Dump(Context& context) const {
   if (lval) {
     // 这里先右后左
     std::string rhs_reg = exp->Dump(context);
@@ -117,7 +116,7 @@ int UnaryOPExpAST::getValue(Context& context) const {
     return 0;
   }
 }
-string PrimaryUnaryExpAST::Dump(Context& context) const {
+std::string PrimaryUnaryExpAST::Dump(Context& context) const {
   if (primary_exp) {
     return primary_exp->Dump(context);
   }
@@ -164,7 +163,7 @@ std::string OpAST::Dump(Context& context) const {
 }
 
 // AddExp ::= MulExp | AddExp ('+' | '-') MulExp
-string MulAddExpAST::Dump(Context& context) const {
+std::string MulAddExpAST::Dump(Context& context) const {
   if (mul_exp) {
     return mul_exp->Dump(context);
   }
@@ -177,10 +176,10 @@ int MulAddExpAST::getValue(Context& context) const {
   return 0;
 }
 
-string ThreeAddExpAST::Dump(Context& context) const {
-  string lhs_reg = add_exp->Dump(context);
-  string rhs_reg = mul_exp->Dump(context);
-  string dest_reg = context.reg_builder.NewReg();
+std::string ThreeAddExpAST::Dump(Context& context) const {
+  std::string lhs_reg = add_exp->Dump(context);
+  std::string rhs_reg = mul_exp->Dump(context);
+  std::string dest_reg = context.reg_builder.NewReg();
   if (op->op == "+") {
     std::cout << "  " << dest_reg << " = add " << lhs_reg << ", " << rhs_reg << "\n";
   } else if (op->op == "-") {
@@ -199,7 +198,7 @@ int ThreeAddExpAST::getValue(Context& context) const {
 }
 
 // MulExp ::= UnaryExp | MulExp ('*' | '/' | '%') UnaryExp
-string UnaryMulExpAST::Dump(Context& context) const {
+std::string UnaryMulExpAST::Dump(Context& context) const {
   if (unary_exp) {
     return unary_exp->Dump(context);
   }
@@ -213,10 +212,10 @@ int UnaryMulExpAST::getValue(Context& context) const {
   return 0;
 }
 
-string ThreeMulExpAST::Dump(Context& context) const {
-  string lhs_reg = mul_exp->Dump(context);
-  string rhs_reg = unary_exp->Dump(context);
-  string dest_reg = context.reg_builder.NewReg();
+std::string ThreeMulExpAST::Dump(Context& context) const {
+  std::string lhs_reg = mul_exp->Dump(context);
+  std::string rhs_reg = unary_exp->Dump(context);
+  std::string dest_reg = context.reg_builder.NewReg();
   if (op->op == "*") {
     std::cout << "  " << dest_reg << " = mul " << lhs_reg << ", " << rhs_reg << "\n";
   } else if (op->op == "/") {
@@ -240,7 +239,7 @@ int ThreeMulExpAST::getValue(Context& context) const {
 }
 
 // RelExp ::= AddExp | RelExp ('<' | '>' | '<=' | '>=') AddExp
-string AddRelExpAST::Dump(Context& context) const {
+std::string AddRelExpAST::Dump(Context& context) const {
   if (add_exp) {
     return add_exp->Dump(context);
   }
@@ -249,10 +248,10 @@ string AddRelExpAST::Dump(Context& context) const {
 int AddRelExpAST::getValue(Context& context) const {
   return add_exp->getValue(context);
 }
-string ThreeRelExpAST::Dump(Context& context) const {
-  string lhs_reg = rel_exp->Dump(context);
-  string rhs_reg = add_exp->Dump(context);
-  string dest_reg = context.reg_builder.NewReg();
+std::string ThreeRelExpAST::Dump(Context& context) const {
+  std::string lhs_reg = rel_exp->Dump(context);
+  std::string rhs_reg = add_exp->Dump(context);
+  std::string dest_reg = context.reg_builder.NewReg();
   if (op->op == "<") {
     std::cout << "  " << dest_reg << " = lt " << lhs_reg << ", " << rhs_reg << "\n";
   } else if (op->op == ">") {
@@ -279,7 +278,7 @@ int ThreeRelExpAST::getValue(Context& context) const {
 }
 
 // EqExp ::= RelExp | EqExp ('==' | '!=') RelExp
-string RelEqExpAST::Dump(Context& context) const {
+std::string RelEqExpAST::Dump(Context& context) const {
   if (rel_exp) {
     return rel_exp->Dump(context);
   }
@@ -289,10 +288,10 @@ int RelEqExpAST::getValue(Context& context) const {
   return rel_exp->getValue(context);
 }
 
-string ThreeEqExpAST::Dump(Context& context) const {
-  string lhs_reg = eq_exp->Dump(context);
-  string rhs_reg = rel_exp->Dump(context);
-  string dest_reg = context.reg_builder.NewReg();
+std::string ThreeEqExpAST::Dump(Context& context) const {
+  std::string lhs_reg = eq_exp->Dump(context);
+  std::string rhs_reg = rel_exp->Dump(context);
+  std::string dest_reg = context.reg_builder.NewReg();
   if (op->op == "==") {
     std::cout << "  " << dest_reg << " = eq " << lhs_reg << ", " << rhs_reg << "\n";
   } else if (op->op == "!=") {
@@ -310,7 +309,7 @@ int ThreeEqExpAST::getValue(Context& context) const {
   }
 }
 // LAndExp ::= EqExp | LAndExp '&&' EqExp
-string EqLAndExpAST::Dump(Context& context) const {
+std::string EqLAndExpAST::Dump(Context& context) const {
   if (eq_exp) {
     return eq_exp->Dump(context);
   }
@@ -320,14 +319,14 @@ int EqLAndExpAST::getValue(Context& context) const {
   return eq_exp->getValue(context);
 }
 
-string ThreeLAndExpAST::Dump(Context& context) const {
-  string lhs_reg = land_exp->Dump(context);
-  string rhs_reg = eq_exp->Dump(context);
-  string dest_reg = context.reg_builder.NewReg();
+std::string ThreeLAndExpAST::Dump(Context& context) const {
+  std::string lhs_reg = land_exp->Dump(context);
+  std::string rhs_reg = eq_exp->Dump(context);
+  std::string dest_reg = context.reg_builder.NewReg();
   // 先对两边进行neq处理，得到0/1值，再进行and运算
   if (op->op == "&&") {
-    string lhs_reg_new = context.reg_builder.NewReg();
-    string rhs_reg_new = context.reg_builder.NewReg();
+    std::string lhs_reg_new = context.reg_builder.NewReg();
+    std::string rhs_reg_new = context.reg_builder.NewReg();
     std::cout << "  " << lhs_reg_new << " = ne " << lhs_reg << ", 0\n";
     std::cout << "  " << rhs_reg_new << " = ne " << rhs_reg << ", 0\n";
     std::cout << "  " << dest_reg << " = and " << lhs_reg_new << ", " << rhs_reg_new << "\n";
@@ -343,7 +342,7 @@ int ThreeLAndExpAST::getValue(Context& context) const {
 }
 
 // LOrExp ::= LAndExp | LOrExp '||' LAndExp
-string LAndLOrExpAST::Dump(Context& context) const {
+std::string LAndLOrExpAST::Dump(Context& context) const {
   if (land_exp) {
     return land_exp->Dump(context);
   }
@@ -352,14 +351,14 @@ string LAndLOrExpAST::Dump(Context& context) const {
 int LAndLOrExpAST::getValue(Context& context) const {
   return land_exp->getValue(context);
 }
-string ThreeLOrExpAST::Dump(Context& context) const {
-  string lhs_reg = lor_exp->Dump(context);
-  string rhs_reg = land_exp->Dump(context);
-  string dest_reg = context.reg_builder.NewReg();
+std::string ThreeLOrExpAST::Dump(Context& context) const {
+  std::string lhs_reg = lor_exp->Dump(context);
+  std::string rhs_reg = land_exp->Dump(context);
+  std::string dest_reg = context.reg_builder.NewReg();
   // 先对两边进行neq处理，得到0/1值，再进行or运算
   if (op->op == "||") {
-    string lhs_reg_new = context.reg_builder.NewReg();
-    string rhs_reg_new = context.reg_builder.NewReg();
+    std::string lhs_reg_new = context.reg_builder.NewReg();
+    std::string rhs_reg_new = context.reg_builder.NewReg();
     std::cout << "  " << lhs_reg_new << " = ne " << lhs_reg << ", 0\n";
     std::cout << "  " << rhs_reg_new << " = ne " << rhs_reg << ", 0\n";
     std::cout << "  " << dest_reg << " = or " << lhs_reg_new << ", " << rhs_reg_new << "\n";
@@ -375,21 +374,21 @@ int ThreeLOrExpAST::getValue(Context& context) const {
 }
 
 // LVal = IDENT
-string LValAST::Dump(Context& context) const { 
+std::string LValAST::Dump(Context& context) const { 
   auto sym = context.scope->lookupLocal(*ident);
   if (sym == nullptr) {
-    cout << "Error: LVal " << *ident << " not found\n";
+    std::cout << "Error: LVal " << *ident << " not found\n";
     return "";
   }
   if (sym->kind == SymbolKind::VARIABLE) {
-    string address = get<string>(sym->value);
-    string new_reg = context.reg_builder.NewReg();
+    std::string address = std::get<std::string>(sym->value);
+    std::string new_reg = context.reg_builder.NewReg();
     std::cout << "  " << new_reg << " = load " << address << "\n";
     return new_reg;
   } else if (sym->kind == SymbolKind::CONSTANT) {
-    return to_string(get<int>(sym->value));
+    return std::to_string(std::get<int>(sym->value));
   } else {
-    cout << "Error: LVal " << *ident << " is not a variable or constant\n";
+    std::cout << "Error: LVal " << *ident << " is not a variable or constant\n";
     return "";
   }
 }
@@ -397,38 +396,38 @@ string LValAST::Dump(Context& context) const {
 int LValAST::getValue(Context& context) const { 
   auto sym = context.scope->lookupLocal(*ident);
   if (sym == nullptr) {
-    cerr << "Error: LVal " << *ident << " not found\n";
+    std::cerr << "Error: LVal " << *ident << " not found\n";
     return 0;
   }
   if (sym->kind == SymbolKind::CONSTANT) {
-    return get<int>(sym->value);
+    return std::get<int>(sym->value);
   } else if (sym->kind == SymbolKind::VARIABLE) {
-    cerr << "Error: LVal is a variable " << *ident << "\n";
+    std::cerr << "Error: LVal is a variable " << *ident << "\n";
     return 0;
   } else {
-    cerr << "Error: LVal " << *ident << " is not a variable or constant\n";
+    std::cerr << "Error: LVal " << *ident << " is not a variable or constant\n";
     return 0;
   }
 }
 
-string LValAST::DumpOnlyAddress(Context& context) const { 
+std::string LValAST::DumpOnlyAddress(Context& context) const { 
   auto sym = context.scope->lookupLocal(*ident);
   if (sym == nullptr) {
-    cout << "Error: LVal " << *ident << " not found\n";
+    std::cerr << "Error: LVal " << *ident << " not found\n";
     return "";
   }
   if (sym->kind == SymbolKind::VARIABLE) {
-    return get<string>(sym->value);
+    return std::get<std::string>(sym->value);
   } else if (sym->kind == SymbolKind::CONSTANT) {
-    cerr << "Error: LVal " << *ident << " is a constant\n";
+    std::cerr << "Error: LVal " << *ident << " is a constant\n";
   } else {
-    cout << "Error: LVal " << *ident << " is not a variable or constant\n";
+    std::cerr << "Error: LVal " << *ident << " is not a variable or constant\n";
   }
   return "";
 }
 
 // ConstExp ::= Exp
-string ConstExpAST::Dump(Context& context) const { 
+std::string ConstExpAST::Dump(Context& context) const { 
   if (exp) {
     return exp->Dump(context);
   }
@@ -438,7 +437,7 @@ int ConstExpAST::getValue(Context& context) const {
   return exp->getValue(context);
 }
 // ConstInitVal ::= ConstExp
-string ConstInitValAST::Dump(Context& context) const { 
+std::string ConstInitValAST::Dump(Context& context) const { 
   if (const_exp) {
     return const_exp->Dump(context);
   }
@@ -448,24 +447,24 @@ int ConstInitValAST::getValue(Context& context) const {
   return const_exp->getValue(context);
 }
 // ConstDef ::= IDENT '=' ConstInitVal
-string ConstDefAST::Dump(Context& context) const { 
+std::string ConstDefAST::Dump(Context& context) const { 
   int constinit_val = const_init_val->getValue(context);
-  auto sym = make_shared<Symbol>(Symbol(*ident, SymbolKind::CONSTANT, constinit_val));
+  auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::CONSTANT, constinit_val));
   if (!context.scope->define(sym)) {
-    cout << "Error: redefine " << *ident << "\n";
+    std::cout << "Error: redefine " << *ident << "\n";
   }
   return "";
 }
 
 // Decl ::= ConstDecl | VarDecl
-string ConstDeclDecAST::Dump(Context& context) const {
+std::string ConstDeclDecAST::Dump(Context& context) const {
   if (const_decl) {
     return const_decl->Dump(context);
   }
   return "";
 }
 
-string VarDeclDecAST::Dump(Context& context) const { 
+std::string VarDeclDecAST::Dump(Context& context) const { 
   if (var_decl) {
     return var_decl->Dump(context);
   }
@@ -473,13 +472,13 @@ string VarDeclDecAST::Dump(Context& context) const {
 }
 
 // ConstDecl ::= 'const' BType ConstDef { ',' ConstDef } ';'
-string ConstDeclAST::Dump(Context& context) const {
+std::string ConstDeclAST::Dump(Context& context) const {
   assert(*b_type == "int");
   const_def_list->Dump(context);
   return "";
 }
 
-string ConstDefListAST::Dump(Context& context) const { 
+std::string ConstDefListAST::Dump(Context& context) const { 
   for (auto& const_def : const_defs) {
     const_def->Dump(context);
   }
@@ -487,16 +486,16 @@ string ConstDefListAST::Dump(Context& context) const {
 }
 
 // VarDecl ::= BType VarDef { ',' VarDef } ';'
-string VarDeclAST::Dump(Context& context) const {
+std::string VarDeclAST::Dump(Context& context) const {
   assert(*b_type == "int");
   var_def_list->Dump(context);
   return "";
 }
 
-string VarDefListAST::Dump(Context& context) const { 
+std::string VarDefListAST::Dump(Context& context) const { 
   for (auto& var_def : var_defs) {
     if (!var_def) {
-      cerr << "Error: VarDef is nullptr\n";
+      std::cerr << "Error: VarDef is nullptr\n";
       continue;
     }
     var_def->Dump(context);
@@ -505,32 +504,32 @@ string VarDefListAST::Dump(Context& context) const {
 }
 
 // VarDef ::= IDENT | IDENT '=' InitVal
-string IDENTVarAST::Dump(Context& context) const { 
-  string address = context.reg_builder.GetAddress(*ident);
-  auto sym = make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
+std::string IDENTVarAST::Dump(Context& context) const { 
+  std::string address = context.reg_builder.GetAddress(*ident);
+  auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
 
   std::cout << "  " << address << " = alloc i32\n";
 
   if (!context.scope->define(sym)) {
-    cerr << "Error: redefine " << *ident << "\n";
+    std::cerr << "Error: redefine " << *ident << "\n";
   }
   return "";
 }
 
-string ThreeVarAST::Dump(Context& context) const { 
-  string address = context.reg_builder.GetAddress(*ident);
-  string init_val_reg = init_val->Dump(context);
-  auto sym = make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
+std::string ThreeVarAST::Dump(Context& context) const { 
+  std::string address = context.reg_builder.GetAddress(*ident);
+  std::string init_val_reg = init_val->Dump(context);
+  auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
   std::cout << "  " << address << " = alloc i32\n";
   std::cout << "  " << "store " << init_val_reg << ", " << address << "\n";
   if (!context.scope->define(sym)) {
-    cerr << "Error: redefine " << *ident << "\n";
+    std::cerr << "Error: redefine " << *ident << "\n";
   }
   return "";
 }
 
 // InitVal ::= Exp
-string InitValAST::Dump(Context& context) const { 
+std::string InitValAST::Dump(Context& context) const { 
   return exp->Dump(context);
 }
 

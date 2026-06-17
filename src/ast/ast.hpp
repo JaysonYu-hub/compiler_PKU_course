@@ -5,7 +5,6 @@
 #include <unordered_map>
 #include <iostream>
 #include <variant>
-using namespace std;
 
 class RegBuilder {
 private:
@@ -24,7 +23,7 @@ public:
     reg_counter = 0;
   }
 
-  std::string GetAddress(string var_name) {
+  std::string GetAddress(const std::string &var_name) const {
     return "@" + var_name;
   }
 };
@@ -32,34 +31,34 @@ public:
 //符号表
 enum class SymbolKind { CONSTANT , VARIABLE };
 
-struct Symbol { 
+struct Symbol {
 public:
-  string name;
+  std::string name;
   SymbolKind kind;
-  variant<int, string> value;// 对于变量为address, 对于常量为const_value
-  Symbol(string name, SymbolKind kind, int const_value) : name(std::move(name)), kind(kind), value(const_value) {}
+  std::variant<int, std::string> value; // 对于变量为address, 对于常量为const_value
+  Symbol(const std::string &name, SymbolKind kind, int const_value) : name(name), kind(kind), value(const_value) {}
 
-  Symbol(string name, SymbolKind kind, string address) : name(std::move(name)), kind(kind), value(std::move(address)) {}
-  Symbol(string name, SymbolKind kind) : name(name), kind(kind), value(0) {}
+  Symbol(const std::string &name, SymbolKind kind, const std::string &address) : name(name), kind(kind), value(address) {}
+  Symbol(const std::string &name, SymbolKind kind) : name(name), kind(kind), value(0) {}
 };
 
 class Scope {
 private:
-  unordered_map<string, shared_ptr<Symbol>> symbols;
-  shared_ptr<Scope> parentScope;
+  std::unordered_map<std::string, std::shared_ptr<Symbol>> symbols;
+  std::shared_ptr<Scope> parentScope;
 public:
-  Scope(shared_ptr<Scope> parentScope) : parentScope(parentScope) {}
+  Scope(std::shared_ptr<Scope> parentScope) : parentScope(parentScope) {}
 
-  shared_ptr<Scope> getParentScope() const { return parentScope; }
+  std::shared_ptr<Scope> getParentScope() const { return parentScope; }
 
-  bool define(shared_ptr<Symbol> symbol) {
+  bool define(std::shared_ptr<Symbol> symbol) {
     if (symbols.find(symbol->name) != symbols.end()) {
       return false;
     }
     symbols[symbol->name] = symbol;
     return true;
   }
-  shared_ptr<Symbol> lookup(string name) {
+  std::shared_ptr<Symbol> lookup(const std::string &name) {
     auto current = symbols.find(name);
     if (current != symbols.end()) {
       return current->second;
@@ -70,7 +69,7 @@ public:
     return nullptr;
   }
 
-  shared_ptr<Symbol> lookupLocal(string name) {
+  std::shared_ptr<Symbol> lookupLocal(const std::string &name) {
     auto it = symbols.find(name);
     if (it != symbols.end()) {
       return it->second;
@@ -88,13 +87,13 @@ public:
       for (const auto& pair : symbols) {
         const auto& name = pair.first;
         const auto& sym = pair.second;
-            
+
         std::clog << indent << "  -> 名字: " << name;
-            
+
         // 打印符号类型 (假设你的 SymbolKind 是枚举)
         std::clog << " | 类型: ";
         if (sym->kind == SymbolKind::CONSTANT) {
-          std::clog << "CONSTANT (值: " << get<int>(sym->value) << ")";
+          std::clog << "CONSTANT (值: " << std::get<int>(sym->value) << ")";
         }
         std::clog << std::endl;
       }
@@ -111,24 +110,21 @@ public:
 };
 
 // 上下文：用于传递RegBuilder和作用域符号表
-class Context { 
+class Context {
 public:
   RegBuilder reg_builder;
-  shared_ptr<Scope> scope;
+  std::shared_ptr<Scope> scope;
 
-  Context(RegBuilder reg_builder) {
-    this->reg_builder = reg_builder;
-    this->scope = make_shared<Scope>(nullptr);
-  }
+  Context(const RegBuilder &reg_builder) : reg_builder(reg_builder), scope(std::make_shared<Scope>(nullptr)) {}
 
   void enterNewScope() {
-    scope = make_shared<Scope>(scope);
+    scope = std::make_shared<Scope>(scope);
   }
   void exitScope() {
     if (scope->getParentScope() != nullptr) {
       scope = scope->getParentScope();
     } else {
-      cout << "Cannot exit global scope";
+      std::cout << "Cannot exit global scope";
       return;
     }
   }
@@ -207,7 +203,7 @@ public:
 // Block ::= '{' {BlockItem} '}'
 class BlockAST : public BaseAST {
 public:
-  std::vector<unique_ptr<BaseAST>> block_items; 
+  std::vector<std::unique_ptr<BaseAST>> block_items; 
 
   BlockAST() = default; 
 
@@ -491,7 +487,7 @@ public:
 // ConstDecl ::= 'const' BType ConstDef { ',' ConstDef } ';'
 class ConstDeclAST : public BaseAST {
 public:
-  std::unique_ptr<string> b_type;
+  std::unique_ptr<std::string> b_type;
   std::unique_ptr<BaseAST> const_def_list;
   ConstDeclAST() = default; 
 
@@ -509,7 +505,7 @@ public:
 // VarDecl ::= BType VarDef { ',' VarDef } ';'
 class VarDeclAST : public BaseAST {
 public:
-  std::unique_ptr<string> b_type;
+  std::unique_ptr<std::string> b_type;
   std::unique_ptr<BaseAST> var_def_list;
   VarDeclAST() = default; 
 
