@@ -4,6 +4,7 @@
 #include <vector>
 #include <unordered_map>
 #include <iostream>
+#include <variant>
 using namespace std;
 
 class RegBuilder {
@@ -22,6 +23,10 @@ public:
   void Reset() {
     reg_counter = 0;
   }
+
+  std::string GetAddress(string var_name) {
+    return "@" + var_name;
+  }
 };
 
 //符号表
@@ -31,15 +36,11 @@ struct Symbol {
 public:
   string name;
   SymbolKind kind;
-  union {
-    int const_value; // 符号的值（对于常量）
-  } value;
-  Symbol(string name, SymbolKind kind, int const_value) : name(name), kind(kind) {
-    value.const_value = const_value;
-  }
-  Symbol(string name, SymbolKind kind) : name(name), kind(kind) {
-    value.const_value = 0;
-  }
+  variant<int, string> value;// 对于变量为address, 对于常量为const_value
+  Symbol(string name, SymbolKind kind, int const_value) : name(std::move(name)), kind(kind), value(const_value) {}
+
+  Symbol(string name, SymbolKind kind, string address) : name(std::move(name)), kind(kind), value(std::move(address)) {}
+  Symbol(string name, SymbolKind kind) : name(name), kind(kind), value(0) {}
 };
 
 class Scope {
@@ -93,7 +94,7 @@ public:
         // 打印符号类型 (假设你的 SymbolKind 是枚举)
         std::clog << " | 类型: ";
         if (sym->kind == SymbolKind::CONSTANT) {
-          std::clog << "CONSTANT (值: " << sym->value.const_value << ")";
+          std::clog << "CONSTANT (值: " << get<int>(sym->value) << ")";
         }
         std::clog << std::endl;
       }
@@ -134,6 +135,7 @@ public:
 };
 
 class OpAST;
+class LValAST;
 class BaseAST {
 public:
   virtual ~BaseAST() = default;
@@ -225,7 +227,7 @@ public:
 
 class AssignStmtAST : public BaseAST {
 public:
-  std::unique_ptr<BaseAST> lval;
+  std::unique_ptr<LValAST> lval;
   std::unique_ptr<ValueAST> exp;
 
   AssignStmtAST() = default; 
@@ -276,7 +278,7 @@ public:
 
 class LValPriAST : public ValueAST {
 public:
-  std::unique_ptr<std::string> ident;
+  std::unique_ptr<ValueAST> lval;
   LValPriAST() = default; 
 
   std::string Dump(Context& context) const override;
@@ -426,6 +428,18 @@ public:
   std::string Dump(Context& context) const override;  
   int getValue(Context& context) const override;
 };  
+
+// LVal = IDENT
+class LValAST : public ValueAST {
+public:
+  std::unique_ptr<std::string> ident;
+  LValAST() = default; 
+
+  std::string Dump(Context& context) const override;
+  // 用于仅返回变量地址而不加载
+  std::string DumpOnlyAddress(Context& context) const;
+  int getValue(Context& context) const override;
+};
 
 // ConstExp ::= Exp
 class ConstExpAST : public ValueAST {

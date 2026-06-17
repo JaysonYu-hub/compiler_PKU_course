@@ -59,11 +59,21 @@ std::string StmtBloAST::Dump(Context& context) const {
   return "";
 }
 
-// Stmt ::= 'return' Exp ';'
-std::string StmtAST::Dump(Context& context) const {
+// Stmt ::= 'return' Exp ';' | LVal '=' Exp ';'
+std::string ReturnStmtAST::Dump(Context& context) const {
   if (exp) {
     std::string ret_val = exp->Dump(context);
     std::cout << "  ret " << ret_val << "\n";
+  }
+  return "";
+}
+
+string AssignStmtAST::Dump(Context& context) const {
+  if (lval) {
+    // 这里先右后左
+    std::string rhs_reg = exp->Dump(context);
+    std::string lhs_reg = lval->DumpOnlyAddress(context);
+    std::cout << "  store " << rhs_reg << ", " << lhs_reg << "\n";
   }
   return "";
 }
@@ -141,24 +151,11 @@ int NumberPriAST::getValue(Context& context) const {
 }
 
 std::string LValPriAST::Dump(Context& context) const {
-
-  auto symbol = context.scope->lookup(*ident);
-  
-  if (symbol == nullptr) {
-    cerr << "Error: symbol not found: " << *ident << endl;
-    context.scope->print(0);
-  }
-  if (symbol) {
-    return to_string(symbol->value.const_value);
-  }
-  return "";
+  return lval->Dump(context);
 }
 
 int LValPriAST::getValue(Context& context) const {
-  if (context.scope->lookup(*ident)) {
-    return context.scope->lookup(*ident)->value.const_value;
-  }
-  return 0;
+  return lval->getValue(context);
 }
 
 // '+' | '-' | '!' | '*' | '/' | '%'
@@ -376,6 +373,60 @@ int ThreeLOrExpAST::getValue(Context& context) const {
     return 0;
   }
 }
+
+// LVal = IDENT
+string LValAST::Dump(Context& context) const { 
+  auto sym = context.scope->lookupLocal(*ident);
+  if (sym == nullptr) {
+    cout << "Error: LVal " << *ident << " not found\n";
+    return "";
+  }
+  if (sym->kind == SymbolKind::VARIABLE) {
+    string address = get<string>(sym->value);
+    string new_reg = context.reg_builder.NewReg();
+    std::cout << "  " << new_reg << " = load " << address << "\n";
+    return new_reg;
+  } else if (sym->kind == SymbolKind::CONSTANT) {
+    return to_string(get<int>(sym->value));
+  } else {
+    cout << "Error: LVal " << *ident << " is not a variable or constant\n";
+    return "";
+  }
+}
+
+int LValAST::getValue(Context& context) const { 
+  auto sym = context.scope->lookupLocal(*ident);
+  if (sym == nullptr) {
+    cerr << "Error: LVal " << *ident << " not found\n";
+    return 0;
+  }
+  if (sym->kind == SymbolKind::CONSTANT) {
+    return get<int>(sym->value);
+  } else if (sym->kind == SymbolKind::VARIABLE) {
+    cerr << "Error: LVal is a variable " << *ident << "\n";
+    return 0;
+  } else {
+    cerr << "Error: LVal " << *ident << " is not a variable or constant\n";
+    return 0;
+  }
+}
+
+string LValAST::DumpOnlyAddress(Context& context) const { 
+  auto sym = context.scope->lookupLocal(*ident);
+  if (sym == nullptr) {
+    cout << "Error: LVal " << *ident << " not found\n";
+    return "";
+  }
+  if (sym->kind == SymbolKind::VARIABLE) {
+    return get<string>(sym->value);
+  } else if (sym->kind == SymbolKind::CONSTANT) {
+    cerr << "Error: LVal " << *ident << " is a constant\n";
+  } else {
+    cout << "Error: LVal " << *ident << " is not a variable or constant\n";
+  }
+  return "";
+}
+
 // ConstExp ::= Exp
 string ConstExpAST::Dump(Context& context) const { 
   if (exp) {
@@ -404,12 +455,19 @@ string ConstDefAST::Dump(Context& context) const {
     cout << "Error: redefine " << *ident << "\n";
   }
   return "";
-};
+}
 
-// Decl ::= ConstDecl
-string DeclAST::Dump(Context& context) const {
+// Decl ::= ConstDecl | VarDecl
+string ConstDeclDecAST::Dump(Context& context) const {
   if (const_decl) {
     return const_decl->Dump(context);
+  }
+  return "";
+}
+
+string VarDeclDecAST::Dump(Context& context) const { 
+  if (var_decl) {
+    return var_decl->Dump(context);
   }
   return "";
 }
@@ -426,4 +484,56 @@ string ConstDefListAST::Dump(Context& context) const {
     const_def->Dump(context);
   }
   return "";
+}
+
+// VarDecl ::= BType VarDef { ',' VarDef } ';'
+string VarDeclAST::Dump(Context& context) const {
+  assert(*b_type == "int");
+  var_def_list->Dump(context);
+  return "";
+}
+
+string VarDefListAST::Dump(Context& context) const { 
+  for (auto& var_def : var_defs) {
+    if (!var_def) {
+      cerr << "Error: VarDef is nullptr\n";
+      continue;
+    }
+    var_def->Dump(context);
+  }
+  return "";
+}
+
+// VarDef ::= IDENT | IDENT '=' InitVal
+string IDENTVarAST::Dump(Context& context) const { 
+  string address = context.reg_builder.GetAddress(*ident);
+  auto sym = make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
+
+  std::cout << "  " << address << " = alloc i32\n";
+
+  if (!context.scope->define(sym)) {
+    cerr << "Error: redefine " << *ident << "\n";
+  }
+  return "";
+}
+
+string ThreeVarAST::Dump(Context& context) const { 
+  string address = context.reg_builder.GetAddress(*ident);
+  string init_val_reg = init_val->Dump(context);
+  auto sym = make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
+  std::cout << "  " << address << " = alloc i32\n";
+  std::cout << "  " << "store " << init_val_reg << ", " << address << "\n";
+  if (!context.scope->define(sym)) {
+    cerr << "Error: redefine " << *ident << "\n";
+  }
+  return "";
+}
+
+// InitVal ::= Exp
+string InitValAST::Dump(Context& context) const { 
+  return exp->Dump(context);
+}
+
+int InitValAST::getValue(Context& context) const { 
+  return exp->getValue(context);
 }

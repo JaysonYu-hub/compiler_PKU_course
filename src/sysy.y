@@ -42,11 +42,11 @@ using namespace std;
 
 %type <ast_val> FuncDef FuncType Block Stmt 
 %type <value_ast> Exp UnaryExp PrimaryExp AddExp ConstExp
-%type <value_ast> RelExp EqExp LAndExp LOrExp ConstInitVal MulExp InitVal
+%type <value_ast> RelExp EqExp LAndExp LOrExp ConstInitVal MulExp InitVal LVal
 %type <op_ast> ComOp EquOp LOrOp LAndOp UnaryOp AddOp MulOp
 %type <int_val> Number
 %type <ast_val> Decl ConstDecl VarDecl BlockItem block_item_list const_def_list var_def_list ConstDef VarDef
-%type <str_val> LVal BType
+%type <str_val> BType
 
 %%
 
@@ -117,7 +117,7 @@ Stmt
   }
   | LVal ASSIGN Exp ';' { 
     auto assign_stmt = new AssignStmtAST();
-    assign_stmt->lval = unique_ptr<BaseAST>($1);
+    assign_stmt->lval = unique_ptr<LValAST>(static_cast<LValAST*>($1));
     assign_stmt->exp = unique_ptr<ValueAST>($3);
     $$ = assign_stmt;
    }
@@ -162,11 +162,10 @@ PrimaryExp
   }
   | LVal {
     auto lval_exp = new LValPriAST();
-    lval_exp->ident = unique_ptr<string>($1);
+    lval_exp->lval = unique_ptr<ValueAST>($1);
     $$ = lval_exp;
   }
   ;
-
 
 MulExp
   : UnaryExp {
@@ -339,7 +338,8 @@ VarDef
   | IDENT ASSIGN InitVal { 
     auto var_def = new ThreeVarAST();
     var_def->ident = unique_ptr<string>($1);
-    var_def->const_exp = unique_ptr<ValueAST>($3);
+    var_def->init_val = unique_ptr<ValueAST>($3);
+    $$ = var_def;
   }
   ;
 
@@ -352,7 +352,11 @@ InitVal
   ;
 
 LVal
-  : IDENT { $$ = $1; }
+  : IDENT { 
+    auto lval_ast = new LValAST(); 
+    lval_ast->ident = unique_ptr<string>($1);
+    $$ = lval_ast; 
+  }
   ;
 
 ConstExp
