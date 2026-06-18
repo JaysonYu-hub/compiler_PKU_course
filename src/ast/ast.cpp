@@ -12,19 +12,21 @@ std::string CompUnitAST::Dump(Context& context) const {
 
 // FuncDef ::= FuncType IDENT '(' ')' Block
 std::string FuncDefAST::Dump(Context& context) const {
-  context.reg_builder.Reset(); // 解析新函数，寄存器计数器清零
+  context.Reset(); // 解析新函数，寄存器计数器清零
   context.enterNewScope();
 
   std::cout << "fun @" << *ident << "(): ";
+
   func_type->Dump(context);
   std::cout << " {\n";
+  std::cout << "\%entry:\n";
 
   if (block) {
     block->Dump(context);
   }
 
   std::cout << "}\n";
-  //context.exitScope();
+  context.exitScope();
   return "";
 }
 
@@ -36,10 +38,11 @@ std::string FuncTypeAST::Dump(Context& context) const {
 
 // Block ::= '{' {BlockItem} '}'
 std::string BlockAST::Dump(Context& context) const {
-  std::cout << "\%entry:\n";
+  context.enterNewScope();
   for (auto& item : block_items) {
     item->Dump(context);
   }
+  context.exitScope();
   return "";
 }
 
@@ -80,7 +83,6 @@ std::string AssignStmtAST::Dump(Context& context) const {
 std::string ExpStmtAST::Dump(Context& context) const {
   if (exp) {
     std::string exp_reg = exp->Dump(context);
-    std::cout << "  drop " << exp_reg << "\n";
   }
   return "";
 }
@@ -113,12 +115,12 @@ std::string UnaryOPExpAST::Dump(Context& context) const {
     return src_reg; 
   } 
   else if (op->op == "-") {
-    std::string dest_reg = context.reg_builder.NewReg();
+    std::string dest_reg = context.NewReg();
     std::cout << "  " << dest_reg << " = sub 0, " << src_reg << "\n";
     return dest_reg; // 向上层返回新寄存器名
   } 
   else if (op->op == "!") {
-    std::string dest_reg = context.reg_builder.NewReg();
+    std::string dest_reg = context.NewReg();
     std::cout << "  " << dest_reg << " = eq 0, " << src_reg << "\n";
     return dest_reg; // 向上层返回新寄存器名
   }
@@ -198,7 +200,7 @@ int MulAddExpAST::getValue(Context& context) const {
 std::string ThreeAddExpAST::Dump(Context& context) const {
   std::string lhs_reg = add_exp->Dump(context);
   std::string rhs_reg = mul_exp->Dump(context);
-  std::string dest_reg = context.reg_builder.NewReg();
+  std::string dest_reg = context.NewReg();
   if (op->op == "+") {
     std::cout << "  " << dest_reg << " = add " << lhs_reg << ", " << rhs_reg << "\n";
   } else if (op->op == "-") {
@@ -234,7 +236,7 @@ int UnaryMulExpAST::getValue(Context& context) const {
 std::string ThreeMulExpAST::Dump(Context& context) const {
   std::string lhs_reg = mul_exp->Dump(context);
   std::string rhs_reg = unary_exp->Dump(context);
-  std::string dest_reg = context.reg_builder.NewReg();
+  std::string dest_reg = context.NewReg();
   if (op->op == "*") {
     std::cout << "  " << dest_reg << " = mul " << lhs_reg << ", " << rhs_reg << "\n";
   } else if (op->op == "/") {
@@ -270,7 +272,7 @@ int AddRelExpAST::getValue(Context& context) const {
 std::string ThreeRelExpAST::Dump(Context& context) const {
   std::string lhs_reg = rel_exp->Dump(context);
   std::string rhs_reg = add_exp->Dump(context);
-  std::string dest_reg = context.reg_builder.NewReg();
+  std::string dest_reg = context.NewReg();
   if (op->op == "<") {
     std::cout << "  " << dest_reg << " = lt " << lhs_reg << ", " << rhs_reg << "\n";
   } else if (op->op == ">") {
@@ -310,7 +312,7 @@ int RelEqExpAST::getValue(Context& context) const {
 std::string ThreeEqExpAST::Dump(Context& context) const {
   std::string lhs_reg = eq_exp->Dump(context);
   std::string rhs_reg = rel_exp->Dump(context);
-  std::string dest_reg = context.reg_builder.NewReg();
+  std::string dest_reg = context.NewReg();
   if (op->op == "==") {
     std::cout << "  " << dest_reg << " = eq " << lhs_reg << ", " << rhs_reg << "\n";
   } else if (op->op == "!=") {
@@ -342,11 +344,11 @@ int EqLAndExpAST::getValue(Context& context) const {
 std::string ThreeLAndExpAST::Dump(Context& context) const {
   std::string lhs_reg = land_exp->Dump(context);
   std::string rhs_reg = eq_exp->Dump(context);
-  std::string dest_reg = context.reg_builder.NewReg();
+  std::string dest_reg = context.NewReg();
   // 先对两边进行neq处理，得到0/1值，再进行and运算
   if (op->op == "&&") {
-    std::string lhs_reg_new = context.reg_builder.NewReg();
-    std::string rhs_reg_new = context.reg_builder.NewReg();
+    std::string lhs_reg_new = context.NewReg();
+    std::string rhs_reg_new = context.NewReg();
     std::cout << "  " << lhs_reg_new << " = ne " << lhs_reg << ", 0\n";
     std::cout << "  " << rhs_reg_new << " = ne " << rhs_reg << ", 0\n";
     std::cout << "  " << dest_reg << " = and " << lhs_reg_new << ", " << rhs_reg_new << "\n";
@@ -374,11 +376,11 @@ int LAndLOrExpAST::getValue(Context& context) const {
 std::string ThreeLOrExpAST::Dump(Context& context) const {
   std::string lhs_reg = lor_exp->Dump(context);
   std::string rhs_reg = land_exp->Dump(context);
-  std::string dest_reg = context.reg_builder.NewReg();
+  std::string dest_reg = context.NewReg();
   // 先对两边进行neq处理，得到0/1值，再进行or运算
   if (op->op == "||") {
-    std::string lhs_reg_new = context.reg_builder.NewReg();
-    std::string rhs_reg_new = context.reg_builder.NewReg();
+    std::string lhs_reg_new = context.NewReg();
+    std::string rhs_reg_new = context.NewReg();
     std::cout << "  " << lhs_reg_new << " = ne " << lhs_reg << ", 0\n";
     std::cout << "  " << rhs_reg_new << " = ne " << rhs_reg << ", 0\n";
     std::cout << "  " << dest_reg << " = or " << lhs_reg_new << ", " << rhs_reg_new << "\n";
@@ -395,14 +397,14 @@ int ThreeLOrExpAST::getValue(Context& context) const {
 
 // LVal = IDENT
 std::string LValAST::Dump(Context& context) const { 
-  auto sym = context.scope->lookupLocal(*ident);
+  auto sym = context.scope->lookup(*ident);
   if (sym == nullptr) {
     std::cout << "Error: LVal " << *ident << " not found\n";
     return "";
   }
   if (sym->kind == SymbolKind::VARIABLE) {
     std::string address = std::get<std::string>(sym->value);
-    std::string new_reg = context.reg_builder.NewReg();
+    std::string new_reg = context.NewReg();
     std::cout << "  " << new_reg << " = load " << address << "\n";
     return new_reg;
   } else if (sym->kind == SymbolKind::CONSTANT) {
@@ -431,7 +433,7 @@ int LValAST::getValue(Context& context) const {
 }
 
 std::string LValAST::DumpOnlyAddress(Context& context) const { 
-  auto sym = context.scope->lookupLocal(*ident);
+  auto sym = context.scope->lookup(*ident);
   if (sym == nullptr) {
     std::cerr << "Error: LVal " << *ident << " not found\n";
     return "";
@@ -525,7 +527,7 @@ std::string VarDefListAST::Dump(Context& context) const {
 
 // VarDef ::= IDENT | IDENT '=' InitVal
 std::string IDENTVarAST::Dump(Context& context) const { 
-  std::string address = context.reg_builder.GetAddress(*ident);
+  std::string address = context.GetAddress(*ident);
   auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
 
   std::cout << "  " << address << " = alloc i32\n";
@@ -537,7 +539,7 @@ std::string IDENTVarAST::Dump(Context& context) const {
 }
 
 std::string ThreeVarAST::Dump(Context& context) const { 
-  std::string address = context.reg_builder.GetAddress(*ident);
+  std::string address = context.GetAddress(*ident);
   std::string init_val_reg = init_val->Dump(context);
   auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
   std::cout << "  " << address << " = alloc i32\n";

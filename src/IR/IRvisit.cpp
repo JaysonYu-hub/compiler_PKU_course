@@ -39,6 +39,7 @@ void IRVisitor::Visit(const koopa_raw_slice_t &slice) {
 
 // 访问函数
 void IRVisitor::Visit(const koopa_raw_function_t &func) {
+  rc_builder.Reset();
   // 计算需要分配的栈空间
   int inst_num = VisitFuncIns(func->bbs);
   int spark_len = 0;
@@ -48,7 +49,6 @@ void IRVisitor::Visit(const koopa_raw_function_t &func) {
     spark_len = 16 * (inst_num / 4 + 1);
   }
   // 执行一些其他的必要操作
-  rc_builder.Reset();
   rc_builder.SetStackSize(spark_len);
   std::string func_name(func->name);
   func_name = func_name.substr(1); // 去掉前缀
@@ -73,7 +73,7 @@ void IRVisitor::Visit(const koopa_raw_basic_block_t &bb) {
 // 访问指令
 void IRVisitor::Visit(const koopa_raw_value_t &value) {
   // 根据指令类型判断后续需要如何访问
-  RegName reg_name;
+  RegObj reg_name;
   const auto &kind = value->kind;
   switch (kind.tag) {
     case KOOPA_RVT_RETURN:
@@ -99,12 +99,11 @@ void IRVisitor::Visit(const koopa_raw_value_t &value) {
       break;
     case KOOPA_RVT_ALLOC:
       // 访问 alloc 指令
-      reg_name = rc_builder.GetRegName(RegKind::SPDIFFADD);
+      reg_name = rc_builder.GetRegObj(RegKind::SPDIFFADD);
       SetReg(value, reg_name);
       break;
     default:
       // 其他类型暂时遇不到
-      
       assert(false);
   }
 }
@@ -113,12 +112,10 @@ void IRVisitor::Visit(const koopa_raw_value_t &value) {
 
 // 对于%1 = add 3, 4 通过GetReg找不到映射，就要对3和4进行Visit
 std::string IRVisitor::Visit(const koopa_raw_integer_t &integer) {
-  
   // 访问 integer 指令
   if (integer.value != 0) {
     std::string reg = rc_builder.NewReg();
     std::cout << "  li "<< reg <<", " << integer.value << std::endl;
-    
     // 这里使用返回值而不是SetReg()是因为寄存器可能被覆盖
     return reg;
   }
@@ -127,7 +124,8 @@ std::string IRVisitor::Visit(const koopa_raw_integer_t &integer) {
 
 void IRVisitor::Visit(const koopa_raw_return_t &ret) {
   // 访问 return 指令
-  RegName reg_name = GetReg(ret.value);  
+  // ret %2 | ret 3
+  RegObj reg_name = GetReg(ret.value);  
   std::cout << "  # " << "ret " << reg_name.reg_name << ", 以及函数的 epilogue" << std::endl;
   if (reg_name.kind == RegKind::SPDIFFADD) {
     std::cout << "  lw a0, " << reg_name.reg_name << std::endl;
@@ -142,28 +140,31 @@ void IRVisitor::Visit(const koopa_raw_return_t &ret) {
 
 void IRVisitor::Visit(const koopa_raw_binary_t &binary, koopa_raw_value_t value) {
   // 访问 binary 指令
+  // %1 = add %0, %1 | %1 = add %0, 3
   // %1 = add %0, %1 这里的%0只是一个value指针，需要判断是否为address
-  RegName lhs_reg = GetReg(binary.lhs);
-  RegName rhs_reg = GetReg(binary.rhs);
+  RegObj lhs_reg = GetReg(binary.lhs);
+  RegObj rhs_reg = GetReg(binary.rhs);
   // 注意GetReg的调用次数
   RegKind lhs_reg_kind = lhs_reg.kind;
   RegKind rhs_reg_kind = rhs_reg.kind;
 
   std::string lhs_reg_name = lhs_reg.reg_name;
   std::string rhs_reg_name = rhs_reg.reg_name;
-  RegName dest_address = rc_builder.GetRegName(RegKind::SPDIFFADD);
+  RegObj dest_address = rc_builder.GetRegObj(RegKind::SPDIFFADD);
 
   std::cout << "  # " << dest_address.reg_name << " = " << binary.op << " " << lhs_reg_name << ", " << rhs_reg_name << std::endl;
 
   if (lhs_reg_kind == RegKind::SPDIFFADD) {
-    std::cout << "  lw " << "t0" << ", " << lhs_reg_name << std::endl;
-    lhs_reg_name = "t0";
+    std::string temp = rc_builder.NewReg();
+    std::cout << "  lw " << temp << ", " << lhs_reg_name << std::endl;
+    lhs_reg_name = temp;
   }
   if (rhs_reg_kind == RegKind::SPDIFFADD) {
-    std::cout << "  lw " << "t1" << ", " << rhs_reg_name << std::endl;
-    rhs_reg_name = "t1";
+    std::string temp = rc_builder.NewReg();
+    std::cout << "  lw " << temp << ", " << rhs_reg_name << std::endl;
+    rhs_reg_name = temp;
   }
-  std::string dest_reg = "t0";
+  std::string dest_reg = rc_builder.NewReg();
   switch (binary.op) {
     case KOOPA_RBO_EQ:
       std::cout << "  xor " << dest_reg << ", " << lhs_reg_name << ", " << rhs_reg_name << std::endl;
@@ -212,26 +213,27 @@ void IRVisitor::Visit(const koopa_raw_binary_t &binary, koopa_raw_value_t value)
   }
   std::cout << "  sw " << dest_reg << ", " << dest_address.reg_name << std::endl;
   SetReg(value, dest_address);
+  rc_builder.ResetReg();
 }
 
 void IRVisitor::Visit(const koopa_raw_load_t &load, koopa_raw_value_t value) {
   // 访问 load 指令
   // %0 = load @x
   // assert(GetReg(load.src).kind == RegKind::SPDIFFADD);
-  std::string dest_address = rc_builder.NewAddress();
+  RegObj dest_address = rc_builder.GetRegObj(RegKind::SPDIFFADD);
   std::string src_reg = GetReg(load.src).reg_name;
 
-  std::cout << "  # " << dest_address << " = load " << src_reg << std::endl;
+  std::cout << "  # " << dest_address.reg_name << " = load " << src_reg << std::endl;
   std::cout << "  lw " << "t0" << ", " << src_reg << std::endl;
-  std::cout << "  sw " << "t0" << ", " << dest_address << std::endl;
-  value_reg_map[value] = RegName(dest_address, RegKind::SPDIFFADD);
+  std::cout << "  sw " << "t0" << ", " << dest_address.reg_name << std::endl;
+  SetReg(value, dest_address);
 }
 
 void IRVisitor::Visit(const koopa_raw_store_t &store) {
   // 访问 store 指令
   // store %0, @x | store 10, @x
-  RegName src_reg = GetReg(store.value);
-  RegName dest_reg = GetReg(store.dest);
+  RegObj src_reg = GetReg(store.value);
+  RegObj dest_reg = GetReg(store.dest);
   std::string src_reg_name = src_reg.reg_name;
   std::string dest_address = dest_reg.reg_name;
   std::cout << "  # " << "store " << src_reg_name << ", " << dest_address << std::endl;
@@ -239,13 +241,7 @@ void IRVisitor::Visit(const koopa_raw_store_t &store) {
     std::cout << "  lw " << "t0" << ", " << src_reg.reg_name << std::endl;
     std::cout << "  sw " << "t0" << ", " << dest_address << std::endl;
   } else if (src_reg.kind == RegKind::NORMAL){
-    if (store.value->kind.tag == KOOPA_RVT_INTEGER) {
-      src_reg_name = "t0";
-      std::cout << "  li " << src_reg_name << ", " << store.value->kind.data.integer.value << std::endl;
-      std::cout << "  sw " << src_reg_name << ", " << dest_address << std::endl;
-    } else {
-      std::cout << "  sw " << src_reg_name << ", " << dest_address << std::endl;
-    }
+    std::cout << "  sw " << src_reg_name << ", " << dest_address << std::endl;
   } else {
     std::cerr << "error: RegKindError" << std::endl;
   }

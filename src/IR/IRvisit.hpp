@@ -7,35 +7,38 @@
 
 enum class RegKind {
   NORMAL,
-  SPDIFFADD,
-  CONSTANT
+  SPDIFFADD
 };
 
-struct RegName {
+struct RegObj {
   std::string reg_name;
   RegKind kind;
 
-  RegName(std::string reg_name, RegKind kind) : reg_name(reg_name), kind(kind) {}
-  RegName(std::string reg_name) : reg_name(reg_name), kind(RegKind::NORMAL) {}
-  RegName() : reg_name(""), kind(RegKind::NORMAL) {}
+  RegObj(std::string reg_name, RegKind kind) : reg_name(reg_name), kind(kind) {}
+  RegObj(std::string reg_name) : reg_name(reg_name), kind(RegKind::NORMAL) {}
+  RegObj() : reg_name(""), kind(RegKind::NORMAL) {}
 };
+
 class RCBuilder {
 private:
   int reg_counter = 0; // 临时寄存器计数器
   int stack_size = 0;
   int sp_diff = 0;
-
 public:
   // 生成下一个可用的寄存器名字（例如 "a0", "a1"）
   std::string NewReg() {
-    if (reg_counter < 8) {
-      return "a" + std::to_string(reg_counter++);
+    if (reg_counter < 7) {
+      return "t" + std::to_string(reg_counter++);
     } else if (reg_counter < 15) {
-      return "t" + std::to_string(reg_counter++ - 8);
+      return "a" + std::to_string(reg_counter++ - 7);
     } else {
       reg_counter = 0;
       return "s0";
     }
+  }
+  // 重置寄存器计数器，一般讲用不到t3
+  void ResetReg() {
+    reg_counter = 0;
   }
   // 仅查看当前计数器值
   std::string CurrentReg() const {
@@ -53,15 +56,12 @@ public:
     stack_size = 0;
     sp_diff = 0;
   }
-
   void SetStackSize(int size) {
     stack_size = size;
   }
-
   int GetStackSize() const {
     return stack_size;
   }
-
   std::string NewAddress() {
     if (sp_diff + 4 <= stack_size) {
       int sp_diff_tmp = sp_diff;
@@ -72,24 +72,23 @@ public:
       return "OverStackError";
     }
   }
-
-  RegName GetRegName(RegKind kind) {
+  // 根据kind返回RegName
+  RegObj GetRegObj(RegKind kind) {
     if (kind == RegKind::SPDIFFADD) {
-      return RegName(NewAddress(), kind);
+      return RegObj(NewAddress(), kind);
     } else if (kind == RegKind::NORMAL) {
-      return RegName(NewReg(), kind);
+      return RegObj(NewReg(), kind);
     } else {
       std::cerr << "Invalid RegKind" << std::endl;
-      return RegName("RegNameError");
+      return RegObj("RegNameError");
     }
   }
 };
 
-
 class IRVisitor {
 private:
   RCBuilder rc_builder;
-  std::unordered_map<koopa_raw_value_t, RegName> value_reg_map; // 存储指令对应的寄存器名字
+  std::unordered_map<koopa_raw_value_t, RegObj> value_reg_map; // 存储指令对应的寄存器名字
 
 public:
   void HandleRawProgram(const koopa_raw_program_t &program) {
@@ -110,9 +109,7 @@ private:
   // 遍历函数的指令以得到分配的空间
   int VisitFuncIns(const koopa_raw_slice_t &slice);
   int VisitFuncIns(const koopa_raw_value_t &value);
-
-
-  RegName GetReg(koopa_raw_value_t value) {
+  RegObj GetReg(koopa_raw_value_t value) {
     /** 
      * 这里要根据value对应的RegName的类型来决定如何获取寄存器
      * 如果是普通寄存器就正常返回
@@ -124,16 +121,17 @@ private:
     if (value->kind.tag == KOOPA_RVT_INTEGER) {
       int val = value->kind.data.integer.value;
       if (val == 0) {
-        return RegName("x0");
+        return RegObj("x0");
       }
       assert(val >= -2147483648 && val <= 2147483647);
       // std::cout << "GetRegCall" << std::endl;
-      return RegName(Visit(value->kind.data.integer));
+      return RegObj(Visit(value->kind.data.integer));
     }
-    return RegName("RegNameError");
+    return RegObj("RegNameError");
   }
-
-  void SetReg(koopa_raw_value_t value, RegName reg) {
+  // 目前仅用于建立value到栈空间的映射
+  void SetReg(koopa_raw_value_t value, RegObj reg) {
+    assert(reg.kind == RegKind::SPDIFFADD);
     value_reg_map[value] = reg;
   }
 };

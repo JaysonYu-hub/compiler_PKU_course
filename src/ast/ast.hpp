@@ -14,17 +14,30 @@ public:
   std::string NewReg() {
     return "%" + std::to_string(reg_counter++);
   }
-  // 仅查看当前计数器值
   std::string CurrentReg() const {
     return "%" + std::to_string(reg_counter);
   }
-  // 每当开始解析一个新函数时清零计数器
   void Reset() {
     reg_counter = 0;
   }
 
   std::string GetAddress(const std::string &var_name) const {
     return "@" + var_name;
+  }
+};
+
+class NumBuilder {
+private:
+  inline static int num_counter = 0; // 数字计数器
+public:
+  void static AddNum() {
+    num_counter++;
+  }
+  void static Reset() {
+    num_counter = 0;
+  }
+  std::string static currentNum() {
+    return std::to_string(num_counter);
   }
 };
 
@@ -46,8 +59,12 @@ class Scope {
 private:
   std::unordered_map<std::string, std::shared_ptr<Symbol>> symbols;
   std::shared_ptr<Scope> parentScope;
+  std::string ident;
 public:
-  Scope(std::shared_ptr<Scope> parentScope) : parentScope(parentScope) {}
+  Scope(std::shared_ptr<Scope> parentScope) : parentScope(parentScope) {
+    NumBuilder::AddNum();
+    ident = NumBuilder::currentNum();
+  }
 
   std::shared_ptr<Scope> getParentScope() const { return parentScope; }
 
@@ -107,6 +124,9 @@ public:
       std::clog << indent << "=== [Scope 根节点结束] ===" << std::endl;
     }
   }
+  std::string getScopeIdent() {
+    return ident;
+  }
 };
 
 // 上下文：用于传递RegBuilder和作用域符号表
@@ -127,6 +147,22 @@ public:
       std::cout << "Cannot exit global scope";
       return;
     }
+  }
+
+  void Reset() {
+    reg_builder.Reset();
+  }
+
+  std::string GetAddress(const std::string &var_name) {
+    return reg_builder.GetAddress(var_name) + "_" + scope->getScopeIdent();
+  }
+
+  std::string NewReg() {
+    return reg_builder.NewReg();
+  }
+
+  std::string CurrentReg() const {
+    return reg_builder.CurrentReg();
   }
 };
 
