@@ -211,7 +211,7 @@ public:
 };
 
 
-// Stmt ::= 'return' Exp ';' | LVal '=' Exp ';'
+// Stmt ::= 'return' Exp ';' | LVal '=' Exp ';' | EXP ';' | ';' | Block
 class ReturnStmtAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> exp;
@@ -227,6 +227,31 @@ public:
   std::unique_ptr<ValueAST> exp;
 
   AssignStmtAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+class ExpStmtAST : public BaseAST {
+public:
+  std::unique_ptr<ValueAST> exp;
+
+  ExpStmtAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+class EmptyStmtAST : public BaseAST {
+public:
+  EmptyStmtAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+class BlockStmtAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> block;
+
+  BlockStmtAST() = default; 
 
   std::string Dump(Context& context) const override;
 };

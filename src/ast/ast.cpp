@@ -58,7 +58,7 @@ std::string StmtBloAST::Dump(Context& context) const {
   return "";
 }
 
-// Stmt ::= 'return' Exp ';' | LVal '=' Exp ';'
+// Stmt ::= 'return' Exp ';' | LVal '=' Exp ';' | Exp ';' | ';' | Block
 std::string ReturnStmtAST::Dump(Context& context) const {
   if (exp) {
     std::string ret_val = exp->Dump(context);
@@ -73,6 +73,25 @@ std::string AssignStmtAST::Dump(Context& context) const {
     std::string rhs_reg = exp->Dump(context);
     std::string lhs_reg = lval->DumpOnlyAddress(context);
     std::cout << "  store " << rhs_reg << ", " << lhs_reg << "\n";
+  }
+  return "";
+}
+
+std::string ExpStmtAST::Dump(Context& context) const {
+  if (exp) {
+    std::string exp_reg = exp->Dump(context);
+    std::cout << "  drop " << exp_reg << "\n";
+  }
+  return "";
+}
+
+std::string EmptyStmtAST::Dump(Context& context) const {
+  return "";
+}
+
+std::string BlockStmtAST::Dump(Context& context) const {
+  if (block) {
+    block->Dump(context);
   }
   return "";
 }
@@ -308,13 +327,14 @@ int ThreeEqExpAST::getValue(Context& context) const {
     return 0;
   }
 }
+
 // LAndExp ::= EqExp | LAndExp '&&' EqExp
 std::string EqLAndExpAST::Dump(Context& context) const {
   if (eq_exp) {
     return eq_exp->Dump(context);
   }
   return "";
-}
+} 
 int EqLAndExpAST::getValue(Context& context) const {
   return eq_exp->getValue(context);
 }

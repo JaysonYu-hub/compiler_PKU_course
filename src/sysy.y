@@ -120,7 +120,21 @@ Stmt
     assign_stmt->lval = unique_ptr<LValAST>(static_cast<LValAST*>($1));
     assign_stmt->exp = unique_ptr<ValueAST>($3);
     $$ = assign_stmt;
-   }
+  }
+  | Exp ';' { 
+    auto exp_stmt = new ExpStmtAST(); 
+    exp_stmt->exp = unique_ptr<ValueAST>($1); 
+    $$ = exp_stmt;
+  }
+  | ';' {
+    auto empty_stmt = new EmptyStmtAST();
+    $$ = empty_stmt; 
+  }
+  | Block {
+    auto block_stmt = new BlockStmtAST(); 
+    block_stmt->block = unique_ptr<BaseAST>($1); 
+    $$ = block_stmt; 
+  }
   ;
 
 Number
