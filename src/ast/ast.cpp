@@ -430,18 +430,34 @@ int EqLAndExpAST::getValue(Context& context) const {
 }
 
 std::string ThreeLAndExpAST::Dump(Context& context) const {
-  std::string lhs_reg = land_exp->Dump(context);
-  std::string rhs_reg = eq_exp->Dump(context);
-  std::string dest_reg = context.NewReg();
-  // 先对两边进行neq处理，得到0/1值，再进行and运算
+  // 使用跳转实现短路求值
   if (op->op == "&&") {
-    std::string lhs_reg_new = context.NewReg();
-    std::string rhs_reg_new = context.NewReg();
-    std::cout << "  " << lhs_reg_new << " = ne " << lhs_reg << ", 0\n";
-    std::cout << "  " << rhs_reg_new << " = ne " << rhs_reg << ", 0\n";
-    std::cout << "  " << dest_reg << " = and " << lhs_reg_new << ", " << rhs_reg_new << "\n";
+    std::string lhs_reg = land_exp->Dump(context);
+    std::string temp_address = context.NewReg();
+
+    std::cout << "  // " << temp_address << " : " << lhs_reg << " && " << "rhs_reg\n";
+    std::string then_label = LabelBuilder::GetLabel("and_calc_rhs");
+    std::string end_label = LabelBuilder::GetLabel("and_end");
+    std::string temp_reg_1 = context.NewReg();
+    std::cout << "  " << temp_address << " = alloc i32\n";
+    std::cout << "  " << "store 0, " << temp_address << "\n";
+    std::cout << "  br " << lhs_reg << " , " << then_label << " , " << end_label << "\n";
+    // then块
+    std::cout << then_label << ":\n";
+    context.cur_block_has_terminator = false;
+    std::string rhs_reg = eq_exp->Dump(context);
+    std::string temp_reg = context.NewReg();
+    std::cout << "  " <<  temp_reg << " = ne " << rhs_reg << ", 0\n";
+    std::cout << "  " << "store " << temp_reg << ", " << temp_address << "\n";
+    std::cout << "  jump " << end_label << "\n";
+    std::cout << end_label << ":\n";
+    context.cur_block_has_terminator = false;
+
+    std::string return_reg = context.NewReg();
+    std::cout << "  " << return_reg << " = load " << temp_address << "\n";
+    return return_reg;
   }
-  return dest_reg;
+  return "";
 }
 int ThreeLAndExpAST::getValue(Context& context) const {
   if (op->op == "&&") {
@@ -462,18 +478,33 @@ int LAndLOrExpAST::getValue(Context& context) const {
   return land_exp->getValue(context);
 }
 std::string ThreeLOrExpAST::Dump(Context& context) const {
-  std::string lhs_reg = lor_exp->Dump(context);
-  std::string rhs_reg = land_exp->Dump(context);
-  std::string dest_reg = context.NewReg();
-  // 先对两边进行neq处理，得到0/1值，再进行or运算
+  // 使用跳转实现短路求值
   if (op->op == "||") {
-    std::string lhs_reg_new = context.NewReg();
-    std::string rhs_reg_new = context.NewReg();
-    std::cout << "  " << lhs_reg_new << " = ne " << lhs_reg << ", 0\n";
-    std::cout << "  " << rhs_reg_new << " = ne " << rhs_reg << ", 0\n";
-    std::cout << "  " << dest_reg << " = or " << lhs_reg_new << ", " << rhs_reg_new << "\n";
+    std::string lhs_reg = lor_exp->Dump(context);
+    std::string temp_address = context.NewReg();
+
+    std::cout << "  // " << temp_address << " : " << lhs_reg << " || " << "rhs_reg" << "\n";
+    std::string then_label = LabelBuilder::GetLabel("or_calc_rhs", temp_address);
+    std::string end_label = LabelBuilder::GetLabel("or_end", temp_address);
+    std::cout << "  " << temp_address << " = alloc i32\n";
+    std::cout << "  " << "store 1, " << temp_address << "\n";
+    std::cout << "  " << "br " << lhs_reg <<", " << end_label << ", " << then_label << "\n";
+    // then块
+    std::cout << then_label << ":\n";
+    context.cur_block_has_terminator = false;
+    std::string rhs_reg = land_exp->Dump(context);
+    std::string temp_reg = context.NewReg();
+    std::cout << "  " << temp_reg << " = ne 0, " << rhs_reg << "\n";
+    std::cout << "  " << "store " << temp_reg << ", " << temp_address << "\n";
+    std::cout << "  jump " << end_label << "\n";
+    std::cout << end_label << ":\n";
+    context.cur_block_has_terminator = false;
+
+    std::string return_reg = context.NewReg();
+    std::cout << "  " << return_reg << " = load " << temp_address << "\n";
+    return return_reg;
   }
-  return dest_reg;
+  return "";
 }
 int ThreeLOrExpAST::getValue(Context& context) const {
   if (op->op == "||") {

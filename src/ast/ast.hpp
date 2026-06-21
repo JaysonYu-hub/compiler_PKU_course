@@ -39,12 +39,22 @@ public:
   std::string static currentNum() {
     return std::to_string(num_counter);
   }
+
+  std::string static GetNum() {
+    NumBuilder::AddNum();
+    return std::to_string(num_counter);
+  }
 };
 
 class LabelBuilder {
 public:
+  // 返回标签，"%" + type + "_" + cond.erase(0, 1) + "_" + NumBuilder::GetNum()
   std::string static GetLabel(std::string type, std::string cond) {
-    return "%" + type + "_" + cond.erase(0, 1) ;
+    return "%" + type + "_" + cond.erase(0, 1) + "_" + NumBuilder::GetNum();
+  }
+  // 返回标签，"%" + type + "_" + NumBuilder::GetNum()
+  std::string static GetLabel(std::string type) {
+    return "%" + type + "_" + NumBuilder::GetNum();
   }
 };
 
@@ -168,6 +178,7 @@ public:
   std::string NewReg() {
     return reg_builder.NewReg();
   }
+
 
   std::string CurrentReg() const {
     return reg_builder.CurrentReg();
