@@ -41,6 +41,13 @@ public:
   }
 };
 
+class LabelBuilder {
+public:
+  std::string static GetLabel(std::string type, std::string cond) {
+    return "%" + type + "_" + cond.erase(0, 1) ;
+  }
+};
+
 //符号表
 enum class SymbolKind { CONSTANT , VARIABLE };
 
@@ -134,6 +141,7 @@ class Context {
 public:
   RegBuilder reg_builder;
   std::shared_ptr<Scope> scope;
+  bool cur_block_has_terminator = false;
 
   Context(const RegBuilder &reg_builder) : reg_builder(reg_builder), scope(std::make_shared<Scope>(nullptr)) {}
 
@@ -163,6 +171,10 @@ public:
 
   std::string CurrentReg() const {
     return reg_builder.CurrentReg();
+  }
+
+  void ResetBlockTerminator() {
+    cur_block_has_terminator = false;
   }
 };
 
@@ -213,14 +225,7 @@ public:
 };
 
 // BlockItem ::= Decl | Stmt
-// 中间抽象层：BlockItem 基类
-class BlockItemAST : public BaseAST {
-public:
-  virtual ~BlockItemAST() = default;
-  std::string Dump(Context& context) const override = 0;
-};
-
-class DeclBloAST : public BlockItemAST {
+class DeclBloAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> decl;
   DeclBloAST() = default; 
@@ -228,7 +233,7 @@ public:
   std::string Dump(Context& context) const override;
 };
 
-class StmtBloAST : public BlockItemAST {
+class StmtBloAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> stmt;
   StmtBloAST() = default; 
@@ -246,8 +251,47 @@ public:
   std::string Dump(Context& context) const override;
 };
 
+// Stmt ::= UnmatchedStmt | MatchedStmt
+class UnmatchedStmtStmtAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> unmatched_stmt;
+  UnmatchedStmtStmtAST() = default; 
 
-// Stmt ::= 'return' Exp ';' | LVal '=' Exp ';' | EXP ';' | ';' | Block
+  std::string Dump(Context& context) const override;
+};
+
+class MatchedStmtStmtAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> matched_stmt;
+  MatchedStmtStmtAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+// UnmatchedStmt ::= IF '(' Exp ')' Stmt | IF '(' Exp ')' MatchedStmt ELSE UnMatchedStmt
+class IfUnmatchedStmtAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> if_exp;
+  std::unique_ptr<BaseAST> if_stmt;
+  std::unique_ptr<BaseAST> else_stmt;
+
+  IfUnmatchedStmtAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+class IfElseUnmatchedStmtAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> if_exp;
+  std::unique_ptr<BaseAST> if_stmt;
+  std::unique_ptr<BaseAST> else_stmt;
+
+  IfElseUnmatchedStmtAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+// MatchedStmt ::= 'return' Exp ';' | LVal '=' Exp ';' | EXP ';' | ';' | Block |IF '(' Exp ')' MatchedStmt else MatchedStmt
 class ReturnStmtAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> exp;
@@ -288,6 +332,17 @@ public:
   std::unique_ptr<BaseAST> block;
 
   BlockStmtAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+class IfMatchedStmtAST : public BaseAST {
+public:
+  std::unique_ptr<ValueAST> if_exp;
+  std::unique_ptr<BaseAST> if_stmt;
+  std::unique_ptr<BaseAST> else_stmt;
+
+  IfMatchedStmtAST() = default; 
 
   std::string Dump(Context& context) const override;
 };

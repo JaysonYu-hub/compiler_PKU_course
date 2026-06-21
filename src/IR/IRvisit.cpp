@@ -65,7 +65,10 @@ void IRVisitor::Visit(const koopa_raw_function_t &func) {
 // 访问基本块
 void IRVisitor::Visit(const koopa_raw_basic_block_t &bb) {
   // 执行一些其他的必要操作
-  // ...
+  // 输出基本块名称
+  std::string bb_name = bb->name ? bb->name : "";
+  bb_name = bb_name.substr(1) + ":";
+  std::cout << bb_name << std::endl;
   // 访问所有指令
   Visit(bb->insts);
 }
@@ -101,6 +104,12 @@ void IRVisitor::Visit(const koopa_raw_value_t &value) {
       // 访问 alloc 指令
       reg_name = rc_builder.GetRegObj(RegKind::SPDIFFADD);
       SetReg(value, reg_name);
+      break;
+    case KOOPA_RVT_BRANCH:
+      Visit(kind.data.branch);
+      break;
+    case KOOPA_RVT_JUMP:
+      Visit(kind.data.jump);
       break;
     default:
       // 其他类型暂时遇不到
@@ -247,6 +256,29 @@ void IRVisitor::Visit(const koopa_raw_store_t &store) {
   }
 }
 
+void IRVisitor::Visit(const koopa_raw_branch_t &branch) {
+  // 访问 branch 指令
+  // br %0, %1, %2
+  RegObj cond_reg = GetReg(branch.cond, RegKind::NORMAL);
+  std::string cond_reg_name = cond_reg.reg_name;
+  std::string true_bb_name = branch.true_bb->name;
+  true_bb_name = true_bb_name.substr(1);
+  std::string false_bb_name = branch.false_bb->name;
+  false_bb_name = false_bb_name.substr(1);
+  std::cout << "  # " << "br " << cond_reg_name << ", " << true_bb_name << ", " << false_bb_name << std::endl;
+  std::cout << "  bnez " << cond_reg_name << ", " << true_bb_name << std::endl;
+  std::cout << "  j " << false_bb_name << std::endl;
+}
+void IRVisitor::Visit(const koopa_raw_jump_t &jump) {
+  // 访问 jump 指令
+  // jmp %0
+  std::cout << "  # " << "jump " << jump.target->name << std::endl;
+  std::string jump_target = jump.target->name;
+  jump_target = jump_target.substr(1);
+  std::cout << "  j " << jump_target << std::endl;
+  rc_builder.ResetReg();
+}
+
 int IRVisitor::VisitFuncIns(const koopa_raw_slice_t &slice) {
   int inst_num = 0;
   for (size_t i = 0; i < slice.len; ++i) {
@@ -278,3 +310,4 @@ int IRVisitor::VisitFuncIns(const koopa_raw_value_t &value) {
       return 1;
   }
 }
+

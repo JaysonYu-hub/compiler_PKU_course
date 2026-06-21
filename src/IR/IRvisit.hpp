@@ -72,7 +72,7 @@ public:
       return "OverStackError";
     }
   }
-  // 根据kind返回RegName
+  // 根据kind返回RegName,会申请NewReg或NewAddress
   RegObj GetRegObj(RegKind kind) {
     if (kind == RegKind::SPDIFFADD) {
       return RegObj(NewAddress(), kind);
@@ -106,6 +106,8 @@ private:
   void Visit(const koopa_raw_binary_t &binary, koopa_raw_value_t value);
   void Visit(const koopa_raw_store_t &store);
   void Visit(const koopa_raw_load_t &load, koopa_raw_value_t value);
+  void Visit(const koopa_raw_branch_t &branch);
+  void Visit(const koopa_raw_jump_t &jump);
   // 遍历函数的指令以得到分配的空间
   int VisitFuncIns(const koopa_raw_slice_t &slice);
   int VisitFuncIns(const koopa_raw_value_t &value);
@@ -133,5 +135,23 @@ private:
   void SetReg(koopa_raw_value_t value, RegObj reg) {
     assert(reg.kind == RegKind::SPDIFFADD);
     value_reg_map[value] = reg;
+  }
+
+  // 返回指定kind的寄存器，如果是地址类型会先加载
+  RegObj GetReg(koopa_raw_value_t value, RegKind kind) {
+    if (kind == RegKind::NORMAL) {
+      if (value_reg_map.find(value) != value_reg_map.end()) {
+        RegObj reg = value_reg_map[value];
+        RegObj load_reg = rc_builder.GetRegObj(RegKind::NORMAL);
+        std::cout << "  lw " << load_reg.reg_name << ", " << reg.reg_name << "\n";
+        return load_reg;
+      } else {
+        return GetReg(value);
+      }
+    } else if (kind == RegKind::SPDIFFADD) {
+      RegObj reg = GetReg(value, RegKind::NORMAL);
+      assert(reg.kind == RegKind::SPDIFFADD);
+    }
+    return RegObj("RegNameError");
   }
 };

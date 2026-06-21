@@ -38,9 +38,9 @@ using namespace std;
 
 %token ADD SUB NOT MUL MOD DIV
 %token <str_val> ASSIGN
-%token LT LE GT GE EQ NE L_AND L_OR
+%token LT LE GT GE EQ NE L_AND L_OR IF ELSE
 
-%type <ast_val> FuncDef FuncType Block Stmt 
+%type <ast_val> FuncDef FuncType Block Stmt UnmatchedStmt MatchedStmt
 %type <value_ast> Exp UnaryExp PrimaryExp AddExp ConstExp
 %type <value_ast> RelExp EqExp LAndExp LOrExp ConstInitVal MulExp InitVal LVal
 %type <op_ast> ComOp EquOp LOrOp LAndOp UnaryOp AddOp MulOp
@@ -110,6 +110,20 @@ BlockItem
   ;
 
 Stmt
+  : MatchedStmt { 
+    auto stmt = new MatchedStmtStmtAST();
+    stmt->matched_stmt = unique_ptr<BaseAST>($1);
+    $$ = stmt;
+  }
+  | UnmatchedStmt { 
+    auto stmt = new UnmatchedStmtStmtAST();
+    stmt->unmatched_stmt = unique_ptr<BaseAST>($1);
+    $$ = stmt;
+  }
+  ;
+
+
+MatchedStmt
   : RETURN Exp ';' {
     auto stmt = new ReturnStmtAST();
     stmt->exp = unique_ptr<ValueAST>($2);
@@ -134,6 +148,29 @@ Stmt
     auto block_stmt = new BlockStmtAST(); 
     block_stmt->block = unique_ptr<BaseAST>($1); 
     $$ = block_stmt; 
+  }
+  | IF '(' Exp ')' MatchedStmt ELSE MatchedStmt { 
+     auto if_stmt = new IfMatchedStmtAST();
+     if_stmt->if_exp = unique_ptr<ValueAST>($3);
+     if_stmt->if_stmt = unique_ptr<BaseAST>($5);
+     if_stmt->else_stmt = unique_ptr<BaseAST>($7);
+     $$ = if_stmt;
+  }
+  ;
+
+UnmatchedStmt
+  : IF '(' Exp ')' Stmt { 
+    auto if_stmt = new IfUnmatchedStmtAST();
+    if_stmt->if_exp = unique_ptr<ValueAST>($3);
+    if_stmt->if_stmt = unique_ptr<BaseAST>($5);
+    $$ = if_stmt;
+  }
+  | IF '(' Exp ')' MatchedStmt ELSE UnmatchedStmt { 
+     auto if_else_stmt = new IfElseUnmatchedStmtAST();
+     if_else_stmt->if_exp = unique_ptr<ValueAST>($3);
+     if_else_stmt->if_stmt = unique_ptr<BaseAST>($5);
+     if_else_stmt->else_stmt = unique_ptr<BaseAST>($7);
+     $$ = if_else_stmt;
   }
   ;
 
