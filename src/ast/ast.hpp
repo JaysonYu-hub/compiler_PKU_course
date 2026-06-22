@@ -281,7 +281,7 @@ public:
   std::string Dump(Context& context) const override;
 };
 
-// UnmatchedStmt ::= IF '(' Exp ')' Stmt | IF '(' Exp ')' MatchedStmt ELSE UnMatchedStmt
+// UnmatchedStmt ::= IF '(' Exp ')' Stmt | IF '(' Exp ')' MatchedStmt ELSE UnMatchedStmt | WHILE '(' Exp ')' UnmatchedStmt
 class IfUnmatchedStmtAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> if_exp;
@@ -304,7 +304,14 @@ public:
   std::string Dump(Context& context) const override;
 };
 
-// MatchedStmt ::= 'return' Exp ';' | LVal '=' Exp ';' | EXP ';' | ';' | Block |IF '(' Exp ')' MatchedStmt else MatchedStmt
+/**  MatchedStmt ::= 'return' Exp ';' 
+ * | LVal '=' Exp ';' 
+ * | EXP ';' 
+ * | ';' 
+ * | Block 
+ * | IF '(' Exp ')' MatchedStmt else MatchedStmt
+ * | WHILE '(' Exp ')' Stmt
+ *  */
 class ReturnStmtAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> exp;
@@ -356,6 +363,16 @@ public:
   std::unique_ptr<BaseAST> else_stmt;
 
   IfMatchedStmtAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+class WhileStmtAST : public BaseAST {
+public:
+  std::unique_ptr<ValueAST> while_exp;
+  std::unique_ptr<BaseAST> while_stmt;
+
+  WhileStmtAST() = default; 
 
   std::string Dump(Context& context) const override;
 };

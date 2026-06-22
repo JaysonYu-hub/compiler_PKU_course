@@ -32,7 +32,7 @@ using namespace std;
 }
 
 %token INT RETURN 
-%token CONST
+%token CONST WHILE
 %token <str_val> IDENT
 %token <int_val> INT_CONST
 
@@ -156,6 +156,12 @@ MatchedStmt
      if_stmt->else_stmt = unique_ptr<BaseAST>($7);
      $$ = if_stmt;
   }
+  | WHILE '(' Exp ')' MatchedStmt { 
+    auto while_stmt = new WhileStmtAST();
+    while_stmt->while_exp = unique_ptr<ValueAST>($3);
+    while_stmt->while_stmt = unique_ptr<BaseAST>($5);
+    $$ = while_stmt;
+  }
   ;
 
 UnmatchedStmt
@@ -171,6 +177,12 @@ UnmatchedStmt
      if_else_stmt->if_stmt = unique_ptr<BaseAST>($5);
      if_else_stmt->else_stmt = unique_ptr<BaseAST>($7);
      $$ = if_else_stmt;
+  }
+  | WHILE '(' Exp ')' UnmatchedStmt { 
+    auto while_stmt = new WhileStmtAST();
+    while_stmt->while_exp = unique_ptr<ValueAST>($3);
+    while_stmt->while_stmt = unique_ptr<BaseAST>($5);
+    $$ = while_stmt;
   }
   ;
 

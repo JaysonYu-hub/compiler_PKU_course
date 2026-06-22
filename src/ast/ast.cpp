@@ -57,134 +57,159 @@ std::string DeclBloAST::Dump(Context& context) const {
 std::string StmtBloAST::Dump(Context& context) const {
   return stmt->Dump(context);
   }
-  // Stmt ::= MatchedStmt | UnmatchedStmt
-  std::string MatchedStmtStmtAST::Dump(Context& context) const {
-    std::string return_ident = matched_stmt->Dump(context);
-    return return_ident;
-  }
+// Stmt ::= MatchedStmt | UnmatchedStmt
+std::string MatchedStmtStmtAST::Dump(Context& context) const {
+  std::string return_ident = matched_stmt->Dump(context);
+  return return_ident;
+}
 
-  std::string UnmatchedStmtStmtAST::Dump(Context& context) const {
-    if (unmatched_stmt) {
-      unmatched_stmt->Dump(context);
-    }
-    return "";
+std::string UnmatchedStmtStmtAST::Dump(Context& context) const {
+  if (unmatched_stmt) {
+    unmatched_stmt->Dump(context);
   }
-  // UnmatchedStmt ::= IF '(' Exp ')' MatchedStmt | IF '(' Exp ')' MatchedStmt ELSE UnmatchedStmt
-  std::string IfUnmatchedStmtAST::Dump(Context& context) const {
-    std::string cond_reg = if_exp->Dump(context);
-    std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
-    std::string else_label = LabelBuilder::GetLabel("else", cond_reg);
-    std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
-    std::cout << "  br " << cond_reg << ", " << if_label << ", " << end_label << "\n";
-    std::cout << if_label << ":\n";
-    context.cur_block_has_terminator = false;
-    if_stmt->Dump(context);
-    if (!context.cur_block_has_terminator) {
-      std::cout << "  jump " << end_label << "\n";
-    }
+  return "";
+}
+// UnmatchedStmt ::= IF '(' Exp ')' MatchedStmt | IF '(' Exp ')' MatchedStmt ELSE UnmatchedStmt
+std::string IfUnmatchedStmtAST::Dump(Context& context) const {
+  std::string cond_reg = if_exp->Dump(context);
+  std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
+  std::string else_label = LabelBuilder::GetLabel("else", cond_reg);
+  std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
+  std::cout << "  br " << cond_reg << ", " << if_label << ", " << end_label << "\n";
+  std::cout << if_label << ":\n";
+  context.cur_block_has_terminator = false;
+  if_stmt->Dump(context);
+  if (!context.cur_block_has_terminator) {
+    std::cout << "  jump " << end_label << "\n";
+  }
+  std::cout << end_label << ":\n";
+  context.cur_block_has_terminator = false;
+  return "";
+}
+
+std::string IfElseUnmatchedStmtAST::Dump(Context& context) const {
+  std::string cond_reg = if_exp->Dump(context);
+  std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
+  std::string else_label = LabelBuilder::GetLabel("else", cond_reg);
+  std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
+  std::cout << "  br " << cond_reg << ", " << if_label << ", " << else_label << "\n";
+  std::cout << if_label << ":\n"; 
+  // 语句块有返回时，不生成跳转指令
+  context.cur_block_has_terminator = false;
+  if_stmt->Dump(context);
+  bool then_has_terminator = context.cur_block_has_terminator;
+  if (!then_has_terminator) {
+    std::cout << "  jump " << end_label << "\n";
+  }
+  std::cout << else_label << ":\n";
+  context.cur_block_has_terminator = false;
+  else_stmt->Dump(context);
+  bool else_has_terminator = context.cur_block_has_terminator;
+  if (!else_has_terminator) {
+    std::cout << "  jump " << end_label << "\n";
+  }
+  if (!then_has_terminator || !else_has_terminator) {
     std::cout << end_label << ":\n";
-    context.cur_block_has_terminator = false;
-    return "";
-  }
-
-  std::string IfElseUnmatchedStmtAST::Dump(Context& context) const {
-    std::string cond_reg = if_exp->Dump(context);
-    std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
-    std::string else_label = LabelBuilder::GetLabel("else", cond_reg);
-    std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
-    std::cout << "  br " << cond_reg << ", " << if_label << ", " << else_label << "\n";
-    std::cout << if_label << ":\n"; 
-    // 语句块有返回时，不生成跳转指令
-    context.cur_block_has_terminator = false;
-    if_stmt->Dump(context);
-    bool then_has_terminator = context.cur_block_has_terminator;
-    if (!then_has_terminator) {
-      std::cout << "  jump " << end_label << "\n";
-    }
-    std::cout << else_label << ":\n";
-    context.cur_block_has_terminator = false;
-    else_stmt->Dump(context);
-    bool else_has_terminator = context.cur_block_has_terminator;
-    if (!else_has_terminator) {
-      std::cout << "  jump " << end_label << "\n";
-    }
-    if (!then_has_terminator || !else_has_terminator) {
-      std::cout << end_label << ":\n";
-    } else {
-      context.cur_block_has_terminator = true;
-    }
-    return "";
-  }
-
-  // MatchedStmt ::= 'return' Exp ';' | LVal '=' Exp ';' | Exp ';' | ';' | Block | IF '(' Exp ')' MatchedStmt ELSE MatchedStmt
-  std::string ReturnStmtAST::Dump(Context& context) const {
-    // 死代码拦截
-    if (context.cur_block_has_terminator) return "";
-    std::string ret_val = exp->Dump(context);
-    std::cout << "  ret " << ret_val << "\n";
+  } else {
     context.cur_block_has_terminator = true;
-    return "";
   }
+  return "";
+}
 
-  std::string AssignStmtAST::Dump(Context& context) const {
-    if (context.cur_block_has_terminator) return "";
-    if (lval) {
-      // 这里先右后左
-      std::string rhs_reg = exp->Dump(context);
-      std::string lhs_reg = lval->DumpOnlyAddress(context);
-      std::cout << "  store " << rhs_reg << ", " << lhs_reg << "\n";
-    }
-    return "";
-  }
+/**  MatchedStmt ::= 'return' Exp ';' 
+ * | LVal '=' Exp ';' 
+ * | Exp ';' 
+ * | ';' 
+ * | Block 
+ * | IF '(' Exp ')' MatchedStmt ELSE MatchedStmt
+ * | WHILE '(' Exp ')' Stmt
+ *  */
+std::string ReturnStmtAST::Dump(Context& context) const {
+  // 死代码拦截
+  if (context.cur_block_has_terminator) return "";
+  std::string ret_val = exp->Dump(context);
+  std::cout << "  ret " << ret_val << "\n";
+  context.cur_block_has_terminator = true;
+  return "";
+}
 
-  std::string ExpStmtAST::Dump(Context& context) const {
-    if (context.cur_block_has_terminator) return "";
-    if (exp) {
-      std::string exp_reg = exp->Dump(context);
-    }
-    return "";
+std::string AssignStmtAST::Dump(Context& context) const {
+  if (context.cur_block_has_terminator) return "";
+  if (lval) {
+    // 这里先右后左
+    std::string rhs_reg = exp->Dump(context);
+    std::string lhs_reg = lval->DumpOnlyAddress(context);
+    std::cout << "  store " << rhs_reg << ", " << lhs_reg << "\n";
   }
+  return "";
+}
 
-  std::string EmptyStmtAST::Dump(Context& context) const {
-    return "";
+std::string ExpStmtAST::Dump(Context& context) const {
+  if (context.cur_block_has_terminator) return "";
+  if (exp) {
+    std::string exp_reg = exp->Dump(context);
   }
+  return "";
+}
 
-  std::string BlockStmtAST::Dump(Context& context) const {
-    if (block) {
-      block->Dump(context);
-    }
-    return "";
-  }
+std::string EmptyStmtAST::Dump(Context& context) const {
+  return "";
+}
 
-  std::string IfMatchedStmtAST::Dump(Context& context) const {
-    if (context.cur_block_has_terminator) return "";
-    std::string cond_reg = if_exp->Dump(context);
-    std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
-    std::string else_label = LabelBuilder::GetLabel("else", cond_reg);
-    std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
-    std::cout << "  br " << cond_reg << ", " << if_label << ", " << else_label << "\n";
-    std::cout << if_label << ":\n";
-    // 语句块有返回时，不生成跳转指令
-    context.cur_block_has_terminator = false;
-    if_stmt->Dump(context);
-    bool then_has_terminator = context.cur_block_has_terminator;
-    if (!then_has_terminator) { 
-      std::cout << "  jump " << end_label << "\n";
-    }
-    std::cout << else_label << ":\n";
-    context.cur_block_has_terminator = false;
-    else_stmt->Dump(context);
-    bool else_has_terminator = context.cur_block_has_terminator;
-    if (!else_has_terminator) {    
-      std::cout << "  jump " << end_label << "\n";
-    }
-    if (!then_has_terminator || !else_has_terminator) {
-      std::cout << end_label << ":\n";
-    } else {
-      context.cur_block_has_terminator = true;
-    }
-    return "";
+std::string BlockStmtAST::Dump(Context& context) const {
+  if (block) {
+    block->Dump(context);
   }
+  return "";
+}
+
+std::string IfMatchedStmtAST::Dump(Context& context) const {
+  if (context.cur_block_has_terminator) return "";
+  std::string cond_reg = if_exp->Dump(context);
+  std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
+  std::string else_label = LabelBuilder::GetLabel("else", cond_reg);
+  std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
+  std::cout << "  br " << cond_reg << ", " << if_label << ", " << else_label << "\n";
+  std::cout << if_label << ":\n";
+  // 语句块有返回时，不生成跳转指令
+  context.cur_block_has_terminator = false;
+  if_stmt->Dump(context);
+  bool then_has_terminator = context.cur_block_has_terminator;
+  if (!then_has_terminator) { 
+    std::cout << "  jump " << end_label << "\n";
+  }
+  std::cout << else_label << ":\n";
+  context.cur_block_has_terminator = false;
+  else_stmt->Dump(context);
+  bool else_has_terminator = context.cur_block_has_terminator;
+  if (!else_has_terminator) {    
+    std::cout << "  jump " << end_label << "\n";
+  }
+  if (!then_has_terminator || !else_has_terminator) {
+    std::cout << end_label << ":\n";
+  } else {
+    context.cur_block_has_terminator = true;
+  }
+  return "";
+}
+
+std::string WhileStmtAST::Dump(Context& context) const {
+  if (context.cur_block_has_terminator) return "";
+  std::cout << "  // while \n";
+  std::string loop_label = LabelBuilder::GetLabel("while_entry");
+  std::string continue_loop_label = LabelBuilder::GetLabel("while_body");
+  std::string end_label = LabelBuilder::GetLabel("end");
+  
+  std::cout << "  jump " << loop_label << "\n";
+  std::cout << loop_label << ":\n";
+  std::string cond_reg = while_exp->Dump(context);
+  std::cout << "  br " << cond_reg << ", " << continue_loop_label << ", " << end_label << "\n";
+  std::cout << continue_loop_label << ":\n";
+  while_stmt->Dump(context);
+  std::cout << "  jump " << loop_label << "\n";
+  std::cout << end_label << ":\n";
+  return "";
+}
 
 // Exp ::= LorExp
 std::string ExpAST::Dump(Context& context) const {
