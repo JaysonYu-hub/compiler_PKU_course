@@ -77,13 +77,13 @@ std::string StmtBloAST::Dump(Context& context) const {
     std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
     std::cout << "  br " << cond_reg << ", " << if_label << ", " << end_label << "\n";
     std::cout << if_label << ":\n";
-    context.ResetBlockTerminator();
+    context.cur_block_has_terminator = false;
     if_stmt->Dump(context);
     if (!context.cur_block_has_terminator) {
       std::cout << "  jump " << end_label << "\n";
     }
     std::cout << end_label << ":\n";
-    context.ResetBlockTerminator();
+    context.cur_block_has_terminator = false;
     return "";
   }
 
@@ -95,14 +95,14 @@ std::string StmtBloAST::Dump(Context& context) const {
     std::cout << "  br " << cond_reg << ", " << if_label << ", " << else_label << "\n";
     std::cout << if_label << ":\n"; 
     // 语句块有返回时，不生成跳转指令
-    context.ResetBlockTerminator();
+    context.cur_block_has_terminator = false;
     if_stmt->Dump(context);
     bool then_has_terminator = context.cur_block_has_terminator;
     if (!then_has_terminator) {
       std::cout << "  jump " << end_label << "\n";
     }
     std::cout << else_label << ":\n";
-    context.ResetBlockTerminator();
+    context.cur_block_has_terminator = false;
     else_stmt->Dump(context);
     bool else_has_terminator = context.cur_block_has_terminator;
     if (!else_has_terminator) {
@@ -165,14 +165,14 @@ std::string StmtBloAST::Dump(Context& context) const {
     std::cout << "  br " << cond_reg << ", " << if_label << ", " << else_label << "\n";
     std::cout << if_label << ":\n";
     // 语句块有返回时，不生成跳转指令
-    context.ResetBlockTerminator();
+    context.cur_block_has_terminator = false;
     if_stmt->Dump(context);
     bool then_has_terminator = context.cur_block_has_terminator;
     if (!then_has_terminator) { 
       std::cout << "  jump " << end_label << "\n";
     }
     std::cout << else_label << ":\n";
-    context.ResetBlockTerminator();
+    context.cur_block_has_terminator = false;
     else_stmt->Dump(context);
     bool else_has_terminator = context.cur_block_has_terminator;
     if (!else_has_terminator) {    

@@ -6,33 +6,28 @@
 #include <iostream>
 #include <variant>
 
-class RegBuilder {
+// 临时寄存器生成器, 在函数开始时reset
+class Counter {
 private:
-  int reg_counter = 0; // 临时寄存器计数器
+  int counter = 0;
 public:
-  // 生成下一个可用的寄存器名字（例如 "%0", "%1"）
-  std::string NewReg() {
-    return "%" + std::to_string(reg_counter++);
+  std::string NewNum() {
+    return std::to_string(counter++);
   }
-  std::string CurrentReg() const {
-    return "%" + std::to_string(reg_counter);
+  std::string CurrentNum() const {
+    return std::to_string(counter);
   }
   void Reset() {
-    reg_counter = 0;
-  }
-
-  std::string GetAddress(const std::string &var_name) const {
-    return "@" + var_name;
+    counter = 0;
   }
 };
 
+/**  全局计数器
+ **/
 class NumBuilder {
 private:
-  inline static int num_counter = 0; // 数字计数器
+  inline static int num_counter = 0;
 public:
-  void static AddNum() {
-    num_counter++;
-  }
   void static Reset() {
     num_counter = 0;
   }
@@ -41,11 +36,17 @@ public:
   }
 
   std::string static GetNum() {
-    NumBuilder::AddNum();
+    num_counter++;
     return std::to_string(num_counter);
   }
 };
 
+/**
+ * 标签生成工具
+ * 支持
+ * 1. type + cond + globalnum
+ * 2. type + globalnum
+*/
 class LabelBuilder {
 public:
   // 返回标签，"%" + type + "_" + cond.erase(0, 1) + "_" + NumBuilder::GetNum()
@@ -58,30 +59,40 @@ public:
   }
 };
 
-//符号表
+
 enum class SymbolKind { CONSTANT , VARIABLE };
 
+/**
+ * 符号表
+ * 符号表是一个字典，键为变量名，值为Symbol
+ * Symbol为符号表项，包含变量名、变量类型、变量值
+ * 对于变量，变量值为address
+ * 对于常量，变量值为const_value
+*/
 struct Symbol {
 public:
   std::string name;
   SymbolKind kind;
-  std::variant<int, std::string> value; // 对于变量为address, 对于常量为const_value
+  std::variant<int, std::string> value;
   Symbol(const std::string &name, SymbolKind kind, int const_value) : name(name), kind(kind), value(const_value) {}
-
   Symbol(const std::string &name, SymbolKind kind, const std::string &address) : name(name), kind(kind), value(address) {}
   Symbol(const std::string &name, SymbolKind kind) : name(name), kind(kind), value(0) {}
 };
 
+/**
+ * 作用域
+ * 作用域是一个字典，键为变量名，值为Symbol
+ * 作用域的父作用域为parentScope
+*/
 class Scope {
 private:
   std::unordered_map<std::string, std::shared_ptr<Symbol>> symbols;
   std::shared_ptr<Scope> parentScope;
   std::string ident;
 public:
-  Scope(std::shared_ptr<Scope> parentScope) : parentScope(parentScope) {
-    NumBuilder::AddNum();
-    ident = NumBuilder::currentNum();
-  }
+  Scope(Counter& scope_ident_builder) : parentScope(nullptr), ident("global") {}
+  Scope(std::shared_ptr<Scope> parentScope, std::string ident) 
+  : parentScope(parentScope), ident(ident) {}
 
   std::shared_ptr<Scope> getParentScope() const { return parentScope; }
 
@@ -102,7 +113,6 @@ public:
     }
     return nullptr;
   }
-
   std::shared_ptr<Symbol> lookupLocal(const std::string &name) {
     auto it = symbols.find(name);
     if (it != symbols.end()) {
@@ -110,7 +120,6 @@ public:
     }
     return nullptr;
   }
-
   void print(int depth = 0) const {
     std::string indent(depth * 2, ' ');
     std::clog << indent << "=== [Scope 层级 " << depth << "] 地址: " << this << " ===" << std::endl;
@@ -132,7 +141,6 @@ public:
         std::clog << std::endl;
       }
     }
-
     // 如果有父作用域，递归打印父作用域
     if (parentScope != nullptr) {
       std::clog << indent << "  --> 指向父作用域..." << std::endl;
@@ -146,46 +154,40 @@ public:
   }
 };
 
-// 上下文：用于传递RegBuilder和作用域符号表
+// 上下文：用于提供RegBuilder接口和作用域符号表
 class Context {
 public:
-  RegBuilder reg_builder;
+  Counter reg_builder;
+  Counter scope_ident_builder;
   std::shared_ptr<Scope> scope;
   bool cur_block_has_terminator = false;
 
-  Context(const RegBuilder &reg_builder) : reg_builder(reg_builder), scope(std::make_shared<Scope>(nullptr)) {}
-
+  Context() : reg_builder(), scope(std::make_shared<Scope>(scope_ident_builder)) {}
   void enterNewScope() {
-    scope = std::make_shared<Scope>(scope);
+    //std::cout << "// 进入新的作用域" << std::endl;
+    std::string new_ident = scope_ident_builder.NewNum();
+    scope = std::make_shared<Scope>(scope, new_ident);
   }
   void exitScope() {
     if (scope->getParentScope() != nullptr) {
       scope = scope->getParentScope();
+      //std::cout << "// 退出作用域" << std::endl;
     } else {
       std::cout << "Cannot exit global scope";
       return;
     }
   }
-
   void Reset() {
     reg_builder.Reset();
   }
-
   std::string GetAddress(const std::string &var_name) {
-    return reg_builder.GetAddress(var_name) + "_" + scope->getScopeIdent();
+    return "@" + var_name + "_" + scope->getScopeIdent();
   }
-
   std::string NewReg() {
-    return reg_builder.NewReg();
+    return "%" + reg_builder.NewNum();
   }
-
-
   std::string CurrentReg() const {
-    return reg_builder.CurrentReg();
-  }
-
-  void ResetBlockTerminator() {
-    cur_block_has_terminator = false;
+    return "%" + reg_builder.CurrentNum();
   }
 };
 
