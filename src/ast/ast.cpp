@@ -2,17 +2,28 @@
 #include <iostream>
 #include <assert.h>
 
-// CompUnit ::= FuncDef
-std::string CompUnitAST::Dump(Context& context) const {
+// CompUnit ::= FuncDef | CompUnit FuncDef
+std::string FuncDefCompUnitAST::Dump(Context& context) const {
   if (func_def) {
     func_def->Dump(context);
   }
   return "";
 }
 
-// FuncDef ::= FuncType IDENT '(' ')' Block
+std::string TwoCompUnitAST::Dump(Context& context) const {
+  // 注意这里的顺序
+  if (comp_unit) {
+    comp_unit->Dump(context);
+  }
+  if (func_def) {
+    func_def->Dump(context);
+  }
+  return "";
+}
+
+// FuncDef ::= FuncType IDENT '(' FuncFParams ')' Block
 std::string FuncDefAST::Dump(Context& context) const {
-  context.Reset(); // 解析新函数，寄存器计数器清零
+  context.ResetRegBuilder(); // 解析新函数，寄存器计数器清零
   context.enterNewScope();
 
   std::cout << "fun @" << *ident << "(): ";
@@ -30,7 +41,24 @@ std::string FuncDefAST::Dump(Context& context) const {
   return "";
 }
 
-// FuncType ::= 'int'
+// FuncFParams ::= | FuncFParam { ',' FuncFParam }
+std::string FuncFParamsAST::Dump(Context& context) const {
+  for (auto& param : func_f_params) {
+    param->Dump(context);
+  }
+  return "";
+}
+
+// FuncFParam ::= BType Ident ';'
+std::string FuncFParamAST::Dump(Context& context) const {
+  std::cout << "  %";
+  std::cout << *ident << ": ";
+  std::cout << *btype;
+  std::cout << "\n";
+  return "";
+}
+
+// FuncType ::= INT | VOID
 std::string FuncTypeAST::Dump(Context& context) const {
   std::cout << type_name;
   return "";
@@ -200,14 +228,37 @@ std::string WhileStmtAST::Dump(Context& context) const {
   std::string continue_loop_label = LabelBuilder::GetLabel("while_body");
   std::string end_label = LabelBuilder::GetLabel("end");
   
+  context.enterNewWhileScope(loop_label, continue_loop_label, end_label);
   std::cout << "  jump " << loop_label << "\n";
   std::cout << loop_label << ":\n";
   std::string cond_reg = while_exp->Dump(context);
   std::cout << "  br " << cond_reg << ", " << continue_loop_label << ", " << end_label << "\n";
   std::cout << continue_loop_label << ":\n";
   while_stmt->Dump(context);
-  std::cout << "  jump " << loop_label << "\n";
+  if (!context.cur_block_has_terminator) {
+    std::cout << "  jump " << loop_label << "\n";
+  }
   std::cout << end_label << ":\n";
+  context.cur_block_has_terminator = false;
+  context.exitWhileScope();
+  return "";
+}
+
+std::string BreakStmtAST::Dump(Context& context) const {
+  if (context.cur_block_has_terminator) return "";
+  WhileLabelContext while_label_context = context.GetWhileLabel();
+  std::cout << "  jump " << while_label_context.while_label_end << "\n";
+  std::string tool_label = while_label_context.while_label_continue + NumBuilder::GetNum();
+  std::cout << tool_label << ":\n";
+  return "";
+}
+
+std::string ContinueStmtAST::Dump(Context& context) const {
+  if (context.cur_block_has_terminator) return "";
+  WhileLabelContext while_label_context = context.GetWhileLabel();
+  std::cout << "  jump " << while_label_context.while_label_begin << "\n";
+  std::string tool_label = while_label_context.while_label_continue + NumBuilder::GetNum();
+  std::cout << tool_label << ":\n";
   return "";
 }
 

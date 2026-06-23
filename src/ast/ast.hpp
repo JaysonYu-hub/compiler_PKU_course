@@ -154,6 +154,20 @@ public:
   }
 };
 
+class WhileLabelContext {
+public:
+  std::string while_label_begin;
+  std::string while_label_continue;
+  std::string while_label_end;
+  WhileLabelContext(std::string while_label_begin, 
+    std::string while_label_continue, 
+    std::string while_label_end)
+    : while_label_begin(while_label_begin), 
+    while_label_continue(while_label_continue), 
+    while_label_end(while_label_end) {}
+  WhileLabelContext() : while_label_begin(""), while_label_continue(""), while_label_end("") {}
+};
+
 // 上下文：用于提供RegBuilder接口和作用域符号表
 class Context {
 public:
@@ -161,6 +175,7 @@ public:
   Counter scope_ident_builder;
   std::shared_ptr<Scope> scope;
   bool cur_block_has_terminator = false;
+  std::vector<WhileLabelContext> while_label_contexts;
 
   Context() : reg_builder(), scope(std::make_shared<Scope>(scope_ident_builder)) {}
   void enterNewScope() {
@@ -177,7 +192,29 @@ public:
       return;
     }
   }
-  void Reset() {
+
+  void enterNewWhileScope(std::string while_label_begin, 
+    std::string while_label_continue, 
+    std::string while_label_end) { 
+    while_label_contexts.push_back(WhileLabelContext(while_label_begin, while_label_continue, while_label_end));
+  }
+
+  void exitWhileScope() { 
+    if (while_label_contexts.empty()) {
+      std::cerr << "Cannot exit while scope" << std::endl;
+      return;
+    }
+    while_label_contexts.pop_back();
+  }
+
+  WhileLabelContext GetWhileLabel() {
+    if (while_label_contexts.empty()) {
+      std::cerr << "while_label_context is empty" << std::endl;
+      return WhileLabelContext();
+    }
+    return while_label_contexts.back();
+  }
+  void ResetRegBuilder() {
     reg_builder.Reset();
   }
   std::string GetAddress(const std::string &var_name) {
@@ -206,32 +243,58 @@ public:
   virtual int getValue(Context& context) const = 0;
 };
 
-// CompUnit ::= FuncDef
-class CompUnitAST : public BaseAST {
+// CompUnit ::= FuncDef | CompUnit FuncDef
+class FuncDefCompUnitAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> func_def;
 
-  CompUnitAST() = default; 
+  FuncDefCompUnitAST() = default; 
   std::string Dump(Context& context) const override;
 };
 
-// FuncDef ::= FuncType IDENT '(' ')' Block
+class TwoCompUnitAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> comp_unit;
+  std::unique_ptr<BaseAST> func_def;
+
+  TwoCompUnitAST() = default; 
+  std::string Dump(Context& context) const override;
+};
+// FuncDef ::= FuncType IDENT '(' FuncFParams ')' Block
 class FuncDefAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> func_type;
   std::unique_ptr<std::string> ident;
   std::unique_ptr<BaseAST> block;
-    
+  std::unique_ptr<BaseAST> func_f_params;
   FuncDefAST() = default; 
 
   std::string Dump(Context& context) const override;
 };
+// FuncFParams ::= | FuncFParam { ',' FuncFParam }
+class FuncFParamsAST : public BaseAST {
+public:
+  //为空就初始化
+  std::vector<std::unique_ptr<BaseAST>> func_f_params; 
+  FuncFParamsAST() = default; 
+  std::string Dump(Context& context) const override;
+};
 
-// FuncType ::= 'int'
+// FuncFParam ::= BType IDENT ';'
+class FuncFParamAST : public BaseAST {
+public:
+  std::unique_ptr<std::string> btype;
+  std::unique_ptr<std::string> ident;
+
+  FuncFParamAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+// FuncType ::= INT | VOID
 class FuncTypeAST : public BaseAST {
 public:
   std::string type_name; 
-    
   FuncTypeAST() = default; 
 
   std::string Dump(Context& context) const override;
@@ -311,6 +374,8 @@ public:
  * | Block 
  * | IF '(' Exp ')' MatchedStmt else MatchedStmt
  * | WHILE '(' Exp ')' Stmt
+ * | CONTINUE ';'
+ * | BREAK ';'
  *  */
 class ReturnStmtAST : public BaseAST {
 public:
@@ -374,6 +439,18 @@ public:
 
   WhileStmtAST() = default; 
 
+  std::string Dump(Context& context) const override;
+};
+
+class ContinueStmtAST : public BaseAST {
+public:
+  ContinueStmtAST() = default;
+  std::string Dump(Context& context) const override;
+};
+
+class BreakStmtAST : public BaseAST {
+public:
+  BreakStmtAST() = default;
   std::string Dump(Context& context) const override;
 };
 

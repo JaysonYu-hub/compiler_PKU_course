@@ -31,8 +31,8 @@ using namespace std;
   OpAST *op_ast;
 }
 
-%token INT RETURN 
-%token CONST WHILE
+%token INT RETURN VOID
+%token CONST WHILE BREAK CONTINUE
 %token <str_val> IDENT
 %token <int_val> INT_CONST
 
@@ -40,7 +40,7 @@ using namespace std;
 %token <str_val> ASSIGN
 %token LT LE GT GE EQ NE L_AND L_OR IF ELSE
 
-%type <ast_val> FuncDef FuncType Block Stmt UnmatchedStmt MatchedStmt
+%type <ast_val> comp_unit FuncDef FuncType FuncFParam FuncFParams Block Stmt UnmatchedStmt MatchedStmt
 %type <value_ast> Exp UnaryExp PrimaryExp AddExp ConstExp
 %type <value_ast> RelExp EqExp LAndExp LOrExp ConstInitVal MulExp InitVal LVal
 %type <op_ast> ComOp EquOp LOrOp LAndOp UnaryOp AddOp MulOp
@@ -51,20 +51,54 @@ using namespace std;
 %%
 
 CompUnit
+  : comp_unit { 
+    auto start = unique_ptr<BaseAST>($1);
+    ast = std::move(start);
+  }
+
+comp_unit
   : FuncDef {
-    auto comp_unit = make_unique<CompUnitAST>();
+    auto comp_unit = new FuncDefCompUnitAST();
     comp_unit->func_def = unique_ptr<BaseAST>($1);
-    ast = std::move(comp_unit);
+    $$ = comp_unit;
+  }
+  | comp_unit FuncDef { 
+    auto comp_unit = new TwoCompUnitAST();
+    comp_unit->comp_unit = unique_ptr<BaseAST>($1);
+    comp_unit->func_def = unique_ptr<BaseAST>($2);
+    $$ = comp_unit;
   }
   ;
 
 FuncDef
-  : FuncType IDENT '(' ')' Block {
+  : FuncType IDENT '(' FuncFParams ')' Block {
     auto func_def = new FuncDefAST();
     func_def->func_type = unique_ptr<BaseAST>($1);
     func_def->ident = unique_ptr<string>($2);
-    func_def->block = unique_ptr<BaseAST>($5);
+    func_def->func_f_params = unique_ptr<BaseAST>($4);
+    func_def->block = unique_ptr<BaseAST>($6);
     $$ = func_def;
+  }
+  ;
+
+FuncFParams
+  : { 
+    auto func_f_params = new FuncFParamsAST();
+    $$ = func_f_params;
+  }
+  | FuncFParams ',' FuncFParam { 
+    auto func_f_params = (static_cast<FuncFParamsAST*>($1));
+    func_f_params->func_f_params.push_back(unique_ptr<BaseAST>($3));
+    $$ = func_f_params;
+  }
+  ;
+
+FuncFParam
+  : BType IDENT { 
+    auto func_f_param = new FuncFParamAST();
+    func_f_param->btype = unique_ptr<string>($1);
+    func_f_param->ident = unique_ptr<string>($2);
+    $$ = func_f_param;
   }
   ;
 
@@ -72,6 +106,12 @@ FuncType
   : INT {
     auto func_type = new FuncTypeAST();
     auto type = "i32";
+    func_type->type_name = type;
+    $$ = func_type;
+  }
+  | VOID { 
+    auto func_type = new FuncTypeAST();
+    auto type = "void";
     func_type->type_name = type;
     $$ = func_type;
   }
@@ -161,6 +201,14 @@ MatchedStmt
     while_stmt->while_exp = unique_ptr<ValueAST>($3);
     while_stmt->while_stmt = unique_ptr<BaseAST>($5);
     $$ = while_stmt;
+  }
+  | BREAK ';' { 
+    auto break_stmt = new BreakStmtAST();
+    $$ = break_stmt;
+  }
+  | CONTINUE ';' { 
+    auto continue_stmt = new ContinueStmtAST();
+    $$ = continue_stmt;
   }
   ;
 
