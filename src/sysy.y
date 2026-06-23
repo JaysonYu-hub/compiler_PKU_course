@@ -40,7 +40,7 @@ using namespace std;
 %token <str_val> ASSIGN
 %token LT LE GT GE EQ NE L_AND L_OR IF ELSE
 
-%type <ast_val> comp_unit FuncDef FuncType FuncFParam FuncFParams Block Stmt UnmatchedStmt MatchedStmt
+%type <ast_val> comp_unit FuncDef FuncType FuncFParam FuncFParams FuncRParams Block Stmt UnmatchedStmt MatchedStmt
 %type <value_ast> Exp UnaryExp PrimaryExp AddExp ConstExp
 %type <value_ast> RelExp EqExp LAndExp LOrExp ConstInitVal MulExp InitVal LVal
 %type <op_ast> ComOp EquOp LOrOp LAndOp UnaryOp AddOp MulOp
@@ -73,15 +73,15 @@ comp_unit
 FuncDef
   : FuncType IDENT '(' FuncFParams ')' Block {
     auto func_def = new FuncDefAST();
-    func_def->func_type = unique_ptr<BaseAST>($1);
+    func_def->func_type = unique_ptr<FuncTypeAST>(static_cast<FuncTypeAST*>($1));
     func_def->ident = unique_ptr<string>($2);
-    func_def->func_f_params = unique_ptr<BaseAST>($4);
+    func_def->func_f_params = unique_ptr<FuncFParamsAST>(static_cast<FuncFParamsAST*>($4));
     func_def->block = unique_ptr<BaseAST>($6);
     $$ = func_def;
   }
   | FuncType IDENT '(' ')' Block { 
     auto func_def = new FuncDefAST();
-    func_def->func_type = unique_ptr<BaseAST>($1);
+    func_def->func_type = unique_ptr<FuncTypeAST>(static_cast<FuncTypeAST*>($1));
     func_def->ident = unique_ptr<string>($2);
     func_def->func_f_params = nullptr;
     func_def->block = unique_ptr<BaseAST>($5);
@@ -92,12 +92,12 @@ FuncDef
 FuncFParams
   : FuncFParam { 
     auto func_f_params = new FuncFParamsAST();
-    func_f_params->func_f_params.push_back(unique_ptr<BaseAST>($1));
+    func_f_params->func_f_params.push_back(unique_ptr<FuncFParamAST>(static_cast<FuncFParamAST*>($1)));
     $$ = func_f_params;
   }
   | FuncFParams ',' FuncFParam { 
     auto func_f_params = (static_cast<FuncFParamsAST*>($1));
-    func_f_params->func_f_params.push_back(unique_ptr<BaseAST>($3));
+    func_f_params->func_f_params.push_back(unique_ptr<FuncFParamAST>(static_cast<FuncFParamAST*>($3)));
     $$ = func_f_params;
   }
   ;
@@ -263,6 +263,31 @@ UnaryExp
     unary_op_exp->op = unique_ptr<OpAST>($1);
     unary_op_exp->unary_exp = unique_ptr<ValueAST>($2);
     $$ = unary_op_exp; 
+  }
+  | IDENT '(' ')' { 
+    auto func_call_exp = new FuncCallExpAST();
+    func_call_exp->ident = unique_ptr<string>($1);
+    func_call_exp->func_r_params = nullptr;
+    $$ = func_call_exp;
+  }
+  | IDENT '(' FuncRParams ')' { 
+    auto func_call_exp = new FuncCallExpAST();
+    func_call_exp->ident = unique_ptr<string>($1);
+    func_call_exp->func_r_params = unique_ptr<BaseAST>($3);
+    $$ = func_call_exp;
+  }
+  ;
+
+FuncRParams
+  : Exp { 
+    auto func_r_params = new FuncRParamsAST();
+    func_r_params->func_r_params.push_back(unique_ptr<ValueAST>($1));
+    $$ = func_r_params;
+  }
+  | FuncRParams ',' Exp { 
+    auto func_r_params = (static_cast<FuncRParamsAST*>($1));
+    func_r_params->func_r_params.push_back(unique_ptr<ValueAST>($3));
+    $$ = func_r_params;
   }
   ;
 

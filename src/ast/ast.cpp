@@ -24,24 +24,30 @@ std::string TwoCompUnitAST::Dump(Context& context) const {
 // FuncDef ::= FuncType IDENT '(' [FuncFParams] ')' Block
 std::string FuncDefAST::Dump(Context& context) const {
   context.ResetRegBuilder(); // 解析新函数，寄存器计数器清零
-  context.enterNewScope();
+  // 这里注意函数名表所在的定义域
+  auto symbol =  std::make_shared<Symbol>(Symbol(*ident, SymbolKind::FUNCTION, FuncInformation(func_type->type_name)));
+  context.scope->define(symbol);
 
+  context.enterNewScope();
   std::cout << "fun @" << *ident << "(";
   if (func_f_params) {
     func_f_params->Dump(context);
   }
   std::cout << ")";
-
   func_type->Dump(context);
+  // 把函数的返回值信息放到context中
   std::cout << " {\n";
   std::cout << "\%entry:\n";
   context.cur_block_has_terminator = false;
+  if (func_f_params) {
+    func_f_params->ParamLocalization(context);
+  }
 
   if (block) {
     block->Dump(context);
   }
-
-  if (!context.cur_block_has_terminator && *ident == "void") {
+  
+  if (!context.cur_block_has_terminator && func_type->type_name == "void") {
     std::cout << "  ret\n";
   }
 
@@ -61,11 +67,23 @@ std::string FuncFParamsAST::Dump(Context& context) const {
   return "";
 }
 
+void FuncFParamsAST::ParamLocalization(Context& context) {
+  for (auto& param : func_f_params) {
+    param->ParamLocalization(context);
+  }
+}
+
 // FuncFParam ::= BType Ident ';'
 std::string FuncFParamAST::Dump(Context& context) const {
-  auto symbol = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, "@" + *ident));
-  context.scope->define(symbol);
   return "@" + *ident + ": " + *btype;
+}
+
+void FuncFParamAST::ParamLocalization(Context& context) {
+  std::string address = context.GetAddress(*ident);
+  auto symbol = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
+  context.scope->define(symbol);
+  std::cout << "  " << address << " = " << "alloc " << *btype << "\n";
+  std::cout << "  store " << "@" + *ident << ", " << address << "\n";
 }
 
 // FuncType ::= INT | VOID
@@ -75,7 +93,7 @@ std::string FuncTypeAST::Dump(Context& context) const {
   } else {
     std::cout << ": " << type_name;
   }
-  return "";
+  return type_name;
 }
 
 // Block ::= '{' {BlockItem} '}'
@@ -290,7 +308,7 @@ std::string ExpAST::Dump(Context& context) const {
 int ExpAST::getValue(Context& context) const {
   return lor_exp->getValue(context);
 }
-// UnaryExp ::= UnaryOP UnaryExp | PrimaryExp
+// UnaryExp ::= UnaryOP UnaryExp | PrimaryExp | IDENT '(' [FuncRParams] ')'
 std::string UnaryOPExpAST::Dump(Context& context) const {
   std::string src_reg = unary_exp->Dump(context);
   if (op->op == "+") {
@@ -331,6 +349,50 @@ int PrimaryUnaryExpAST::getValue(Context& context) const {
     return primary_exp->getValue(context);
   }
   return 0;
+}
+
+std::string FuncCallExpAST::Dump(Context& context) const {
+  std::string func_name = *ident;
+  // 这里要先查一下是否有返回值
+  auto func_symbol = context.scope->lookup(func_name);
+  if (func_symbol == nullptr) {
+    std::cerr << "func " << func_name << " not found" << "\n";
+  }
+  auto func_inf = std::get<FuncInformation>(func_symbol->value);
+  
+  if (func_inf.ret_type != "void") {
+    std::string func_reg = context.NewReg();
+    if (func_r_params) {
+      std::cout << "  " << func_reg << " = call @" << func_name << "(" << func_r_params->Dump(context) << ")\n";
+    } else {
+      std::cout << "  " << func_reg << " = call @" << func_name << "()\n";
+    }
+    return func_reg;
+  } else { 
+    if (func_r_params) {
+      std::cout << "  call @" << func_name << "(" << func_r_params->Dump(context) << ")" << "\n";
+    } else {
+      std::cout << "  call @" << func_name << "()" << "\n";
+    }
+    return "";
+  }
+}
+
+int FuncCallExpAST::getValue(Context& context) const {
+  std::cerr << "func can't getvalue before start" << "\n";
+  return 0;
+}
+// FuncRParams ::= Exp { ',' Exp }
+std::string FuncRParamsAST::Dump(Context& context) const {
+  std::string params;
+  if (func_r_params.size() > 0) {
+    params += func_r_params[0]->Dump(context);
+    for (int i = 1; i < func_r_params.size(); i++) {
+      params = params + ", " + func_r_params[i]->Dump(context);
+    }
+  }
+  std::cout << params;
+  return "";
 }
 
 // PrimaryExp ::= '(' Exp ')' | LVal | Number
@@ -685,9 +747,7 @@ int ConstInitValAST::getValue(Context& context) const {
 std::string ConstDefAST::Dump(Context& context) const { 
   int constinit_val = const_init_val->getValue(context);
   auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::CONSTANT, constinit_val));
-  if (!context.scope->define(sym)) {
-    std::cout << "Error: redefine " << *ident << "\n";
-  }
+  context.scope->define(sym);
   return "";
 }
 
@@ -745,9 +805,7 @@ std::string IDENTVarAST::Dump(Context& context) const {
 
   std::cout << "  " << address << " = alloc i32\n";
 
-  if (!context.scope->define(sym)) {
-    std::cerr << "Error: redefine " << *ident << "\n";
-  }
+  context.scope->define(sym);
   return "";
 }
 
@@ -757,9 +815,7 @@ std::string ThreeVarAST::Dump(Context& context) const {
   auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
   std::cout << "  " << address << " = alloc i32\n";
   std::cout << "  " << "store " << init_val_reg << ", " << address << "\n";
-  if (!context.scope->define(sym)) {
-    std::cerr << "Error: redefine " << *ident << "\n";
-  }
+  context.scope->define(sym);
   return "";
 }
 

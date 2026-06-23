@@ -61,7 +61,14 @@ public:
 };
 
 
-enum class SymbolKind { CONSTANT , VARIABLE };
+class FuncInformation { 
+  public:
+  std::string ret_type;
+  FuncInformation() : ret_type("") {}
+  FuncInformation(std::string ret_type) : ret_type(ret_type) {}
+};
+
+enum class SymbolKind { CONSTANT, VARIABLE, FUNCTION };
 
 /**
  * 符号表
@@ -74,11 +81,21 @@ struct Symbol {
 public:
   std::string name;
   SymbolKind kind;
-  std::variant<int, std::string> value;
+  std::variant<int, std::string, FuncInformation> value;
   Symbol(const std::string &name, SymbolKind kind, int const_value) : name(name), kind(kind), value(const_value) {}
   Symbol(const std::string &name, SymbolKind kind, const std::string &address) : name(name), kind(kind), value(address) {}
-  Symbol(const std::string &name, SymbolKind kind) : name(name), kind(kind), value(0) {
-    assert(kind == SymbolKind::CONSTANT);
+
+  Symbol(const std::string &name, SymbolKind kind, FuncInformation func_information) : name(name), kind(kind), value(func_information) {}
+  Symbol(const std::string &name, SymbolKind kind) : name(name), kind(kind) {
+    if (kind == SymbolKind::CONSTANT) {
+      value = 0;
+    } else if (kind == SymbolKind::FUNCTION) {
+      value = FuncInformation();
+    } else if (kind == SymbolKind::VARIABLE) {
+      value = "";
+    } else {
+      assert(false);
+    }
   }
 };
 
@@ -99,12 +116,11 @@ public:
 
   std::shared_ptr<Scope> getParentScope() const { return parentScope; }
 
-  bool define(std::shared_ptr<Symbol> symbol) {
+  void define(std::shared_ptr<Symbol> symbol) {
     if (symbols.find(symbol->name) != symbols.end()) {
-      return false;
+      std::cerr << "error: " << symbol->name << " had been defined" << std::endl;   
     }
     symbols[symbol->name] = symbol;
-    return true;
   }
   std::shared_ptr<Symbol> lookup(const std::string &name) {
     auto current = symbols.find(name);
@@ -220,6 +236,7 @@ public:
   void ResetRegBuilder() {
     reg_builder.Reset();
   }
+  // return "@" + var_name + "_" + scope_ident
   std::string GetAddress(const std::string &var_name) {
     return "@" + var_name + "_" + scope->getScopeIdent();
   }
@@ -263,23 +280,19 @@ public:
   TwoCompUnitAST() = default; 
   std::string Dump(Context& context) const override;
 };
-// FuncDef ::= FuncType IDENT '(' FuncFParams ')' Block
+
+class FuncTypeAST;
+class FuncFParamsAST;
+// FuncDef ::= FuncType IDENT '(' [FuncFParams] ')' Block
 class FuncDefAST : public BaseAST {
 public:
-  std::unique_ptr<BaseAST> func_type;
+  // 这里dump需要访问func_type
+  std::unique_ptr<FuncTypeAST> func_type;
   std::unique_ptr<std::string> ident;
   std::unique_ptr<BaseAST> block;
-  std::unique_ptr<BaseAST> func_f_params;
+  std::unique_ptr<FuncFParamsAST> func_f_params;
   FuncDefAST() = default; 
 
-  std::string Dump(Context& context) const override;
-};
-// FuncFParams ::= | FuncFParam { ',' FuncFParam }
-class FuncFParamsAST : public BaseAST {
-public:
-  //为空就初始化
-  std::vector<std::unique_ptr<BaseAST>> func_f_params; 
-  FuncFParamsAST() = default; 
   std::string Dump(Context& context) const override;
 };
 
@@ -292,7 +305,19 @@ public:
   FuncFParamAST() = default; 
 
   std::string Dump(Context& context) const override;
+  void ParamLocalization(Context& context);
 };
+
+// FuncFParams ::= FuncFParam { ',' FuncFParam }
+class FuncFParamsAST : public BaseAST {
+public:
+  //为空就初始化
+  std::vector<std::unique_ptr<FuncFParamAST>> func_f_params; 
+  FuncFParamsAST() = default; 
+  std::string Dump(Context& context) const override;
+  void ParamLocalization(Context& context);
+};
+
 
 // FuncType ::= INT | VOID
 class FuncTypeAST : public BaseAST {
@@ -467,7 +492,7 @@ public:
   int getValue(Context& context) const override;
 };
 
-// UnaryExp ::= UnaryOP UnaryExp | PrimaryExp
+// UnaryExp ::= UnaryOP UnaryExp | PrimaryExp | IDENT '(' [FuncRParams] ')'
 class UnaryOPExpAST : public ValueAST {
 public:
   std::unique_ptr<OpAST> op;
@@ -486,6 +511,27 @@ public:
 
   std::string Dump(Context& context) const override;
   int getValue(Context& context) const override;
+};
+
+class FuncCallExpAST : public ValueAST {
+public:
+  std::unique_ptr<std::string> ident;
+  std::unique_ptr<BaseAST> func_r_params;
+
+  FuncCallExpAST() = default; 
+
+  std::string Dump(Context& context) const override;
+  // 这里的getValue要扔出报错
+  int getValue(Context& context) const override;
+};
+
+// FuncRParams ::= Exp { ',' Exp }
+class FuncRParamsAST : public BaseAST {
+public:
+  std::vector<std::unique_ptr<ValueAST>> func_r_params; 
+  FuncRParamsAST() = default; 
+
+  std::string Dump(Context& context) const override;
 };
 
 // PrimaryExp ::= '(' Exp ')' | LVal | Number
