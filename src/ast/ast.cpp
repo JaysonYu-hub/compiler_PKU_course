@@ -21,19 +21,28 @@ std::string TwoCompUnitAST::Dump(Context& context) const {
   return "";
 }
 
-// FuncDef ::= FuncType IDENT '(' FuncFParams ')' Block
+// FuncDef ::= FuncType IDENT '(' [FuncFParams] ')' Block
 std::string FuncDefAST::Dump(Context& context) const {
   context.ResetRegBuilder(); // 解析新函数，寄存器计数器清零
   context.enterNewScope();
 
-  std::cout << "fun @" << *ident << "(): ";
+  std::cout << "fun @" << *ident << "(";
+  if (func_f_params) {
+    func_f_params->Dump(context);
+  }
+  std::cout << ")";
 
   func_type->Dump(context);
   std::cout << " {\n";
   std::cout << "\%entry:\n";
+  context.cur_block_has_terminator = false;
 
   if (block) {
     block->Dump(context);
+  }
+
+  if (!context.cur_block_has_terminator && *ident == "void") {
+    std::cout << "  ret\n";
   }
 
   std::cout << "}\n";
@@ -43,24 +52,29 @@ std::string FuncDefAST::Dump(Context& context) const {
 
 // FuncFParams ::= | FuncFParam { ',' FuncFParam }
 std::string FuncFParamsAST::Dump(Context& context) const {
-  for (auto& param : func_f_params) {
-    param->Dump(context);
+  if (func_f_params.size() > 0) {
+    std::cout << func_f_params[0]->Dump(context);
+    for (int i = 1; i < func_f_params.size(); i++) {
+      std::cout << ", " << func_f_params[i]->Dump(context);
+    }
   }
   return "";
 }
 
 // FuncFParam ::= BType Ident ';'
 std::string FuncFParamAST::Dump(Context& context) const {
-  std::cout << "  %";
-  std::cout << *ident << ": ";
-  std::cout << *btype;
-  std::cout << "\n";
-  return "";
+  auto symbol = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, "@" + *ident));
+  context.scope->define(symbol);
+  return "@" + *ident + ": " + *btype;
 }
 
 // FuncType ::= INT | VOID
 std::string FuncTypeAST::Dump(Context& context) const {
-  std::cout << type_name;
+  if (type_name == "void") {
+    std::cout << "";
+  } else {
+    std::cout << ": " << type_name;
+  }
   return "";
 }
 
@@ -144,7 +158,7 @@ std::string IfElseUnmatchedStmtAST::Dump(Context& context) const {
   return "";
 }
 
-/**  MatchedStmt ::= 'return' Exp ';' 
+/**  MatchedStmt ::= RETURN [Exp] ';' 
  * | LVal '=' Exp ';' 
  * | Exp ';' 
  * | ';' 
@@ -155,8 +169,12 @@ std::string IfElseUnmatchedStmtAST::Dump(Context& context) const {
 std::string ReturnStmtAST::Dump(Context& context) const {
   // 死代码拦截
   if (context.cur_block_has_terminator) return "";
-  std::string ret_val = exp->Dump(context);
-  std::cout << "  ret " << ret_val << "\n";
+  if (exp) {
+    std::string ret_val = exp->Dump(context);
+    std::cout << "  ret " << ret_val << "\n";
+  } else {
+    std::cout << "  ret\n";
+  }
   context.cur_block_has_terminator = true;
   return "";
 }
@@ -690,7 +708,7 @@ std::string VarDeclDecAST::Dump(Context& context) const {
 
 // ConstDecl ::= 'const' BType ConstDef { ',' ConstDef } ';'
 std::string ConstDeclAST::Dump(Context& context) const {
-  assert(*b_type == "int");
+  assert(*b_type == "i32");
   const_def_list->Dump(context);
   return "";
 }
@@ -704,7 +722,7 @@ std::string ConstDefListAST::Dump(Context& context) const {
 
 // VarDecl ::= BType VarDef { ',' VarDef } ';'
 std::string VarDeclAST::Dump(Context& context) const {
-  assert(*b_type == "int");
+  assert(*b_type == "i32");
   var_def_list->Dump(context);
   return "";
 }

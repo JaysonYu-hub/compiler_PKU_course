@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <iostream>
 #include <variant>
+#include <assert.h>
 
 // 临时寄存器生成器, 在函数开始时reset
 class Counter {
@@ -76,7 +77,9 @@ public:
   std::variant<int, std::string> value;
   Symbol(const std::string &name, SymbolKind kind, int const_value) : name(name), kind(kind), value(const_value) {}
   Symbol(const std::string &name, SymbolKind kind, const std::string &address) : name(name), kind(kind), value(address) {}
-  Symbol(const std::string &name, SymbolKind kind) : name(name), kind(kind), value(0) {}
+  Symbol(const std::string &name, SymbolKind kind) : name(name), kind(kind), value(0) {
+    assert(kind == SymbolKind::CONSTANT);
+  }
 };
 
 /**
@@ -367,7 +370,7 @@ public:
   std::string Dump(Context& context) const override;
 };
 
-/**  MatchedStmt ::= 'return' Exp ';' 
+/**  MatchedStmt ::= RETURN [Exp] ';' 
  * | LVal '=' Exp ';' 
  * | EXP ';' 
  * | ';' 

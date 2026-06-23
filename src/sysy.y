@@ -79,11 +79,20 @@ FuncDef
     func_def->block = unique_ptr<BaseAST>($6);
     $$ = func_def;
   }
+  | FuncType IDENT '(' ')' Block { 
+    auto func_def = new FuncDefAST();
+    func_def->func_type = unique_ptr<BaseAST>($1);
+    func_def->ident = unique_ptr<string>($2);
+    func_def->func_f_params = nullptr;
+    func_def->block = unique_ptr<BaseAST>($5);
+    $$ = func_def;
+  }
   ;
 
 FuncFParams
-  : { 
+  : FuncFParam { 
     auto func_f_params = new FuncFParamsAST();
+    func_f_params->func_f_params.push_back(unique_ptr<BaseAST>($1));
     $$ = func_f_params;
   }
   | FuncFParams ',' FuncFParam { 
@@ -167,6 +176,11 @@ MatchedStmt
   : RETURN Exp ';' {
     auto stmt = new ReturnStmtAST();
     stmt->exp = unique_ptr<ValueAST>($2);
+    $$ = stmt;
+  }
+  | RETURN ';' { 
+    auto stmt = new ReturnStmtAST();
+    stmt->exp = nullptr;
     $$ = stmt;
   }
   | LVal ASSIGN Exp ';' { 
@@ -397,7 +411,7 @@ const_def_list
   ;
 
 BType
-  : INT { $$ = new string("int"); }
+  : INT { $$ = new string("i32"); }
   ;
 
 ConstDef
