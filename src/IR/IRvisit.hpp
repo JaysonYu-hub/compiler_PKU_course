@@ -10,6 +10,8 @@ namespace IR {
     int stack_size = 0;
     int local_var_sp_top = 0;
     int local_var_sp = 0;
+    int param_sp_top = 0;
+    int param_sp = 0;
 
     void Reset() {
       stack_size = 0;
@@ -82,11 +84,23 @@ namespace IR {
           break;
         }
         case ObjKind::LOCALVAR_ADD: {
-          if (call_stack_info.local_var_sp - 4 >= 0) {
+          if (call_stack_info.local_var_sp - 4 >= call_stack_info.param_sp_top) {
             call_stack_info.local_var_sp -= 4;
             return RegObj(std::to_string(call_stack_info.local_var_sp) + "(sp)", kind);
           } else {
             std::cerr << "Error: local var sp overflow" << std::endl;
+            std::cout << "local_var_sp : " << std::to_string(call_stack_info.local_var_sp) << std::endl;
+            return RegObj("OverStackError", kind);
+          }
+          break;
+        }
+        case ObjKind::FUNC_PARAM_ADD: {
+          if (call_stack_info.param_sp + 4 <= call_stack_info.param_sp_top) {
+            int temp = call_stack_info.param_sp;
+            call_stack_info.param_sp += 4;
+            return RegObj(std::to_string(temp) + "(sp)", kind);
+          } else {
+            std::cerr << "Error: param sp overflow" << std::endl;
             std::cout << "local_var_sp : " << std::to_string(call_stack_info.local_var_sp) << std::endl;
             return RegObj("OverStackError", kind);
           }
@@ -103,8 +117,7 @@ namespace IR {
         return RegObj("a" + std::to_string(x), ObjKind::FUNC_PARAM_REG);
       } else {
         // 此时没有call_stack_info
-        auto reg = GetAddress(ObjKind::LOCALVAR_ADD);
-        reg.kind = ObjKind::FUNC_PARAM_ADD;
+        auto reg = GetAddress(ObjKind::FUNC_PARAM_ADD);
         return reg;
       }
     }

@@ -54,6 +54,7 @@ void IR::IRVisitor::SetStackSpace(IR::FuncInformation &func_info) {
   context.call_stack_info.stack_size = spark_len;
   context.call_stack_info.local_var_sp_top += spark_len;
   context.call_stack_info.local_var_sp = context.call_stack_info.local_var_sp_top;
+  context.call_stack_info.param_sp_top = 4 * (func_info.max_param_num - 8);
 }
 
 // 访问函数
@@ -329,30 +330,9 @@ void IR::IRVisitor::Visit(const koopa_raw_call_t &call, koopa_raw_value_t value)
   /**处理call命令 
    * 把所需参数放到寄存器和栈上
    */
-  int x, y;
-  if (call.args.len <= 8) {
-    x = call.args.len;
-    y = x + 1;
-  } else {
-    x = 8;
-    y = x;
-  }
+  context.call_stack_info.param_sp = 0;
   assert(call.args.kind == KOOPA_RSIK_VALUE);
-  for (size_t i = 0; i < x; i++) {
-    auto ptr = call.args.buffer[i];
-    koopa_raw_value_t val = reinterpret_cast<koopa_raw_value_t>(ptr);
-    auto tem_reg = GetTemReg(val);
-    auto param_reg = context.GetParamRegOrAddForSet(i);
-    context.t_reg_builder.Reset();
-    if (param_reg.kind == ObjKind::FUNC_PARAM_ADD) {
-      std::cout << "  sw " << tem_reg.reg_name << ", " << param_reg.reg_name << "\n";
-    } else if (param_reg.kind == ObjKind::FUNC_PARAM_REG) {
-      std::cout << "  mv " << param_reg.reg_name << ", " << tem_reg.reg_name << "\n";
-    } else {
-      assert(false);
-    }
-  }
-  for (int i = call.args.len - 1; i >= y; i--) {
+  for (size_t i = 0; i < call.args.len; i++) {
     auto ptr = call.args.buffer[i];
     koopa_raw_value_t val = reinterpret_cast<koopa_raw_value_t>(ptr);
     auto tem_reg = GetTemReg(val);
@@ -367,7 +347,6 @@ void IR::IRVisitor::Visit(const koopa_raw_call_t &call, koopa_raw_value_t value)
     }
   }
   std::string temp = call.callee->name;
-  
   temp = temp.substr(1);
   std::cout << "  call " << temp << std::endl;
 
