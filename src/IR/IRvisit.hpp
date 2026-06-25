@@ -10,8 +10,6 @@ namespace IR {
     int stack_size = 0;
     int local_var_sp_top = 0;
     int local_var_sp = 0;
-    // 用于
-    int param_sp_bottom = -1;
 
     void Reset() {
       stack_size = 0;
@@ -100,30 +98,14 @@ namespace IR {
       }
     }
     // 用于调用函数时，把多余参数放到栈上, x表示参数index(从0开始)
-    // 当x大于8时，从大到小调用
     RegObj GetParamRegOrAddForSet(int x) {
       if (x <= 7) {
         return RegObj("a" + std::to_string(x), ObjKind::FUNC_PARAM_REG);
       } else {
         // 此时没有call_stack_info
-        // 把param_sp_bottom放到参数栈的最底部,只有第一次调用时触发
-        if (call_stack_info.param_sp_bottom == -1) {
-          call_stack_info.param_sp_bottom = call_stack_info.local_var_sp - 4 * (x - 7);
-          assert(call_stack_info.param_sp_bottom != -1);
-        }
-        if (call_stack_info.param_sp_bottom + 4 <= call_stack_info.local_var_sp) {
-          int temp = call_stack_info.param_sp_bottom;
-          call_stack_info.param_sp_bottom += 4;
-          return RegObj(std::to_string(temp) + "(sp)", ObjKind::FUNC_PARAM_ADD);
-        } else {
-          std::cerr << "Error: param sp overflow" << std::endl;
-          std::cout << "local_var_sp : " << std::to_string(call_stack_info.local_var_sp) << std::endl;
-          std::cout << "param_sp_bottom : " << std::to_string(call_stack_info.param_sp_bottom) << std::endl;
-          return RegObj("OverStackError", ObjKind::FUNC_PARAM_ADD);
-        }
-        if (call_stack_info.param_sp_bottom == call_stack_info.local_var_sp) {
-
-        }
+        auto reg = GetAddress(ObjKind::LOCALVAR_ADD);
+        reg.kind = ObjKind::FUNC_PARAM_ADD;
+        return reg;
       }
     }
     // 用于函数定义，可以得到所需9,10参数的栈位置
