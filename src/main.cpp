@@ -21,7 +21,7 @@ extern int yyparse(unique_ptr<BaseAST> &ast);
 
 int main(int argc, const char *argv[]) {
   Context context = Context();  
-  IRVisitor ir_visitor;
+  IR::IRVisitor ir_visitor;
   // 解析命令行参数. 测试脚本/评测平台要求你的编译器能接收如下参数:
   // compiler 模式 输入文件 -o 输出文件
   assert(argc == 5);
@@ -46,7 +46,7 @@ int main(int argc, const char *argv[]) {
   ast->Dump(context);
   cout << endl;
   cout.rdbuf(coutbuf); // 恢复原来的缓冲区
-
+  
   if (mode == "-riscv") {
     koopa_program_t program;
     koopa_error_code_t ret_code = koopa_parse_from_file(output, &program);
