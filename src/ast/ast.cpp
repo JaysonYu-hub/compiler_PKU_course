@@ -5,6 +5,32 @@
 // CompUnit ::= FuncDef | CompUnit FuncDef
 std::string FuncDefCompUnitAST::Dump(Context& context) const {
   if (func_def) {
+    auto library_decl = R"(decl @getint(): i32
+decl @getch(): i32
+decl @getarray(*i32): i32
+decl @putint(i32)
+decl @putch(i32)
+decl @putarray(i32, *i32)
+decl @starttime()
+decl @stoptime()
+)";
+    std::cout << library_decl;
+    auto symbol =  std::make_shared<Symbol>(Symbol("getint", SymbolKind::FUNCTION, FuncInformation("i32")));
+    context.scope->define(symbol);
+    symbol =  std::make_shared<Symbol>(Symbol("getch", SymbolKind::FUNCTION, FuncInformation("i32")));
+    context.scope->define(symbol);
+    symbol =  std::make_shared<Symbol>(Symbol("getarray", SymbolKind::FUNCTION, FuncInformation("i32")));
+    context.scope->define(symbol);
+    symbol =  std::make_shared<Symbol>(Symbol("putint", SymbolKind::FUNCTION, FuncInformation("void")));
+    context.scope->define(symbol);
+    symbol =  std::make_shared<Symbol>(Symbol("putch", SymbolKind::FUNCTION, FuncInformation("void")));
+    context.scope->define(symbol);
+    symbol =  std::make_shared<Symbol>(Symbol("putarray", SymbolKind::FUNCTION, FuncInformation("void")));
+    context.scope->define(symbol);
+    symbol =  std::make_shared<Symbol>(Symbol("starttime", SymbolKind::FUNCTION, FuncInformation("void")));
+    context.scope->define(symbol);
+    symbol =  std::make_shared<Symbol>(Symbol("stoptime", SymbolKind::FUNCTION, FuncInformation("void")));
+    context.scope->define(symbol);
     func_def->Dump(context);
   }
   return "";

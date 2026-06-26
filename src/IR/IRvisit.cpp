@@ -59,6 +59,9 @@ void IR::IRVisitor::SetStackSpace(IR::FuncInformation &func_info) {
 
 // 访问函数
 void IR::IRVisitor::Visit(const koopa_raw_function_t &func) {
+  if (func->bbs.len == 0) {
+    return;
+  }
   // 计算需要分配的栈空间
   IR::FuncInformation func_info;
   VisitFuncIns(func->bbs, func_info);
