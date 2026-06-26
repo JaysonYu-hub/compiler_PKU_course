@@ -139,6 +139,8 @@ public:
     }
     return nullptr;
   }
+
+  bool isGlobal() const { return parentScope == nullptr; }
   void print(int depth = 0) const {
     std::string indent(depth * 2, ' ');
     std::clog << indent << "=== [Scope 层级 " << depth << "] 地址: " << this << " ===" << std::endl;
@@ -195,6 +197,7 @@ public:
   std::shared_ptr<Scope> scope;
   bool cur_block_has_terminator = false;
   std::vector<WhileLabelContext> while_label_contexts;
+  std::shared_ptr<std::string> decl_type_context;
 
   Context() : reg_builder(), scope(std::make_shared<Scope>(scope_ident_builder)) {}
   void enterNewScope() {
@@ -263,31 +266,51 @@ public:
   virtual int getValue(Context& context) const = 0;
 };
 
-// CompUnit ::= FuncDef | CompUnit FuncDef
+// CompUnit ::= end_comp_unit
+class CompUnitAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> end_comp_unit;
+  CompUnitAST() = default;
+  std::string Dump(Context& context) const override;
+};
+
+// end_comp_unit ::= comp_unit | end_comp_unit comp_unit
+class CompEndCompUnitAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> comp_unit;
+  CompEndCompUnitAST() = default;
+  std::string Dump(Context& context) const override;
+};
+
+class TwoEndCompUnitAST : public BaseAST {
+public:
+  std::unique_ptr<BaseAST> end_comp_unit;
+  std::unique_ptr<BaseAST> comp_unit;
+  TwoEndCompUnitAST() = default;
+  std::string Dump(Context& context) const override;
+};
+
+// comp_unit ::= Decl | FuncDef
 class FuncDefCompUnitAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> func_def;
-
   FuncDefCompUnitAST() = default; 
   std::string Dump(Context& context) const override;
 };
 
-class TwoCompUnitAST : public BaseAST {
+class DeclCompUnitAST : public BaseAST {
 public:
-  std::unique_ptr<BaseAST> comp_unit;
-  std::unique_ptr<BaseAST> func_def;
-
-  TwoCompUnitAST() = default; 
-  std::string Dump(Context& context) const override;
+    std::unique_ptr<BaseAST> decl;
+    DeclCompUnitAST() = default;
+    std::string Dump(Context& context) const override;
 };
 
-class FuncTypeAST;
 class FuncFParamsAST;
-// FuncDef ::= FuncType IDENT '(' [FuncFParams] ')' Block
+// FuncDef ::= Type IDENT '(' [FuncFParams] ')' Block
 class FuncDefAST : public BaseAST {
 public:
-  // 这里dump需要访问func_type
-  std::unique_ptr<FuncTypeAST> func_type;
+  // 这里dump需要访问type
+  std::unique_ptr<std::string> type;
   std::unique_ptr<std::string> ident;
   std::unique_ptr<BaseAST> block;
   std::unique_ptr<FuncFParamsAST> func_f_params;
@@ -296,10 +319,10 @@ public:
   std::string Dump(Context& context) const override;
 };
 
-// FuncFParam ::= BType IDENT ';'
+// FuncFParam ::= Type IDENT ';'
 class FuncFParamAST : public BaseAST {
 public:
-  std::unique_ptr<std::string> btype;
+  std::unique_ptr<std::string> type;
   std::unique_ptr<std::string> ident;
 
   FuncFParamAST() = default; 
@@ -316,16 +339,6 @@ public:
   FuncFParamsAST() = default; 
   std::string Dump(Context& context) const override;
   void ParamLocalization(Context& context);
-};
-
-
-// FuncType ::= INT | VOID
-class FuncTypeAST : public BaseAST {
-public:
-  std::string type_name; 
-  FuncTypeAST() = default; 
-
-  std::string Dump(Context& context) const override;
 };
 
 // BlockItem ::= Decl | Stmt
@@ -756,10 +769,10 @@ public:
   std::string Dump(Context& context) const override;
 };
 
-// ConstDecl ::= 'const' BType ConstDef { ',' ConstDef } ';'
+// ConstDecl ::= 'const' Type ConstDef { ',' ConstDef } ';'
 class ConstDeclAST : public BaseAST {
 public:
-  std::unique_ptr<std::string> b_type;
+  std::unique_ptr<std::string> type;
   std::unique_ptr<BaseAST> const_def_list;
   ConstDeclAST() = default; 
 
@@ -774,10 +787,10 @@ public:
   std::string Dump(Context& context) const override;
 };
 
-// VarDecl ::= BType VarDef { ',' VarDef } ';'
+// VarDecl ::= Type VarDef { ',' VarDef } ';'
 class VarDeclAST : public BaseAST {
 public:
-  std::unique_ptr<std::string> b_type;
+  std::unique_ptr<std::string> type;
   std::unique_ptr<BaseAST> var_def_list;
   VarDeclAST() = default; 
 

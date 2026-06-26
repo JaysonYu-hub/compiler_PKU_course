@@ -12,6 +12,7 @@
 #include <string>
 #include "ast/ast.hpp"
 #include <vector>
+#include <assert.h>
 
 int yylex();
 extern int yylineno;
@@ -40,48 +41,63 @@ using namespace std;
 %token <str_val> ASSIGN
 %token LT LE GT GE EQ NE L_AND L_OR IF ELSE
 
-%type <ast_val> comp_unit FuncDef FuncType FuncFParam FuncFParams FuncRParams Block Stmt UnmatchedStmt MatchedStmt
+%type <ast_val> comp_unit end_comp_unit FuncDef FuncFParam FuncFParams FuncRParams Block Stmt UnmatchedStmt MatchedStmt
 %type <value_ast> Exp UnaryExp PrimaryExp AddExp ConstExp
 %type <value_ast> RelExp EqExp LAndExp LOrExp ConstInitVal MulExp InitVal LVal
 %type <op_ast> ComOp EquOp LOrOp LAndOp UnaryOp AddOp MulOp
 %type <int_val> Number
 %type <ast_val> Decl ConstDecl VarDecl BlockItem block_item_list const_def_list var_def_list ConstDef VarDef
-%type <str_val> BType
+%type <str_val> FuncType Type
 
 %%
 
 CompUnit
-  : comp_unit { 
-    auto start = unique_ptr<BaseAST>($1);
-    ast = std::move(start);
+  : end_comp_unit {
+    auto comp_unit = new CompUnitAST();
+    comp_unit->end_comp_unit = unique_ptr<BaseAST>($1);
+    ast = unique_ptr<BaseAST>(comp_unit);
   }
+  ;
 
-comp_unit
-  : FuncDef {
+end_comp_unit
+  : comp_unit {
+    auto start = new CompEndCompUnitAST();
+    start->comp_unit = unique_ptr<BaseAST>($1);
+    $$ = start;
+  }
+  | end_comp_unit comp_unit { 
+    auto start = new TwoEndCompUnitAST();
+    start->end_comp_unit = unique_ptr<BaseAST>($1);
+    start->comp_unit = unique_ptr<BaseAST>($2);
+    $$ = start;
+  }
+  ;
+
+comp_unit 
+  : FuncDef { 
     auto comp_unit = new FuncDefCompUnitAST();
     comp_unit->func_def = unique_ptr<BaseAST>($1);
     $$ = comp_unit;
   }
-  | comp_unit FuncDef { 
-    auto comp_unit = new TwoCompUnitAST();
-    comp_unit->comp_unit = unique_ptr<BaseAST>($1);
-    comp_unit->func_def = unique_ptr<BaseAST>($2);
+  | Decl { 
+    auto comp_unit = new DeclCompUnitAST();
+    comp_unit->decl = unique_ptr<BaseAST>($1);
     $$ = comp_unit;
   }
   ;
 
 FuncDef
-  : FuncType IDENT '(' FuncFParams ')' Block {
+  : Type IDENT '(' FuncFParams ')' Block {
     auto func_def = new FuncDefAST();
-    func_def->func_type = unique_ptr<FuncTypeAST>(static_cast<FuncTypeAST*>($1));
+    func_def->type = unique_ptr<string>($1);
     func_def->ident = unique_ptr<string>($2);
     func_def->func_f_params = unique_ptr<FuncFParamsAST>(static_cast<FuncFParamsAST*>($4));
     func_def->block = unique_ptr<BaseAST>($6);
     $$ = func_def;
   }
-  | FuncType IDENT '(' ')' Block { 
+  | Type IDENT '(' ')' Block { 
     auto func_def = new FuncDefAST();
-    func_def->func_type = unique_ptr<FuncTypeAST>(static_cast<FuncTypeAST*>($1));
+    func_def->type = unique_ptr<string>($1);
     func_def->ident = unique_ptr<string>($2);
     func_def->func_f_params = nullptr;
     func_def->block = unique_ptr<BaseAST>($5);
@@ -103,26 +119,11 @@ FuncFParams
   ;
 
 FuncFParam
-  : BType IDENT { 
+  : Type IDENT { 
     auto func_f_param = new FuncFParamAST();
-    func_f_param->btype = unique_ptr<string>($1);
+    func_f_param->type = unique_ptr<string>($1);
     func_f_param->ident = unique_ptr<string>($2);
     $$ = func_f_param;
-  }
-  ;
-
-FuncType
-  : INT {
-    auto func_type = new FuncTypeAST();
-    auto type = "i32";
-    func_type->type_name = type;
-    $$ = func_type;
-  }
-  | VOID { 
-    auto func_type = new FuncTypeAST();
-    auto type = "void";
-    func_type->type_name = type;
-    $$ = func_type;
   }
   ;
 
@@ -413,9 +414,10 @@ Decl
   ;
 
 ConstDecl
-  : CONST BType const_def_list ';' {
+  : CONST Type const_def_list ';' {
+    assert(*$2 != "void");
     auto decl_ast = new ConstDeclAST();
-    decl_ast->b_type = unique_ptr<string>($2);
+    decl_ast->type = unique_ptr<string>($2);
     decl_ast->const_def_list = unique_ptr<BaseAST>($3);
     $$ = decl_ast;
   }
@@ -435,8 +437,17 @@ const_def_list
   }
   ;
 
-BType
-  : INT { $$ = new string("i32"); }
+Type
+  : FuncType { $$ = $1; }
+  ;
+
+FuncType
+  : INT {
+    $$ = new string("i32");
+  }
+  | VOID { 
+    $$ = new string("void");
+  }
   ;
 
 ConstDef
@@ -457,9 +468,10 @@ ConstInitVal
   ;
 
 VarDecl
-  : BType var_def_list ';' { 
+  : Type var_def_list ';' { 
+    assert(*$1 != "void");
     auto var_decl = new VarDeclAST();
-    var_decl->b_type = unique_ptr<string>($1);
+    var_decl->type = unique_ptr<string>($1);
     var_decl->var_def_list = unique_ptr<BaseAST>($2);
     $$ = var_decl;
   }

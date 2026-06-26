@@ -2,9 +2,9 @@
 #include <iostream>
 #include <assert.h>
 
-// CompUnit ::= FuncDef | CompUnit FuncDef
-std::string FuncDefCompUnitAST::Dump(Context& context) const {
-  if (func_def) {
+// CompUnit ::= end_comp_unit
+std::string CompUnitAST::Dump(Context& context) const { 
+  if (end_comp_unit) {
     auto library_decl = R"(decl @getint(): i32
 decl @getch(): i32
 decl @getarray(*i32): i32
@@ -13,6 +13,7 @@ decl @putch(i32)
 decl @putarray(i32, *i32)
 decl @starttime()
 decl @stoptime()
+
 )";
     std::cout << library_decl;
     auto symbol =  std::make_shared<Symbol>(Symbol("getint", SymbolKind::FUNCTION, FuncInformation("i32")));
@@ -31,18 +32,40 @@ decl @stoptime()
     context.scope->define(symbol);
     symbol =  std::make_shared<Symbol>(Symbol("stoptime", SymbolKind::FUNCTION, FuncInformation("void")));
     context.scope->define(symbol);
+    end_comp_unit->Dump(context);
+  }
+  return "";
+}
+// end_comp_unit ::= comp_unit | end_comp_unit comp_unit
+std::string CompEndCompUnitAST::Dump(Context& context) const {
+  if (comp_unit) {
+    comp_unit->Dump(context);
+  }
+  return "";
+}
+
+std::string TwoEndCompUnitAST::Dump(Context& context) const {
+  // 这里是有先后顺序的
+  if (end_comp_unit) {
+    end_comp_unit->Dump(context);
+  }
+  if (comp_unit) {
+    comp_unit->Dump(context);
+  }
+  return "";
+}
+
+// comp_unit ::= Decl | FuncDef
+std::string FuncDefCompUnitAST::Dump(Context& context) const {
+  if (func_def) {
     func_def->Dump(context);
   }
   return "";
 }
 
-std::string TwoCompUnitAST::Dump(Context& context) const {
-  // 注意这里的顺序
-  if (comp_unit) {
-    comp_unit->Dump(context);
-  }
-  if (func_def) {
-    func_def->Dump(context);
+std::string DeclCompUnitAST::Dump(Context& context) const {
+  if (decl) {
+    decl->Dump(context);
   }
   return "";
 }
@@ -51,7 +74,7 @@ std::string TwoCompUnitAST::Dump(Context& context) const {
 std::string FuncDefAST::Dump(Context& context) const {
   context.ResetRegBuilder(); // 解析新函数，寄存器计数器清零
   // 这里注意函数名表所在的定义域
-  auto symbol =  std::make_shared<Symbol>(Symbol(*ident, SymbolKind::FUNCTION, FuncInformation(func_type->type_name)));
+  auto symbol =  std::make_shared<Symbol>(Symbol(*ident, SymbolKind::FUNCTION, FuncInformation(*type)));
   context.scope->define(symbol);
 
   context.enterNewScope();
@@ -60,7 +83,8 @@ std::string FuncDefAST::Dump(Context& context) const {
     func_f_params->Dump(context);
   }
   std::cout << ")";
-  func_type->Dump(context);
+  if (*type == "void") {;}
+  else { std::cout << " : " << *type; }
   // 把函数的返回值信息放到context中
   std::cout << " {\n";
   std::cout << "\%entry:\n";
@@ -73,7 +97,7 @@ std::string FuncDefAST::Dump(Context& context) const {
     block->Dump(context);
   }
   
-  if (!context.cur_block_has_terminator && func_type->type_name == "void") {
+  if (!context.cur_block_has_terminator && *type == "void") {
     std::cout << "  ret\n";
   }
 
@@ -101,25 +125,15 @@ void FuncFParamsAST::ParamLocalization(Context& context) {
 
 // FuncFParam ::= BType Ident ';'
 std::string FuncFParamAST::Dump(Context& context) const {
-  return "@" + *ident + ": " + *btype;
+  return "@" + *ident + ": " + *type;
 }
 
 void FuncFParamAST::ParamLocalization(Context& context) {
   std::string address = context.GetAddress(*ident);
   auto symbol = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
   context.scope->define(symbol);
-  std::cout << "  " << address << " = " << "alloc " << *btype << "\n";
+  std::cout << "  " << address << " = " << "alloc " << *type << "\n";
   std::cout << "  store " << "@" + *ident << ", " << address << "\n";
-}
-
-// FuncType ::= INT | VOID
-std::string FuncTypeAST::Dump(Context& context) const {
-  if (type_name == "void") {
-    std::cout << "";
-  } else {
-    std::cout << ": " << type_name;
-  }
-  return type_name;
 }
 
 // Block ::= '{' {BlockItem} '}'
@@ -385,21 +399,18 @@ std::string FuncCallExpAST::Dump(Context& context) const {
     std::cerr << "func " << func_name << " not found" << "\n";
   }
   auto func_inf = std::get<FuncInformation>(func_symbol->value);
-  
+  std::string param;
+  if (func_r_params) {
+    param = func_r_params->Dump(context);
+  } else {
+    param = "";
+  }
   if (func_inf.ret_type != "void") {
     std::string func_reg = context.NewReg();
-    if (func_r_params) {
-      std::cout << "  " << func_reg << " = call @" << func_name << "(" << func_r_params->Dump(context) << ")\n";
-    } else {
-      std::cout << "  " << func_reg << " = call @" << func_name << "()\n";
-    }
+      std::cout << "  " << func_reg << " = call @" << func_name << "(" << param << ")\n";
     return func_reg;
   } else { 
-    if (func_r_params) {
-      std::cout << "  call @" << func_name << "(" << func_r_params->Dump(context) << ")" << "\n";
-    } else {
-      std::cout << "  call @" << func_name << "()" << "\n";
-    }
+      std::cout << "  call @" << func_name << "(" << param << ")" << "\n";
     return "";
   }
 }
@@ -417,8 +428,7 @@ std::string FuncRParamsAST::Dump(Context& context) const {
       params = params + ", " + func_r_params[i]->Dump(context);
     }
   }
-  std::cout << params;
-  return "";
+  return params;
 }
 
 // PrimaryExp ::= '(' Exp ')' | LVal | Number
@@ -794,7 +804,7 @@ std::string VarDeclDecAST::Dump(Context& context) const {
 
 // ConstDecl ::= 'const' BType ConstDef { ',' ConstDef } ';'
 std::string ConstDeclAST::Dump(Context& context) const {
-  assert(*b_type == "i32");
+  assert(*type == "i32");
   const_def_list->Dump(context);
   return "";
 }
@@ -808,7 +818,7 @@ std::string ConstDefListAST::Dump(Context& context) const {
 
 // VarDecl ::= BType VarDef { ',' VarDef } ';'
 std::string VarDeclAST::Dump(Context& context) const {
-  assert(*b_type == "i32");
+  context.decl_type_context = std::make_shared<std::string>(*type);
   var_def_list->Dump(context);
   return "";
 }
@@ -828,19 +838,28 @@ std::string VarDefListAST::Dump(Context& context) const {
 std::string IDENTVarAST::Dump(Context& context) const { 
   std::string address = context.GetAddress(*ident);
   auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
+  std::string b_type = *context.decl_type_context;
 
-  std::cout << "  " << address << " = alloc i32\n";
-
+  if (context.scope->isGlobal()) {
+    std::cout << "global " << address << " = alloc " << b_type << ", " << "zeroinit\n";
+  } else {
+    std::cout << "  " << address << " = alloc " << b_type << "\n";
+  }
   context.scope->define(sym);
   return "";
 }
 
 std::string ThreeVarAST::Dump(Context& context) const { 
   std::string address = context.GetAddress(*ident);
-  std::string init_val_reg = init_val->Dump(context);
+  std::string b_type = *context.decl_type_context;
   auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
-  std::cout << "  " << address << " = alloc i32\n";
-  std::cout << "  " << "store " << init_val_reg << ", " << address << "\n";
+  if (context.scope->isGlobal()) {
+    std::cout << "global " << address << " = alloc " << b_type << ", " << init_val->getValue(context) << "\n";
+  } else {
+    std::cout << "  " << address << " = alloc " << b_type << "\n";
+    std::string init_val_reg = init_val->Dump(context);
+    std::cout << "  " << "store " << init_val_reg << ", " << address << "\n";
+  }
   context.scope->define(sym);
   return "";
 }
