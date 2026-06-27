@@ -132,7 +132,7 @@ void IR::IRVisitor::Visit(const koopa_raw_value_t &value) {
       break;
     case KOOPA_RVT_ALLOC:
       // 访问 alloc 指令
-      reg_name = context.GetAddress(ObjKind::LOCALVAR_ADD);
+      reg_name = context.GetAddress(ObjKind::LOCAL_VAR_ADD);
       SetReg(value, reg_name);
       break;
     case KOOPA_RVT_BRANCH:
@@ -148,9 +148,11 @@ void IR::IRVisitor::Visit(const koopa_raw_value_t &value) {
       // 函数定义时，建立函数参数value到对应寄存器或地址的映射
       SetReg(value, context.GetParamRegOrAddForGet(kind.data.func_arg_ref.index));
       break;
+    case KOOPA_RVT_GLOBAL_ALLOC:
+      Visit(kind.data.global_alloc, value);
+      break;
     default:
       // 其他类型暂时遇不到
-      std::cout << (kind.tag == KOOPA_RVT_CALL);
       assert(false);
   }
 }
@@ -175,7 +177,7 @@ void IR::IRVisitor::Visit(const koopa_raw_return_t &ret) {
   if (ret.value != nullptr) {
     RegObj reg_name = GetReg(ret.value);  
     std::cout << "  # " << "ret " << reg_name.reg_name << std::endl;
-    if (reg_name.kind == ObjKind::LOCALVAR_ADD) {
+    if (reg_name.kind == ObjKind::LOCAL_VAR_ADD) {
       std::cout << "  lw a0, " << reg_name.reg_name << std::endl;
     } else if (reg_name.kind == ObjKind::TEMP_REG) {
       std::cout << "  mv a0, " << reg_name.reg_name << std::endl;
@@ -206,16 +208,16 @@ void IR::IRVisitor::Visit(const koopa_raw_binary_t &binary, koopa_raw_value_t va
 
   std::string lhs_reg_name = lhs_reg.reg_name;
   std::string rhs_reg_name = rhs_reg.reg_name;
-  RegObj dest_address = context.GetAddress(ObjKind::LOCALVAR_ADD);
+  RegObj dest_address = context.GetAddress(ObjKind::LOCAL_VAR_ADD);
 
   std::cout << "  # " << dest_address.reg_name << " = " << binary.op << " " << lhs_reg_name << ", " << rhs_reg_name << std::endl;
 
-  if (lhs_reg_kind == ObjKind::LOCALVAR_ADD) {
+  if (lhs_reg_kind == ObjKind::LOCAL_VAR_ADD) {
     std::string temp = context.t_reg_builder.NewReg().reg_name;
     std::cout << "  lw " << temp << ", " << lhs_reg_name << std::endl;
     lhs_reg_name = temp;
   }
-  if (rhs_reg_kind == ObjKind::LOCALVAR_ADD) {
+  if (rhs_reg_kind == ObjKind::LOCAL_VAR_ADD) {
     std::string temp = context.t_reg_builder.NewReg().reg_name;
     std::cout << "  lw " << temp << ", " << rhs_reg_name << std::endl;
     rhs_reg_name = temp;
@@ -274,30 +276,39 @@ void IR::IRVisitor::Visit(const koopa_raw_binary_t &binary, koopa_raw_value_t va
 
 void IR::IRVisitor::Visit(const koopa_raw_load_t &load, koopa_raw_value_t value) {
   // 访问 load 指令
-  // %0 = load @x
-  // assert(GetReg(load.src).kind == ObjKind::LOCALVAR_ADD);
-  RegObj dest_address = context.GetAddress(ObjKind::LOCALVAR_ADD);
-  std::string src_reg = GetReg(load.src).reg_name;
+  // %0 = load @x(local_add/global_add)
+  // assert(GetReg(load.src).kind == ObjKind::LOCAL_VAR_ADD);
+  RegObj dest_address = context.GetAddress(ObjKind::LOCAL_VAR_ADD);
+  RegObj src_reg = GetReg(load.src);
 
-  std::cout << "  # " << dest_address.reg_name << " = load " << src_reg << std::endl;
-  std::cout << "  lw " << "t0" << ", " << src_reg << std::endl;
-  std::cout << "  sw " << "t0" << ", " << dest_address.reg_name << std::endl;
+  std::cout << "  # " << dest_address.reg_name << " = load " << src_reg.reg_name << std::endl;
+  RegObj temp;
+  if (src_reg.kind == ObjKind::LOCAL_VAR_ADD) {
+    temp = AddToReg(src_reg);
+  } else if (src_reg.kind == ObjKind::GLOBAL_VAR_ADD) { 
+    temp = AddToReg(GlobalVarToAdd(src_reg));
+  }
+  std::cout << "  sw " << temp.reg_name << ", " << dest_address.reg_name << std::endl;
   SetReg(value, dest_address);
+  context.t_reg_builder.Reset();
 }
 
 void IR::IRVisitor::Visit(const koopa_raw_store_t &store) {
   // 访问 store 指令
-  // store %0, @x | store 10, @x | store @x(函数参数/栈地址), @y
+  // store %0, @x(栈地址，全局地址) | store 10, @x | store @x(函数参数/栈地址), @y
   RegObj src_reg = GetReg(store.value);
   RegObj dest_reg = GetReg(store.dest);
 
   if (src_reg.kind == ObjKind::FUNC_PARAM_ADD 
-    || src_reg.kind == ObjKind::LOCALVAR_ADD
+    || src_reg.kind == ObjKind::LOCAL_VAR_ADD
     || src_reg.kind == ObjKind::RA_ADD ) {
     src_reg = AddToReg(src_reg);
   }
   
-  assert(dest_reg.kind == ObjKind::LOCALVAR_ADD);
+  if (dest_reg.kind == ObjKind::GLOBAL_VAR_ADD) {
+    dest_reg = GlobalVarToAdd(dest_reg);
+  }
+  assert(dest_reg.kind == ObjKind::LOCAL_VAR_ADD || dest_reg.kind == ObjKind::TEMP_ADD);
   
   std::string src_reg_name = src_reg.reg_name;
   std::string dest_address = dest_reg.reg_name;
@@ -355,10 +366,28 @@ void IR::IRVisitor::Visit(const koopa_raw_call_t &call, koopa_raw_value_t value)
 
   // 调用之后要把返回值放到local_var_reg上, 如果有的话
   if (value->ty->tag != KOOPA_RTT_UNIT) {
-    RegObj reg_obj = context.GetAddress(ObjKind::LOCALVAR_ADD);
+    RegObj reg_obj = context.GetAddress(ObjKind::LOCAL_VAR_ADD);
     SetReg(value, reg_obj);
     std::cout << "  sw a0, " << reg_obj.reg_name << "\n";
   }
+}
+
+void IR::IRVisitor::Visit(const koopa_raw_global_alloc_t &alloc, koopa_raw_value_t value) {
+  std::string var_name = value->name;
+  var_name = var_name.substr(1);
+  if (alloc.init->kind.tag == KOOPA_RVT_ZERO_INIT) {
+    std::cout << "  .bss\n";
+    std::cout << "  .globl " << var_name << "\n";
+    std::cout << var_name << ": \n";
+    std::cout << "  .zero 4" << "\n";
+  } else {
+    int init_value = alloc.init->kind.data.integer.value;
+    std::cout << "  .data" << std::endl;
+    std::cout << "  .globl " << var_name << std::endl;
+    std::cout << var_name << ":\n";
+    std::cout << "  .word " << init_value << std::endl;
+  }
+  SetReg(value, RegObj(var_name, ObjKind::GLOBAL_VAR_ADD));
 }
 
 // 用于统计函数内有返回值的指令数

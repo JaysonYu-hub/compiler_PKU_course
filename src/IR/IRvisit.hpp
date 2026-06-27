@@ -38,8 +38,10 @@ namespace IR {
     TEMP_REG,
     FUNC_PARAM_REG,
     RA_ADD,
-    LOCALVAR_ADD,
-    FUNC_PARAM_ADD
+    LOCAL_VAR_ADD,
+    FUNC_PARAM_ADD,
+    GLOBAL_VAR_ADD,
+    TEMP_ADD
   };
 
   struct RegObj {
@@ -83,7 +85,7 @@ namespace IR {
           return RegObj(std::to_string(call_stack_info.stack_size - 4) + "(sp)", ObjKind::RA_ADD);
           break;
         }
-        case ObjKind::LOCALVAR_ADD: {
+        case ObjKind::LOCAL_VAR_ADD: {
           if (call_stack_info.local_var_sp - 4 >= call_stack_info.param_sp_top) {
             call_stack_info.local_var_sp -= 4;
             return RegObj(std::to_string(call_stack_info.local_var_sp) + "(sp)", kind);
@@ -184,11 +186,21 @@ namespace IR {
     // 把地址寄存器加载到临时寄存器中
     RegObj AddToReg(RegObj reg) {
       assert(reg.kind == ObjKind::FUNC_PARAM_ADD ||
-      reg.kind == ObjKind::LOCALVAR_ADD ||
-      reg.kind == ObjKind::RA_ADD
+      reg.kind == ObjKind::LOCAL_VAR_ADD ||
+      reg.kind == ObjKind::RA_ADD ||
+      reg.kind == ObjKind::TEMP_ADD
       );
       RegObj load_reg = context.t_reg_builder.NewReg();
       std::cout << "  lw " << load_reg.reg_name << ", " << reg.reg_name << "\n";
+      return load_reg;
+    }
+    // 把全局变量加载到0(临时寄存器)中
+    RegObj GlobalVarToAdd(RegObj reg) {
+      assert(reg.kind == ObjKind::GLOBAL_VAR_ADD);
+      RegObj load_reg = context.t_reg_builder.NewReg();
+      std::cout << "  la " << load_reg.reg_name << ", " << reg.reg_name << "\n";
+      load_reg.reg_name =  "0(" + load_reg.reg_name + ")";
+      load_reg.kind = ObjKind::TEMP_ADD;
       return load_reg;
     }
 
@@ -206,6 +218,7 @@ namespace IR {
     void Visit(const koopa_raw_branch_t &branch);
     void Visit(const koopa_raw_jump_t &jump);
     void Visit(const koopa_raw_call_t &call, koopa_raw_value_t value);
+    void Visit(const koopa_raw_global_alloc_t &alloc, koopa_raw_value_t value);
     // 遍历函数的指令以得到分配的空间
     void VisitFuncIns(const koopa_raw_slice_t &slice, IR::FuncInformation &func_information);
     void VisitFuncIns(const koopa_raw_value_t &value, IR::FuncInformation &func_information);
