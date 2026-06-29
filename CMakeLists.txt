@@ -54,6 +54,8 @@ file(GLOB_RECURSE CXX_SOURCES "src/*.cpp")
 file(GLOB_RECURSE CC_SOURCES "src/*.cc")
 set(SOURCES ${C_SOURCES} ${CXX_SOURCES} ${CC_SOURCES}
             ${FLEX_Lexer_OUTPUTS} ${BISON_Parser_OUTPUT_SOURCE})
+list(APPEND SOURCES
+  src/ast/codegen.cpp)
 
 # executable
 add_executable(compiler ${SOURCES})

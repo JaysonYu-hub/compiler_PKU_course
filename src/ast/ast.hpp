@@ -5,7 +5,9 @@
 #include <unordered_map>
 #include <iostream>
 #include <variant>
-#include <assert.h>
+#include <cassert>
+
+class CodeGenerator;
 
 // 临时寄存器生成器, 在函数开始时reset
 class Counter {
@@ -267,6 +269,10 @@ class BaseAST {
 public:
   virtual ~BaseAST() = default;
   virtual std::string Dump(Context& context) const = 0;
+  virtual std::string Generate(Context& context) const {
+    (void)context;
+    return "";
+  }
 };
 
 class ValueAST : public BaseAST {
@@ -285,35 +291,39 @@ public:
 };
 
 // end_comp_unit ::= comp_unit | end_comp_unit comp_unit
-class CompEndCompUnitAST : public BaseAST {
+class CompUnitSequenceAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> comp_unit;
-  CompEndCompUnitAST() = default;
+  CompUnitSequenceAST() = default;
   std::string Dump(Context& context) const override;
 };
+using CompEndCompUnitAST = CompUnitSequenceAST;
 
-class TwoEndCompUnitAST : public BaseAST {
+class CompUnitListAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> end_comp_unit;
   std::unique_ptr<BaseAST> comp_unit;
-  TwoEndCompUnitAST() = default;
+  CompUnitListAST() = default;
   std::string Dump(Context& context) const override;
 };
+using TwoEndCompUnitAST = CompUnitListAST;
 
 // comp_unit ::= Decl | FuncDef
-class FuncDefCompUnitAST : public BaseAST {
+class FunctionDefinitionUnitAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> func_def;
-  FuncDefCompUnitAST() = default; 
+  FunctionDefinitionUnitAST() = default; 
   std::string Dump(Context& context) const override;
 };
+using FuncDefCompUnitAST = FunctionDefinitionUnitAST;
 
-class DeclCompUnitAST : public BaseAST {
+class DeclarationUnitAST : public BaseAST {
 public:
     std::unique_ptr<BaseAST> decl;
-    DeclCompUnitAST() = default;
+    DeclarationUnitAST() = default;
     std::string Dump(Context& context) const override;
 };
+using DeclCompUnitAST = DeclarationUnitAST;
 
 class FuncFParamsAST;
 // FuncDef ::= Type IDENT '(' [FuncFParams] ')' Block
@@ -352,21 +362,23 @@ public:
 };
 
 // BlockItem ::= Decl | Stmt
-class DeclBloAST : public BaseAST {
+class DeclBlockAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> decl;
-  DeclBloAST() = default; 
+  DeclBlockAST() = default; 
 
   std::string Dump(Context& context) const override;
 };
+using DeclBloAST = DeclBlockAST;
 
-class StmtBloAST : public BaseAST {
+class StmtBlockAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> stmt;
-  StmtBloAST() = default; 
+  StmtBlockAST() = default; 
 
   std::string Dump(Context& context) const override;
 };
+using StmtBloAST = StmtBlockAST;
 
 // Block ::= '{' {BlockItem} '}'
 class BlockAST : public BaseAST {
@@ -379,21 +391,23 @@ public:
 };
 
 // Stmt ::= UnmatchedStmt | MatchedStmt
-class UnmatchedStmtStmtAST : public BaseAST {
+class UnmatchedStmtWrapperAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> unmatched_stmt;
-  UnmatchedStmtStmtAST() = default; 
+  UnmatchedStmtWrapperAST() = default; 
 
   std::string Dump(Context& context) const override;
 };
+using UnmatchedStmtStmtAST = UnmatchedStmtWrapperAST;
 
-class MatchedStmtStmtAST : public BaseAST {
+class MatchedStmtWrapperAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> matched_stmt;
-  MatchedStmtStmtAST() = default; 
+  MatchedStmtWrapperAST() = default; 
 
   std::string Dump(Context& context) const override;
 };
+using MatchedStmtStmtAST = MatchedStmtWrapperAST;
 
 // UnmatchedStmt ::= IF '(' Exp ')' Stmt | IF '(' Exp ')' MatchedStmt ELSE UnMatchedStmt | WHILE '(' Exp ')' UnmatchedStmt
 class IfUnmatchedStmtAST : public BaseAST {
@@ -558,32 +572,35 @@ public:
 };
 
 // PrimaryExp ::= '(' Exp ')' | LVal | Number
-class ThreePriAST : public ValueAST {
+class ParenthesizedExprAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> exp;
-  ThreePriAST() = default; 
+  ParenthesizedExprAST() = default; 
 
   std::string Dump(Context& context) const override;
   int getValue(Context& context) const override;
 };
+using ThreePriAST = ParenthesizedExprAST;
 
-class LValPriAST : public ValueAST {
+class LValuePrimaryExprAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> lval;
-  LValPriAST() = default; 
+  LValuePrimaryExprAST() = default; 
 
   std::string Dump(Context& context) const override;
   int getValue(Context& context) const override;
 };
+using LValPriAST = LValuePrimaryExprAST;
 
-class NumberPriAST : public ValueAST {
+class NumberPrimaryExprAST : public ValueAST {
 public:
   int value;
-  NumberPriAST() = default; 
+  NumberPrimaryExprAST() = default; 
 
   std::string Dump(Context& context) const override;
   int getValue(Context& context) const override;
 };
+using NumberPriAST = NumberPrimaryExprAST;
 
 //'+' | '-' | '!' | '*' | '/' | '%'
 class OpAST : public BaseAST {
@@ -604,16 +621,17 @@ public:
   int getValue(Context& context) const override;
 };
 
-class ThreeMulExpAST : public ValueAST {
+class BinaryMulExprAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> mul_exp;
   std::unique_ptr<OpAST> op; // '*' | '/' | '%'
   std::unique_ptr<ValueAST> unary_exp;
 
-  ThreeMulExpAST() = default; 
+  BinaryMulExprAST() = default; 
   std::string Dump(Context& context) const override;
   int getValue(Context& context) const override;
 };
+using ThreeMulExpAST = BinaryMulExprAST;
 
 // AddExp ::= MulExp | AddExp ('+' | '-') MulExp
 class MulAddExpAST : public ValueAST {
@@ -625,16 +643,17 @@ public:
   int getValue(Context& context) const override;
 };
 
-class ThreeAddExpAST : public ValueAST {
+class BinaryAddExprAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> add_exp;
   std::unique_ptr<OpAST> op; // '+' or '-'
   std::unique_ptr<ValueAST> mul_exp;
 
-  ThreeAddExpAST() = default; 
+  BinaryAddExprAST() = default; 
   std::string Dump(Context& context) const override; 
   int getValue(Context& context) const override;
 };
+using ThreeAddExpAST = BinaryAddExprAST;
 
 // RelExp ::= AddExp | RelExp ('<' | '>' | '<=' | '>=') AddExp
 class AddRelExpAST : public ValueAST {
@@ -646,16 +665,17 @@ public:
   int getValue(Context& context) const override;
 };
 
-class ThreeRelExpAST : public ValueAST {
+class BinaryRelExprAST : public ValueAST {
 public: 
   std::unique_ptr<ValueAST> rel_exp;
   std::unique_ptr<OpAST> op; // '<' | '>' | '<=' | '>='
   std::unique_ptr<ValueAST> add_exp;
 
-  ThreeRelExpAST() = default; 
+  BinaryRelExprAST() = default; 
   std::string Dump(Context& context) const override; 
   int getValue(Context& context) const override;
 };
+using ThreeRelExpAST = BinaryRelExprAST;
 
 // EqExp ::= RelExp | EqExp ('==' | '!=') RelExp
 class RelEqExpAST : public ValueAST {
@@ -667,16 +687,17 @@ public:
   int getValue(Context& context) const override;
 };
 
-class ThreeEqExpAST : public ValueAST {
+class BinaryEqExprAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> eq_exp;
   std::unique_ptr<OpAST> op; // '==' | '!='
   std::unique_ptr<ValueAST> rel_exp;
 
-  ThreeEqExpAST() = default; 
+  BinaryEqExprAST() = default; 
   std::string Dump(Context& context) const override; 
   int getValue(Context& context) const override;
 };
+using ThreeEqExpAST = BinaryEqExprAST;
 
 // LAndExp ::= EqExp | LAndExp '&&' EqExp
 class EqLAndExpAST : public ValueAST {
@@ -688,16 +709,17 @@ public:
   int getValue(Context& context) const override;
 };
 
-class ThreeLAndExpAST : public ValueAST {
+class BinaryLogicalAndExprAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> land_exp;
   std::unique_ptr<OpAST> op; // '&&'
   std::unique_ptr<ValueAST> eq_exp;
 
-  ThreeLAndExpAST() = default; 
+  BinaryLogicalAndExprAST() = default; 
   std::string Dump(Context& context) const override; 
   int getValue(Context& context) const override;
 };
+using ThreeLAndExpAST = BinaryLogicalAndExprAST;
 
 // LOrExp ::= LAndExp | LOrExp '||' LAndExp
 class LAndLOrExpAST : public ValueAST {
@@ -709,16 +731,17 @@ public:
   int getValue(Context& context) const override;
 };
 
-class ThreeLOrExpAST : public ValueAST {
+class BinaryLogicalOrExprAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> lor_exp;
   std::unique_ptr<OpAST> op; // '||'
   std::unique_ptr<ValueAST> land_exp;
 
-  ThreeLOrExpAST() = default; 
+  BinaryLogicalOrExprAST() = default; 
   std::string Dump(Context& context) const override;  
   int getValue(Context& context) const override;
-};  
+};
+using ThreeLOrExpAST = BinaryLogicalOrExprAST;
 
 // LVal = IDENT | IDENT '[' Exp ']'
 class LValAST : public ValueAST {
@@ -732,15 +755,16 @@ public:
   int getValue(Context& context) const override;
 };
 
-class FourLValAST : public ValueAST {
+class ArrayLValueAST : public ValueAST {
 public:
   std::unique_ptr<std::string> ident;
   std::unique_ptr<ValueAST> exp;
 
-  FourLValAST() = default; 
+  ArrayLValueAST() = default; 
   std::string Dump(Context& context) const override;
   int getValue(Context& context) const override;
 };
+using FourLValAST = ArrayLValueAST;
 
 // ConstExp ::= Exp
 class ConstExpAST : public ValueAST {
@@ -760,12 +784,12 @@ public:
 
   std::string Dump(Context& context) const override;
 };
-class ThreeConstInitValAST;
+class CompoundConstInitValueAST;
 class ArrayConstDefAST : public BaseAST { 
   public:
   std::unique_ptr<std::string> ident;
   std::unique_ptr<ValueAST> const_exp;
-  std::unique_ptr<ThreeConstInitValAST> const_init_val;
+  std::unique_ptr<CompoundConstInitValueAST> const_init_val;
   ArrayConstDefAST() = default;
   std::string Dump(Context& context) const override;
 };
@@ -787,34 +811,37 @@ public:
   std::string Dump(Context& context) const override;
 };
 
-class ThreeConstInitValAST : public ValueAST {
+class CompoundConstInitValueAST : public ValueAST {
 public:
   // 这里不使用base是为了使用list中的vector
   std::unique_ptr<ConstInitValListAST> const_init_val_list;
-  ThreeConstInitValAST() = default; 
+  CompoundConstInitValueAST() = default; 
 
   std::string Dump(Context& context) const override;
   int getValue(Context& context) const override;
   std::vector<int> getValues(Context& context) const;
 };
+using ThreeConstInitValAST = CompoundConstInitValueAST;
 
 
 // Decl ::= ConstDecl | VarDecl
-class ConstDeclDecAST : public BaseAST {
+class ConstDeclWrapperAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> const_decl;
-  ConstDeclDecAST() = default; 
+  ConstDeclWrapperAST() = default; 
 
   std::string Dump(Context& context) const override;
 };
+using ConstDeclDecAST = ConstDeclWrapperAST;
 
-class VarDeclDecAST : public BaseAST {
+class VarDeclWrapperAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> var_decl;
-  VarDeclDecAST() = default; 
+  VarDeclWrapperAST() = default; 
 
   std::string Dump(Context& context) const override;
 };
+using VarDeclDecAST = VarDeclWrapperAST;
 
 // ConstDecl ::= 'const' Type ConstDef { ',' ConstDef } ';'
 class ConstDeclAST : public BaseAST {
@@ -854,42 +881,46 @@ public:
 
 // VarDef ::= IDENT | IDENT '=`' InitVal | IDENT '[' ConstExp ']' | IDENT '[' ConstExp ']' '=' InitVal
 // 这里单独的IDENT也被称为变量声明
-class IDENTVarAST : public BaseAST {
+class SimpleVarDefAST : public BaseAST {
 public:
   std::unique_ptr<std::string> ident;
-  IDENTVarAST() = default; 
+  SimpleVarDefAST() = default; 
 
   std::string Dump(Context& context) const override;
 };
+using IDENTVarAST = SimpleVarDefAST;
 
-class ThreeVarAST : public BaseAST {
+class InitializedVarDefAST : public BaseAST {
 public:
   std::unique_ptr<std::string> ident;
   std::unique_ptr<ValueAST> init_val;
-  ThreeVarAST() = default; 
+  InitializedVarDefAST() = default; 
 
   std::string Dump(Context& context) const override;
 };
+using ThreeVarAST = InitializedVarDefAST;
 
-class FourVarDefAST : public BaseAST { 
+class ArrayVarDefAST : public BaseAST { 
   public:
   std::unique_ptr<std::string> ident;
   std::unique_ptr<ValueAST> const_exp;
-  FourVarDefAST() = default; 
+  ArrayVarDefAST() = default; 
 
   std::string Dump(Context& context) const override;
 };
-class ThreeInitValAST;
-class SixVarDefAST : public BaseAST { 
+using FourVarDefAST = ArrayVarDefAST;
+class CompoundInitValueAST;
+class ArrayInitializedVarDefAST : public BaseAST { 
   public:
   std::unique_ptr<std::string> ident;
   std::unique_ptr<ValueAST> const_exp;
-  std::unique_ptr<ThreeInitValAST> init_val;
-  SixVarDefAST() = default; 
+  std::unique_ptr<CompoundInitValueAST> init_val;
+  ArrayInitializedVarDefAST() = default; 
 
   std::string Dump(Context& context) const override;
   std::vector<std::string> DumpList(Context& context) const;
 };
+using SixVarDefAST = ArrayInitializedVarDefAST;
 
 // InitVal ::= Exp | '{' Exp { ',' Exp } '}'
 class InitValAST : public ValueAST {
@@ -910,11 +941,12 @@ public:
   std::vector<int> getValue(Context& context) const;
 };
 
-class ThreeInitValAST : public ValueAST {
+class CompoundInitValueAST : public ValueAST {
 public:
   std::unique_ptr<InitValListAST> init_val_list;
-  ThreeInitValAST() = default; 
+  CompoundInitValueAST() = default; 
 
   std::string Dump(Context& context) const override;
   int getValue(Context& context) const override;
 };
+using ThreeInitValAST = CompoundInitValueAST;

@@ -63,12 +63,12 @@ CompUnit
 
 end_comp_unit
   : comp_unit {
-    auto start = new CompEndCompUnitAST();
+    auto start = new CompUnitSequenceAST();
     start->comp_unit = unique_ptr<BaseAST>($1);
     $$ = start;
   }
   | end_comp_unit comp_unit { 
-    auto start = new TwoEndCompUnitAST();
+    auto start = new CompUnitListAST();
     start->end_comp_unit = unique_ptr<BaseAST>($1);
     start->comp_unit = unique_ptr<BaseAST>($2);
     $$ = start;
@@ -77,12 +77,12 @@ end_comp_unit
 
 comp_unit 
   : FuncDef { 
-    auto comp_unit = new FuncDefCompUnitAST();
+    auto comp_unit = new FunctionDefinitionUnitAST();
     comp_unit->func_def = unique_ptr<BaseAST>($1);
     $$ = comp_unit;
   }
   | Decl { 
-    auto comp_unit = new DeclCompUnitAST();
+    auto comp_unit = new DeclarationUnitAST();
     comp_unit->decl = unique_ptr<BaseAST>($1);
     $$ = comp_unit;
   }
@@ -150,25 +150,25 @@ block_item_list
 
 BlockItem
   : Stmt {
-    auto stmt_blo = new StmtBloAST();
-    stmt_blo->stmt = unique_ptr<BaseAST>($1);
-    $$ = stmt_blo;
+    auto stmt_block = new StmtBlockAST();
+    stmt_block->stmt = unique_ptr<BaseAST>($1);
+    $$ = stmt_block;
   }
   | Decl { 
-    auto decl_blo = new DeclBloAST();
-    decl_blo->decl = unique_ptr<BaseAST>($1);
-    $$ = decl_blo;
+    auto decl_block = new DeclBlockAST();
+    decl_block->decl = unique_ptr<BaseAST>($1);
+    $$ = decl_block;
    }
   ;
 
 Stmt
   : MatchedStmt { 
-    auto stmt = new MatchedStmtStmtAST();
+    auto stmt = new MatchedStmtWrapperAST();
     stmt->matched_stmt = unique_ptr<BaseAST>($1);
     $$ = stmt;
   }
   | UnmatchedStmt { 
-    auto stmt = new UnmatchedStmtStmtAST();
+    auto stmt = new UnmatchedStmtWrapperAST();
     stmt->unmatched_stmt = unique_ptr<BaseAST>($1);
     $$ = stmt;
   }
@@ -304,17 +304,17 @@ Exp
 
 PrimaryExp 
   : '(' Exp ')' {
-    auto paren_expr = new ThreePriAST();
+    auto paren_expr = new ParenthesizedExprAST();
     paren_expr->exp = unique_ptr<ValueAST>($2);
     $$ = paren_expr;
   }
   | Number {
-    auto number_exp = new NumberPriAST();
+    auto number_exp = new NumberPrimaryExprAST();
     number_exp->value = $1;
     $$ = number_exp;  
   }
   | LVal {
-    auto lval_exp = new LValPriAST();
+    auto lval_exp = new LValuePrimaryExprAST();
     lval_exp->lval = unique_ptr<ValueAST>($1);
     $$ = lval_exp;
   }
@@ -342,11 +342,11 @@ AddExp
     $$ = mul_add_exp;
   }
   | AddExp AddOp MulExp {
-    auto three_add_exp = new ThreeAddExpAST();
-    three_add_exp->add_exp = unique_ptr<ValueAST>($1);
-    three_add_exp->op = unique_ptr<OpAST>($2);
-    three_add_exp->mul_exp = unique_ptr<ValueAST>($3);
-    $$ = three_add_exp;
+    auto binary_add_exp = new BinaryAddExprAST();
+    binary_add_exp->add_exp = unique_ptr<ValueAST>($1);
+    binary_add_exp->op = unique_ptr<OpAST>($2);
+    binary_add_exp->mul_exp = unique_ptr<ValueAST>($3);
+    $$ = binary_add_exp;
   }
   ;
 
@@ -357,11 +357,11 @@ RelExp
     $$ = add_rel_exp;
   }
   | RelExp ComOp AddExp {
-    auto three_rel_exp = new ThreeRelExpAST();
-    three_rel_exp->rel_exp = unique_ptr<ValueAST>($1);
-    three_rel_exp->op = unique_ptr<OpAST>($2);
-    three_rel_exp->add_exp = unique_ptr<ValueAST>($3);
-    $$ = three_rel_exp;
+    auto binary_rel_exp = new BinaryRelExprAST();
+    binary_rel_exp->rel_exp = unique_ptr<ValueAST>($1);
+    binary_rel_exp->op = unique_ptr<OpAST>($2);
+    binary_rel_exp->add_exp = unique_ptr<ValueAST>($3);
+    $$ = binary_rel_exp;
   }
   ;
 
@@ -372,11 +372,11 @@ EqExp
     $$ = rel_eq_exp;
   }
   | EqExp EquOp RelExp {
-    auto three_eq_exp = new ThreeEqExpAST();
-    three_eq_exp->eq_exp = unique_ptr<ValueAST>($1);
-    three_eq_exp->op = unique_ptr<OpAST>($2);
-    three_eq_exp->rel_exp = unique_ptr<ValueAST>($3);
-    $$ = three_eq_exp;
+    auto binary_eq_exp = new BinaryEqExprAST();
+    binary_eq_exp->eq_exp = unique_ptr<ValueAST>($1);
+    binary_eq_exp->op = unique_ptr<OpAST>($2);
+    binary_eq_exp->rel_exp = unique_ptr<ValueAST>($3);
+    $$ = binary_eq_exp;
   }
   ;
 
@@ -387,11 +387,11 @@ LAndExp
     $$ = eq_land_exp;
   }
   | LAndExp LAndOp EqExp {
-    auto three_land_exp = new ThreeLAndExpAST();
-    three_land_exp->land_exp = unique_ptr<ValueAST>($1);
-    three_land_exp->op = unique_ptr<OpAST>($2);
-    three_land_exp->eq_exp = unique_ptr<ValueAST>($3);
-    $$ = three_land_exp;
+    auto binary_land_exp = new BinaryLogicalAndExprAST();
+    binary_land_exp->land_exp = unique_ptr<ValueAST>($1);
+    binary_land_exp->op = unique_ptr<OpAST>($2);
+    binary_land_exp->eq_exp = unique_ptr<ValueAST>($3);
+    $$ = binary_land_exp;
   }
   ;
 
@@ -402,17 +402,17 @@ LOrExp
     $$ = land_lor_exp;
   }
   | LOrExp LOrOp LAndExp {
-    auto three_lor_exp = new ThreeLOrExpAST();
-    three_lor_exp->lor_exp = unique_ptr<ValueAST>($1);
-    three_lor_exp->op = unique_ptr<OpAST>($2);
-    three_lor_exp->land_exp = unique_ptr<ValueAST>($3);
-    $$ = three_lor_exp;
+    auto binary_lor_exp = new BinaryLogicalOrExprAST();
+    binary_lor_exp->lor_exp = unique_ptr<ValueAST>($1);
+    binary_lor_exp->op = unique_ptr<OpAST>($2);
+    binary_lor_exp->land_exp = unique_ptr<ValueAST>($3);
+    $$ = binary_lor_exp;
   }
   ;
 
 Decl
-  : ConstDecl { auto decl = new ConstDeclDecAST(); decl->const_decl = unique_ptr<BaseAST>($1); $$ = decl; }
-  | VarDecl   { auto decl = new VarDeclDecAST(); decl->var_decl = unique_ptr<BaseAST>($1); $$ = decl; }
+  : ConstDecl { auto decl = new ConstDeclWrapperAST(); decl->const_decl = unique_ptr<BaseAST>($1); $$ = decl; }
+  | VarDecl   { auto decl = new VarDeclWrapperAST(); decl->var_decl = unique_ptr<BaseAST>($1); $$ = decl; }
   ;
 
 ConstDecl
@@ -463,7 +463,7 @@ ConstDef
     auto const_def = new ArrayConstDefAST();
     const_def->ident = unique_ptr<string>($1);
     const_def->const_exp = unique_ptr<ValueAST>($3);
-    const_def->const_init_val = unique_ptr<ThreeConstInitValAST>(static_cast<ThreeConstInitValAST*>($6));
+    const_def->const_init_val = unique_ptr<CompoundConstInitValueAST>(static_cast<CompoundConstInitValueAST*>($6));
     $$ = const_def;
   }
   ;
@@ -522,27 +522,27 @@ var_def_list
 
 VarDef
   : IDENT { 
-    auto var_def = new IDENTVarAST();
+    auto var_def = new SimpleVarDefAST();
     var_def->ident = unique_ptr<string>($1);
     $$ = var_def;
   }
   | IDENT '[' ConstExp ']' { 
-    auto var_def = new FourVarDefAST();
+    auto var_def = new ArrayVarDefAST();
     var_def->ident = unique_ptr<string>($1);
     var_def->const_exp = unique_ptr<ValueAST>($3);
     $$ = var_def;
   }
   | IDENT ASSIGN InitVal { 
-    auto var_def = new ThreeVarAST();
+    auto var_def = new InitializedVarDefAST();
     var_def->ident = unique_ptr<string>($1);
     var_def->init_val = unique_ptr<ValueAST>($3);
     $$ = var_def;
   }
   | IDENT '[' ConstExp ']' ASSIGN InitVal { 
-    auto var_def = new SixVarDefAST();
+    auto var_def = new ArrayInitializedVarDefAST();
     var_def->ident = unique_ptr<string>($1);
     var_def->const_exp = unique_ptr<ValueAST>($3);
-    var_def->init_val = unique_ptr<ThreeInitValAST>(static_cast<ThreeInitValAST*>($6));
+    var_def->init_val = unique_ptr<CompoundInitValueAST>(static_cast<CompoundInitValueAST*>($6));
     $$ = var_def;
   }
   ;
@@ -584,7 +584,7 @@ LVal
     $$ = lval_ast; 
   }
   | IDENT '[' Exp ']' { 
-    auto lval_ast = new FourLValAST(); 
+    auto lval_ast = new ArrayLValueAST(); 
     lval_ast->ident = unique_ptr<string>($1);
     lval_ast->exp = unique_ptr<ValueAST>($3);
     $$ = lval_ast; 

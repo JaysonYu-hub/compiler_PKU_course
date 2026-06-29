@@ -1,6 +1,7 @@
 #include "ast/ast.hpp"
+#include "ast/codegen.hpp"
 #include <iostream>
-#include <assert.h>
+#include <cassert>
 
 // CompUnit ::= end_comp_unit
 std::string CompUnitAST::Dump(Context& context) const { 
@@ -37,14 +38,14 @@ decl @stoptime()
   return "";
 }
 // end_comp_unit ::= comp_unit | end_comp_unit comp_unit
-std::string CompEndCompUnitAST::Dump(Context& context) const {
+std::string CompUnitSequenceAST::Dump(Context& context) const {
   if (comp_unit) {
     comp_unit->Dump(context);
   }
   return "";
 }
 
-std::string TwoEndCompUnitAST::Dump(Context& context) const {
+std::string CompUnitListAST::Dump(Context& context) const {
   // 这里是有先后顺序的
   if (end_comp_unit) {
     end_comp_unit->Dump(context);
@@ -147,23 +148,23 @@ std::string BlockAST::Dump(Context& context) const {
 }
 
 // BlockItem ::= Decl | Stmt
-std::string DeclBloAST::Dump(Context& context) const {
+std::string DeclBlockAST::Dump(Context& context) const {
   if (decl) {
     decl->Dump(context);
   }
   return "";
 }
 
-std::string StmtBloAST::Dump(Context& context) const {
+std::string StmtBlockAST::Dump(Context& context) const {
   return stmt->Dump(context);
   }
 // Stmt ::= MatchedStmt | UnmatchedStmt
-std::string MatchedStmtStmtAST::Dump(Context& context) const {
+std::string MatchedStmtWrapperAST::Dump(Context& context) const {
   std::string return_ident = matched_stmt->Dump(context);
   return return_ident;
 }
 
-std::string UnmatchedStmtStmtAST::Dump(Context& context) const {
+std::string UnmatchedStmtWrapperAST::Dump(Context& context) const {
   if (unmatched_stmt) {
     unmatched_stmt->Dump(context);
   }
@@ -432,14 +433,14 @@ std::string FuncRParamsAST::Dump(Context& context) const {
 }
 
 // PrimaryExp ::= '(' Exp ')' | LVal | Number
-std::string ThreePriAST::Dump(Context& context) const {
+std::string ParenthesizedExprAST::Dump(Context& context) const {
   if (exp) {
     return exp->Dump(context);
   }
   return "";
 }
 
-int ThreePriAST::getValue(Context& context) const {
+int ParenthesizedExprAST::getValue(Context& context) const {
   return exp->getValue(context);
 }
 
@@ -477,7 +478,7 @@ int MulAddExpAST::getValue(Context& context) const {
   return 0;
 }
 
-std::string ThreeAddExpAST::Dump(Context& context) const {
+std::string BinaryAddExprAST::Dump(Context& context) const {
   std::string lhs_reg = add_exp->Dump(context);
   std::string rhs_reg = mul_exp->Dump(context);
   std::string dest_reg = context.NewReg();
@@ -488,7 +489,7 @@ std::string ThreeAddExpAST::Dump(Context& context) const {
   }
   return dest_reg;
 }
-int ThreeAddExpAST::getValue(Context& context) const {
+int BinaryAddExprAST::getValue(Context& context) const {
   if (op->op == "+") {
     return add_exp->getValue(context) + mul_exp->getValue(context);
   } else if (op->op == "-") {
@@ -513,7 +514,7 @@ int UnaryMulExpAST::getValue(Context& context) const {
   return 0;
 }
 
-std::string ThreeMulExpAST::Dump(Context& context) const {
+std::string BinaryMulExprAST::Dump(Context& context) const {
   std::string lhs_reg = mul_exp->Dump(context);
   std::string rhs_reg = unary_exp->Dump(context);
   std::string dest_reg = context.NewReg();
@@ -527,7 +528,7 @@ std::string ThreeMulExpAST::Dump(Context& context) const {
   return dest_reg;
 }
 
-int ThreeMulExpAST::getValue(Context& context) const {
+int BinaryMulExprAST::getValue(Context& context) const {
   if (op->op == "*") {
     return mul_exp->getValue(context) * unary_exp->getValue(context);
   } else if (op->op == "/") {
@@ -549,7 +550,7 @@ std::string AddRelExpAST::Dump(Context& context) const {
 int AddRelExpAST::getValue(Context& context) const {
   return add_exp->getValue(context);
 }
-std::string ThreeRelExpAST::Dump(Context& context) const {
+std::string BinaryRelExprAST::Dump(Context& context) const {
   std::string lhs_reg = rel_exp->Dump(context);
   std::string rhs_reg = add_exp->Dump(context);
   std::string dest_reg = context.NewReg();
@@ -564,7 +565,7 @@ std::string ThreeRelExpAST::Dump(Context& context) const {
   }
   return dest_reg;
 }
-int ThreeRelExpAST::getValue(Context& context) const {
+int BinaryRelExprAST::getValue(Context& context) const {
   if (op->op == "<") {
     return rel_exp->getValue(context) < add_exp->getValue(context);
   } else if (op->op == ">") {
@@ -589,7 +590,7 @@ int RelEqExpAST::getValue(Context& context) const {
   return rel_exp->getValue(context);
 }
 
-std::string ThreeEqExpAST::Dump(Context& context) const {
+std::string BinaryEqExprAST::Dump(Context& context) const {
   std::string lhs_reg = eq_exp->Dump(context);
   std::string rhs_reg = rel_exp->Dump(context);
   std::string dest_reg = context.NewReg();
@@ -600,7 +601,7 @@ std::string ThreeEqExpAST::Dump(Context& context) const {
   }
   return dest_reg;
 }
-int ThreeEqExpAST::getValue(Context& context) const {
+int BinaryEqExprAST::getValue(Context& context) const {
   if (op->op == "==") {
     return eq_exp->getValue(context) == rel_exp->getValue(context);
   } else if (op->op == "!=") {
@@ -621,7 +622,7 @@ int EqLAndExpAST::getValue(Context& context) const {
   return eq_exp->getValue(context);
 }
 
-std::string ThreeLAndExpAST::Dump(Context& context) const {
+std::string BinaryLogicalAndExprAST::Dump(Context& context) const {
   // 使用跳转实现短路求值
   if (op->op == "&&") {
     std::string lhs_reg = land_exp->Dump(context);
@@ -651,7 +652,7 @@ std::string ThreeLAndExpAST::Dump(Context& context) const {
   }
   return "";
 }
-int ThreeLAndExpAST::getValue(Context& context) const {
+int BinaryLogicalAndExprAST::getValue(Context& context) const {
   if (op->op == "&&") {
     return land_exp->getValue(context) && eq_exp->getValue(context);
   } else {
@@ -669,7 +670,7 @@ std::string LAndLOrExpAST::Dump(Context& context) const {
 int LAndLOrExpAST::getValue(Context& context) const {
   return land_exp->getValue(context);
 }
-std::string ThreeLOrExpAST::Dump(Context& context) const {
+std::string BinaryLogicalOrExprAST::Dump(Context& context) const {
   // 使用跳转实现短路求值
   if (op->op == "||") {
     std::string lhs_reg = lor_exp->Dump(context);
@@ -698,7 +699,7 @@ std::string ThreeLOrExpAST::Dump(Context& context) const {
   }
   return "";
 }
-int ThreeLOrExpAST::getValue(Context& context) const {
+int BinaryLogicalOrExprAST::getValue(Context& context) const {
   if (op->op == "||") {
     return lor_exp->getValue(context) || land_exp->getValue(context);
   } else {
@@ -760,7 +761,7 @@ std::string LValAST::DumpOnlyAddress(Context& context) const {
 }
 
 // LVal = IDENT | # IDENT '[' Exp ']' 
-std::string FourLValAST::Dump(Context& context) const { 
+std::string ArrayLValueAST::Dump(Context& context) const { 
   std::shared_ptr<Symbol> sym = context.scope->lookup(*ident);
   if (!sym) {
     std::cerr << "Error: LVal " << *ident << " not found\n";
@@ -775,7 +776,7 @@ std::string FourLValAST::Dump(Context& context) const {
   return result;
 }
 
-int FourLValAST::getValue(Context& context) const { 
+int ArrayLValueAST::getValue(Context& context) const { 
   assert(false);
   return 0;
 }
@@ -801,15 +802,15 @@ int ConstExpConstInitValAST::getValue(Context& context) const {
   return const_exp->getValue(context);
 }
 
-std::string ThreeConstInitValAST::Dump(Context& context) const { 
+std::string CompoundConstInitValueAST::Dump(Context& context) const { 
   return const_init_val_list->Dump(context);
 }
 
-int ThreeConstInitValAST::getValue(Context& context) const { 
+int CompoundConstInitValueAST::getValue(Context& context) const { 
   assert(false);
   return 0;
 }
-std::vector<int> ThreeConstInitValAST::getValues(Context& context) const { 
+std::vector<int> CompoundConstInitValueAST::getValues(Context& context) const { 
   std::vector<int> init_vals;
   for (auto& init_val : const_init_val_list->const_init_vals) {
     init_vals.push_back(init_val->getValue(context));
@@ -867,14 +868,14 @@ std::string ArrayConstDefAST::Dump(Context& context) const {
 }
 
 // Decl ::= ConstDecl | VarDecl
-std::string ConstDeclDecAST::Dump(Context& context) const {
+std::string ConstDeclWrapperAST::Dump(Context& context) const {
   if (const_decl) {
     return const_decl->Dump(context);
   }
   return "";
 }
 
-std::string VarDeclDecAST::Dump(Context& context) const { 
+std::string VarDeclWrapperAST::Dump(Context& context) const { 
   if (var_decl) {
     return var_decl->Dump(context);
   }
@@ -914,7 +915,7 @@ std::string VarDefListAST::Dump(Context& context) const {
 }
 
 // VarDef ::= IDENT | IDENT '=' InitVal | IDENT '[' ConstExp ']' | IDENT '[' ConstExp ']' '=' InitVal
-std::string IDENTVarAST::Dump(Context& context) const { 
+std::string SimpleVarDefAST::Dump(Context& context) const { 
   std::string address = context.GetAddress(*ident);
   auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
   std::string b_type = *context.decl_type_context;
@@ -928,7 +929,7 @@ std::string IDENTVarAST::Dump(Context& context) const {
   return "";
 }
 
-std::string ThreeVarAST::Dump(Context& context) const { 
+std::string InitializedVarDefAST::Dump(Context& context) const { 
   std::string address = context.GetAddress(*ident);
   std::string b_type = *context.decl_type_context;
   auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
@@ -943,7 +944,7 @@ std::string ThreeVarAST::Dump(Context& context) const {
   return "";
 }
 
-std::string FourVarDefAST::Dump(Context& context) const { 
+std::string ArrayVarDefAST::Dump(Context& context) const { 
   std::string address = context.GetAddress(*ident);
   std::string b_type = *context.decl_type_context;
   auto arr_size = const_exp->getValue(context);
@@ -959,7 +960,7 @@ std::string FourVarDefAST::Dump(Context& context) const {
   return "";
 }
 
-std::vector<std::string> SixVarDefAST::DumpList(Context& context) const { 
+std::vector<std::string> ArrayInitializedVarDefAST::DumpList(Context& context) const { 
   std::vector<std::string> ret;
   for (auto& init_val : init_val->init_val_list->init_vals) {
      ret.push_back(init_val->Dump(context));
@@ -967,7 +968,7 @@ std::vector<std::string> SixVarDefAST::DumpList(Context& context) const {
   return ret;
 }
 
-std::string SixVarDefAST::Dump(Context& context) const { 
+std::string ArrayInitializedVarDefAST::Dump(Context& context) const { 
   std::string address = context.GetAddress(*ident);
   std::string b_type = *context.decl_type_context;
   auto arr_size = const_exp->getValue(context);
@@ -1016,11 +1017,11 @@ int InitValAST::getValue(Context& context) const {
   return exp->getValue(context);
 }
 
-std::string ThreeInitValAST::Dump(Context& context) const { 
+std::string CompoundInitValueAST::Dump(Context& context) const { 
   return "";
 }
 
-int ThreeInitValAST::getValue(Context& context) const { 
+int CompoundInitValueAST::getValue(Context& context) const { 
   assert(false);
   return 0;
 }
