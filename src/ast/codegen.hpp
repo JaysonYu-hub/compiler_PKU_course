@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 class Context;
 class BaseAST;
@@ -28,6 +29,48 @@ class IfMatchedStmtAST;
 class WhileStmtAST;
 class ContinueStmtAST;
 class BreakStmtAST;
+class ExpAST;
+class UnaryOPExpAST;
+class PrimaryUnaryExpAST;
+class FuncCallExpAST;
+class FuncRParamsAST;
+class ParenthesizedExprAST;
+class LValuePrimaryExprAST;
+class NumberPrimaryExprAST;
+class OpAST;
+class UnaryMulExpAST;
+class BinaryMulExprAST;
+class MulAddExpAST;
+class BinaryAddExprAST;
+class AddRelExpAST;
+class BinaryRelExprAST;
+class RelEqExpAST;
+class BinaryEqExprAST;
+class EqLAndExpAST;
+class BinaryLogicalAndExprAST;
+class LAndLOrExpAST;
+class BinaryLogicalOrExprAST;
+class LValAST;
+class ArrayLValueAST;
+class ConstExpAST;
+class ConstDefAST;
+class ArrayConstDefAST;
+class ConstExpConstInitValAST;
+class ConstInitValListAST;
+class CompoundConstInitValueAST;
+class ConstDeclWrapperAST;
+class VarDeclWrapperAST;
+class ConstDeclAST;
+class ConstDefListAST;
+class VarDeclAST;
+class VarDefListAST;
+class SimpleVarDefAST;
+class InitializedVarDefAST;
+class ArrayVarDefAST;
+class ArrayInitializedVarDefAST;
+class InitValAST;
+class InitValListAST;
+class CompoundInitValueAST;
 
 class CodeGenerator {
 public:
@@ -58,7 +101,54 @@ public:
   std::string Generate(const WhileStmtAST& node);
   std::string Generate(const ContinueStmtAST& node);
   std::string Generate(const BreakStmtAST& node);
+  std::string Generate(const ExpAST& node);
+  std::string Generate(const UnaryOPExpAST& node);
+  std::string Generate(const PrimaryUnaryExpAST& node);
+  std::string Generate(const FuncCallExpAST& node);
+  std::string Generate(const FuncRParamsAST& node);
+  std::string Generate(const ParenthesizedExprAST& node);
+  std::string Generate(const LValuePrimaryExprAST& node);
+  std::string Generate(const NumberPrimaryExprAST& node);
+  std::string Generate(const OpAST& node);
+  std::string Generate(const UnaryMulExpAST& node);
+  std::string Generate(const BinaryMulExprAST& node);
+  std::string Generate(const MulAddExpAST& node);
+  std::string Generate(const BinaryAddExprAST& node);
+  std::string Generate(const AddRelExpAST& node);
+  std::string Generate(const BinaryRelExprAST& node);
+  std::string Generate(const RelEqExpAST& node);
+  std::string Generate(const BinaryEqExprAST& node);
+  std::string Generate(const EqLAndExpAST& node);
+  std::string Generate(const BinaryLogicalAndExprAST& node);
+  std::string Generate(const LAndLOrExpAST& node);
+  std::string Generate(const BinaryLogicalOrExprAST& node);
+  std::string Generate(const LValAST& node);
+  std::string Generate(const ArrayLValueAST& node);
+  std::string Generate(const ConstExpAST& node);
+  std::string Generate(const ConstDefAST& node);
+  std::string Generate(const ArrayConstDefAST& node);
+  std::string Generate(const ConstExpConstInitValAST& node);
+  std::string Generate(const ConstInitValListAST& node);
+  std::string Generate(const CompoundConstInitValueAST& node);
+  std::string Generate(const ConstDeclWrapperAST& node);
+  std::string Generate(const VarDeclWrapperAST& node);
+  std::string Generate(const ConstDeclAST& node);
+  std::string Generate(const ConstDefListAST& node);
+  std::string Generate(const VarDeclAST& node);
+  std::string Generate(const VarDefListAST& node);
+  std::string Generate(const SimpleVarDefAST& node);
+  std::string Generate(const InitializedVarDefAST& node);
+  std::string Generate(const ArrayVarDefAST& node);
+  std::string Generate(const ArrayInitializedVarDefAST& node);
+  std::string Generate(const InitValAST& node);
+  std::string Generate(const InitValListAST& node);
+  std::string Generate(const CompoundInitValueAST& node);
+
+  // New helper:
+  void ParamLocalization(const FuncFParamsAST& node);
+  void ParamLocalization(const FuncFParamAST& node);
 
 private:
   Context& context;
 };
+
