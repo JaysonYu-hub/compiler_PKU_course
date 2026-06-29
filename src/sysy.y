@@ -43,10 +43,12 @@ using namespace std;
 
 %type <ast_val> comp_unit end_comp_unit FuncDef FuncFParam FuncFParams FuncRParams Block Stmt UnmatchedStmt MatchedStmt
 %type <value_ast> Exp UnaryExp PrimaryExp AddExp ConstExp
-%type <value_ast> RelExp EqExp LAndExp LOrExp ConstInitVal MulExp InitVal LVal
+%type <value_ast> RelExp EqExp LAndExp LOrExp MulExp InitVal LVal
 %type <op_ast> ComOp EquOp LOrOp LAndOp UnaryOp AddOp MulOp
 %type <int_val> Number
-%type <ast_val> Decl ConstDecl VarDecl BlockItem block_item_list const_def_list var_def_list ConstDef VarDef
+%type <ast_val> Decl ConstDecl VarDecl BlockItem block_item_list const_def_list var_def_list initval_exp_list const_exp_list ConstDef VarDef
+/* 这里constinival只所以使用base而不是value是为了兼容array */
+%type <ast_val> ConstInitVal
 %type <str_val> FuncType Type
 
 %%
@@ -454,15 +456,42 @@ ConstDef
   : IDENT ASSIGN ConstInitVal { 
     auto const_def = new ConstDefAST();
     const_def->ident = unique_ptr<string>($1);
-    const_def->const_init_val = unique_ptr<ValueAST>($3);
+    const_def->const_init_val = unique_ptr<ValueAST>(static_cast<ValueAST*> ($3));
     $$ = const_def;
-   }
+  }
+  | IDENT '[' ConstExp ']' ASSIGN ConstInitVal { 
+    auto const_def = new ArrayConstDefAST();
+    const_def->ident = unique_ptr<string>($1);
+    const_def->const_exp = unique_ptr<ValueAST>($3);
+    const_def->const_init_val = unique_ptr<ThreeConstInitValAST>(static_cast<ThreeConstInitValAST*>($6));
+    $$ = const_def;
+  }
   ;
 
 ConstInitVal
   : ConstExp { 
-    auto constinit_val = new ConstInitValAST(); 
+    auto constinit_val = new ConstExpConstInitValAST(); 
     constinit_val->const_exp = unique_ptr<ValueAST>($1); 
+    $$ = constinit_val;
+  }
+  | '{' '}' { auto constinit_val = new ThreeConstInitValAST(); $$ = constinit_val; }
+  | '{' const_exp_list '}' {
+    auto constinit_val = new ThreeConstInitValAST();
+    constinit_val->const_init_val_list = unique_ptr<ConstInitValListAST>(static_cast<ConstInitValListAST*>($2));
+    $$ = constinit_val;
+  }
+  ;
+
+const_exp_list
+  : const_exp_list ',' ConstExp {
+    auto constinit_val = (static_cast<ConstInitValListAST*>($1));
+    constinit_val->const_init_vals.push_back(unique_ptr<ValueAST>($3));
+    $$ = constinit_val;
+  }
+  | ConstExp {
+    auto constinit_val = new ConstInitValListAST();
+     constinit_val->const_init_vals = vector<unique_ptr<ValueAST>>();
+     constinit_val->const_init_vals.push_back(unique_ptr<ValueAST>($1));
     $$ = constinit_val;
   }
   ;
@@ -497,10 +526,23 @@ VarDef
     var_def->ident = unique_ptr<string>($1);
     $$ = var_def;
   }
+  | IDENT '[' ConstExp ']' { 
+    auto var_def = new FourVarDefAST();
+    var_def->ident = unique_ptr<string>($1);
+    var_def->const_exp = unique_ptr<ValueAST>($3);
+    $$ = var_def;
+  }
   | IDENT ASSIGN InitVal { 
     auto var_def = new ThreeVarAST();
     var_def->ident = unique_ptr<string>($1);
     var_def->init_val = unique_ptr<ValueAST>($3);
+    $$ = var_def;
+  }
+  | IDENT '[' ConstExp ']' ASSIGN InitVal { 
+    auto var_def = new SixVarDefAST();
+    var_def->ident = unique_ptr<string>($1);
+    var_def->const_exp = unique_ptr<ValueAST>($3);
+    var_def->init_val = unique_ptr<ThreeInitValAST>(static_cast<ThreeInitValAST*>($6));
     $$ = var_def;
   }
   ;
@@ -511,12 +553,40 @@ InitVal
     init_val->exp = unique_ptr<ValueAST>($1);
     $$ = init_val;
   }
+  | '{' '}' { 
+    auto init_val = new ThreeInitValAST();
+    $$ = init_val;
+  }
+  | '{' initval_exp_list '}' { 
+    auto init_val = new ThreeInitValAST();
+    init_val->init_val_list = unique_ptr<InitValListAST>(static_cast<InitValListAST*>($2));
+    $$ = init_val;
+  }
   ;
+
+initval_exp_list
+  : Exp { 
+    auto initval_exp_list = new InitValListAST();
+    initval_exp_list->init_vals.push_back(unique_ptr<ValueAST>($1));
+    $$ = initval_exp_list;
+  }
+  | initval_exp_list ',' Exp { 
+    auto initval_exp_list = static_cast<InitValListAST*>($1);
+    initval_exp_list->init_vals.push_back(unique_ptr<ValueAST>($3));
+    $$ = initval_exp_list;
+  }
+  ; 
 
 LVal
   : IDENT { 
     auto lval_ast = new LValAST(); 
     lval_ast->ident = unique_ptr<string>($1);
+    $$ = lval_ast; 
+  }
+  | IDENT '[' Exp ']' { 
+    auto lval_ast = new FourLValAST(); 
+    lval_ast->ident = unique_ptr<string>($1);
+    lval_ast->exp = unique_ptr<ValueAST>($3);
     $$ = lval_ast; 
   }
   ;

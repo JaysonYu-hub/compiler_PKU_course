@@ -68,7 +68,15 @@ class FuncInformation {
   FuncInformation(std::string ret_type) : ret_type(ret_type) {}
 };
 
-enum class SymbolKind { CONSTANT, VARIABLE, FUNCTION };
+class ArrayInformation { 
+  public:
+  std::string address;
+  int size;
+  ArrayInformation() : size(0) {}
+  ArrayInformation(std::string address, int size) : address(address), size(size) {}
+};
+
+enum class SymbolKind { CONSTANT, VARIABLE, FUNCTION, ARRAY, CONST_ARRAY};
 
 /**
  * 符号表
@@ -76,16 +84,19 @@ enum class SymbolKind { CONSTANT, VARIABLE, FUNCTION };
  * Symbol为符号表项，包含变量名、变量类型、变量值
  * 对于变量，变量值为address
  * 对于常量，变量值为const_value
+ * 对于函数，变量值为FuncInformation
+ * 对于数组，变量值为数组长度
 */
 struct Symbol {
 public:
   std::string name;
   SymbolKind kind;
-  std::variant<int, std::string, FuncInformation> value;
+  std::variant<int, std::string, FuncInformation, ArrayInformation> value;
   Symbol(const std::string &name, SymbolKind kind, int const_value) : name(name), kind(kind), value(const_value) {}
   Symbol(const std::string &name, SymbolKind kind, const std::string &address) : name(name), kind(kind), value(address) {}
 
   Symbol(const std::string &name, SymbolKind kind, FuncInformation func_information) : name(name), kind(kind), value(func_information) {}
+  
   Symbol(const std::string &name, SymbolKind kind) : name(name), kind(kind) {
     if (kind == SymbolKind::CONSTANT) {
       value = 0;
@@ -94,7 +105,6 @@ public:
     } else if (kind == SymbolKind::VARIABLE) {
       value = "";
     } else {
-      assert(false);
     }
   }
 };
@@ -710,7 +720,7 @@ public:
   int getValue(Context& context) const override;
 };  
 
-// LVal = IDENT
+// LVal = IDENT | IDENT '[' Exp ']'
 class LValAST : public ValueAST {
 public:
   std::unique_ptr<std::string> ident;
@@ -719,6 +729,16 @@ public:
   std::string Dump(Context& context) const override;
   // 用于仅返回变量地址而不加载
   std::string DumpOnlyAddress(Context& context) const;
+  int getValue(Context& context) const override;
+};
+
+class FourLValAST : public ValueAST {
+public:
+  std::unique_ptr<std::string> ident;
+  std::unique_ptr<ValueAST> exp;
+
+  FourLValAST() = default; 
+  std::string Dump(Context& context) const override;
   int getValue(Context& context) const override;
 };
 
@@ -731,18 +751,7 @@ public:
   int getValue(Context& context) const override;
 };
 
-
-// ConstInitVal ::= ConstExp
-class ConstInitValAST : public ValueAST {
-public:
-  std::unique_ptr<ValueAST> const_exp;
-  ConstInitValAST() = default; 
-
-  std::string Dump(Context& context) const override;
-  int getValue(Context& context) const override;
-};
-
-// ConstDef ::= IDENT '=' ConstInitVal
+// ConstDef ::= IDENT '=' ConstInitVal | IDENT '[' ConstExp ']' '=' ConstInitVal
 class ConstDefAST : public BaseAST {
 public:
   std::unique_ptr<std::string> ident;
@@ -751,6 +760,44 @@ public:
 
   std::string Dump(Context& context) const override;
 };
+class ThreeConstInitValAST;
+class ArrayConstDefAST : public BaseAST { 
+  public:
+  std::unique_ptr<std::string> ident;
+  std::unique_ptr<ValueAST> const_exp;
+  std::unique_ptr<ThreeConstInitValAST> const_init_val;
+  ArrayConstDefAST() = default;
+  std::string Dump(Context& context) const override;
+};
+// ConstInitVal ::= ConstExp | '{' ConstInitVal { ',' ConstInitVal } '}'
+class ConstExpConstInitValAST : public ValueAST {
+public:
+  std::unique_ptr<ValueAST> const_exp;
+  ConstExpConstInitValAST() = default; 
+
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
+};
+
+class ConstInitValListAST : public BaseAST {
+public:
+  std::vector<std::unique_ptr<ValueAST>> const_init_vals;
+  ConstInitValListAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+
+class ThreeConstInitValAST : public ValueAST {
+public:
+  // 这里不使用base是为了使用list中的vector
+  std::unique_ptr<ConstInitValListAST> const_init_val_list;
+  ThreeConstInitValAST() = default; 
+
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
+  std::vector<int> getValues(Context& context) const;
+};
+
 
 // Decl ::= ConstDecl | VarDecl
 class ConstDeclDecAST : public BaseAST {
@@ -805,7 +852,7 @@ public:
   std::string Dump(Context& context) const override;
 };
 
-// VarDef ::= IDENT | IDENT '=`' InitVal;
+// VarDef ::= IDENT | IDENT '=`' InitVal | IDENT '[' ConstExp ']' | IDENT '[' ConstExp ']' '=' InitVal
 // 这里单独的IDENT也被称为变量声明
 class IDENTVarAST : public BaseAST {
 public:
@@ -824,7 +871,27 @@ public:
   std::string Dump(Context& context) const override;
 };
 
-// InitVal ::= Exp
+class FourVarDefAST : public BaseAST { 
+  public:
+  std::unique_ptr<std::string> ident;
+  std::unique_ptr<ValueAST> const_exp;
+  FourVarDefAST() = default; 
+
+  std::string Dump(Context& context) const override;
+};
+class ThreeInitValAST;
+class SixVarDefAST : public BaseAST { 
+  public:
+  std::unique_ptr<std::string> ident;
+  std::unique_ptr<ValueAST> const_exp;
+  std::unique_ptr<ThreeInitValAST> init_val;
+  SixVarDefAST() = default; 
+
+  std::string Dump(Context& context) const override;
+  std::vector<std::string> DumpList(Context& context) const;
+};
+
+// InitVal ::= Exp | '{' Exp { ',' Exp } '}'
 class InitValAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> exp;
@@ -834,3 +901,20 @@ public:
   int getValue(Context& context) const override;
 };
 
+class InitValListAST : public BaseAST {
+public:
+  std::vector<std::unique_ptr<ValueAST>> init_vals;
+  InitValListAST() = default; 
+
+  std::string Dump(Context& context) const override;
+  std::vector<int> getValue(Context& context) const;
+};
+
+class ThreeInitValAST : public ValueAST {
+public:
+  std::unique_ptr<InitValListAST> init_val_list;
+  ThreeInitValAST() = default; 
+
+  std::string Dump(Context& context) const override;
+  int getValue(Context& context) const override;
+};

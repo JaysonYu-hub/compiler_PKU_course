@@ -706,7 +706,7 @@ int ThreeLOrExpAST::getValue(Context& context) const {
   }
 }
 
-// LVal = IDENT
+// LVal = IDENT | IDENT '[' Exp ']'
 std::string LValAST::Dump(Context& context) const { 
   auto sym = context.scope->lookup(*ident);
   if (sym == nullptr) {
@@ -759,6 +759,26 @@ std::string LValAST::DumpOnlyAddress(Context& context) const {
   return "";
 }
 
+// LVal = IDENT | # IDENT '[' Exp ']' 
+std::string FourLValAST::Dump(Context& context) const { 
+  std::shared_ptr<Symbol> sym = context.scope->lookup(*ident);
+  if (!sym) {
+    std::cerr << "Error: LVal " << *ident << " not found\n";
+    return "";
+  }
+  assert(sym->kind == SymbolKind::ARRAY);
+  auto temp = context.NewReg();
+  auto index = exp->Dump(context);
+  auto result = context.NewReg();
+  std::cout << "  " << temp << " = getelementptr " << std::get<ArrayInformation>(sym->value).address << ", " << index << "\n";
+  std::cout << "  " << result << " = load " << temp << "\n";
+  return result;
+}
+
+int FourLValAST::getValue(Context& context) const { 
+  assert(false);
+  return 0;
+}
 // ConstExp ::= Exp
 std::string ConstExpAST::Dump(Context& context) const { 
   if (exp) {
@@ -769,20 +789,79 @@ std::string ConstExpAST::Dump(Context& context) const {
 int ConstExpAST::getValue(Context& context) const { 
   return exp->getValue(context);
 }
-// ConstInitVal ::= ConstExp
-std::string ConstInitValAST::Dump(Context& context) const { 
+// ConstInitVal ::= ConstExp | '{' ConstInitVal { ',' ConstInitVal } '}' | '{' '}'
+std::string ConstExpConstInitValAST::Dump(Context& context) const { 
   if (const_exp) {
     return const_exp->Dump(context);
   }
   return "";
 };
-int ConstInitValAST::getValue(Context& context) const { 
+
+int ConstExpConstInitValAST::getValue(Context& context) const { 
   return const_exp->getValue(context);
 }
-// ConstDef ::= IDENT '=' ConstInitVal
+
+std::string ThreeConstInitValAST::Dump(Context& context) const { 
+  return const_init_val_list->Dump(context);
+}
+
+int ThreeConstInitValAST::getValue(Context& context) const { 
+  assert(false);
+  return 0;
+}
+std::vector<int> ThreeConstInitValAST::getValues(Context& context) const { 
+  std::vector<int> init_vals;
+  for (auto& init_val : const_init_val_list->const_init_vals) {
+    init_vals.push_back(init_val->getValue(context));
+  }
+  return init_vals;
+}
+
+std::string ConstInitValListAST::Dump(Context& context) const { 
+  return "";
+}
+
+// ConstDef ::= IDENT '=' ConstInitVal | IDENT '[' ConstExp ']' '=' ConstInitVal
 std::string ConstDefAST::Dump(Context& context) const { 
   int constinit_val = const_init_val->getValue(context);
   auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::CONSTANT, constinit_val));
+  context.scope->define(sym);
+  return "";
+}
+
+std::string ArrayConstDefAST::Dump(Context& context) const { 
+  auto raw_init_vals = const_init_val->getValues(context);
+  auto arr_size = const_exp->getValue(context);
+  auto address = context.GetAddress(*ident);
+  ArrayInformation arr_info(address, arr_size);
+  auto sym = std::make_shared<Symbol>(Symbol(address, SymbolKind::CONST_ARRAY));
+  sym->value = arr_info;
+
+  auto init_vals = std::vector<std::string>(arr_size);
+  for (int i = 0; i < raw_init_vals.size(); i++) {
+    init_vals[i] = std::to_string(raw_init_vals[i]);
+  }
+  for (int i = raw_init_vals.size(); i < arr_size; i++) {
+    init_vals[i] = "0";
+  }
+  if (context.scope->isGlobal()) {
+    std::string str;
+    for (int i = 0; i < arr_size; i++) {
+      str += init_vals[i];
+      if (i != arr_size - 1) {
+        str += ", ";
+      }
+    }
+    std::cout << "global " << address << " = alloc [i32, " << arr_size << "], {" << str << "}\n";
+  } else {
+    std::cout << "  " << address  << " = alloc [i32, " << arr_size << "]\n";
+    // 对数组进行初始化
+    for (int i = 0; i < arr_size; i++) {
+      auto temp = context.NewReg();
+      std::cout << "  " << temp << " = " << "getelementptr " << address << ", " << i << "\n";
+      std::cout << "  store " << init_vals[i] << ", " << temp << "\n";
+    }
+  }
   context.scope->define(sym);
   return "";
 }
@@ -834,7 +913,7 @@ std::string VarDefListAST::Dump(Context& context) const {
   return "";
 }
 
-// VarDef ::= IDENT | IDENT '=' InitVal
+// VarDef ::= IDENT | IDENT '=' InitVal | IDENT '[' ConstExp ']' | IDENT '[' ConstExp ']' '=' InitVal
 std::string IDENTVarAST::Dump(Context& context) const { 
   std::string address = context.GetAddress(*ident);
   auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::VARIABLE, address));
@@ -864,11 +943,96 @@ std::string ThreeVarAST::Dump(Context& context) const {
   return "";
 }
 
-// InitVal ::= Exp
+std::string FourVarDefAST::Dump(Context& context) const { 
+  std::string address = context.GetAddress(*ident);
+  std::string b_type = *context.decl_type_context;
+  auto arr_size = const_exp->getValue(context);
+  auto sym = std::make_shared<Symbol>(Symbol(address, SymbolKind::ARRAY));
+  sym->value = ArrayInformation(address, arr_size);
+
+  if (context.scope->isGlobal()) {
+    std::cout << "global " << address << " = alloc [" << b_type << ", " << arr_size << "]\n";
+  } else {
+    std::cout << "  " << address << " = alloc [" << b_type << ", " << arr_size << "]\n";
+  }
+  context.scope->define(sym);
+  return "";
+}
+
+std::vector<std::string> SixVarDefAST::DumpList(Context& context) const { 
+  std::vector<std::string> ret;
+  for (auto& init_val : init_val->init_val_list->init_vals) {
+     ret.push_back(init_val->Dump(context));
+  }
+  return ret;
+}
+
+std::string SixVarDefAST::Dump(Context& context) const { 
+  std::string address = context.GetAddress(*ident);
+  std::string b_type = *context.decl_type_context;
+  auto arr_size = const_exp->getValue(context);
+  auto sym = std::make_shared<Symbol>(Symbol(*ident, SymbolKind::ARRAY));
+  sym->value = ArrayInformation(b_type, arr_size);
+  if (context.scope->isGlobal()) {
+    auto raw_init_vals = init_val->init_val_list->getValue(context);
+    auto init_vals = std::vector<std::string>(arr_size);
+    for (int i = 0; i < raw_init_vals.size(); i++) {
+      init_vals[i] = std::to_string(raw_init_vals[i]);
+    }
+    for (int i = raw_init_vals.size(); i < arr_size; i++) {
+      init_vals[i] = "0";
+    }
+    std::string str;
+    for (int i = 0; i < arr_size; i++) {
+      str += init_vals[i];
+      if (i != arr_size - 1) {
+        str += ", ";
+      }
+    }
+    std::cout << "global " << address << " = alloc [i32, " << arr_size << "], {" << str << "}\n";
+  } else {
+    auto init_vals = DumpList(context);
+    for (int i = init_vals.size(); i < arr_size; i++) {
+      init_vals.push_back("0");
+    }
+    std::cout << "  " << address  << " = alloc [i32, " << arr_size << "]\n";
+    // 对数组进行初始化
+    for (int i = 0; i < arr_size; i++) {
+      auto temp = context.NewReg();
+      std::cout << "  " << temp << " = " << "getelementptr " << address << ", " << i << "\n";
+      std::cout << "  store " << init_vals[i] << ", " << temp << "\n";
+    }
+  }
+  context.scope->define(sym);
+  return "";
+}
+
+// InitVal ::= Exp | '{' Exp { ',' Exp } '}'
 std::string InitValAST::Dump(Context& context) const { 
   return exp->Dump(context);
 }
 
 int InitValAST::getValue(Context& context) const { 
   return exp->getValue(context);
+}
+
+std::string ThreeInitValAST::Dump(Context& context) const { 
+  return "";
+}
+
+int ThreeInitValAST::getValue(Context& context) const { 
+  assert(false);
+  return 0;
+}
+
+std::string InitValListAST::Dump(Context& context) const { 
+  return "";
+}
+
+std::vector<int> InitValListAST::getValue(Context& context) const { 
+  std::vector<int> ret;
+  for (auto& init_val : init_vals) {
+    ret.push_back(init_val->getValue(context));
+  }
+  return ret;
 }
