@@ -43,12 +43,12 @@ using namespace std;
 
 %type <ast_val> comp_unit end_comp_unit FuncDef FuncFParam FuncFParams FuncRParams Block Stmt UnmatchedStmt MatchedStmt
 %type <value_ast> Exp UnaryExp PrimaryExp AddExp ConstExp
-%type <value_ast> RelExp EqExp LAndExp LOrExp MulExp InitVal LVal
+%type <value_ast> RelExp EqExp LAndExp LOrExp MulExp LVal
 %type <op_ast> ComOp EquOp LOrOp LAndOp UnaryOp AddOp MulOp
 %type <int_val> Number
 %type <ast_val> Decl ConstDecl VarDecl BlockItem block_item_list const_def_list var_def_list initval_exp_list const_exp_list ConstDef VarDef
 /* 这里constinival只所以使用base而不是value是为了兼容array */
-%type <ast_val> ConstInitVal
+%type <ast_val> ConstInitVal InitVal
 %type <str_val> FuncType Type
 
 %%
@@ -535,14 +535,14 @@ VarDef
   | IDENT ASSIGN InitVal { 
     auto var_def = new InitializedVarDefAST();
     var_def->ident = unique_ptr<string>($1);
-    var_def->init_val = unique_ptr<ValueAST>($3);
+    var_def->init_val = unique_ptr<ValueAST>(static_cast<ValueAST*>($3));
     $$ = var_def;
   }
   | IDENT '[' ConstExp ']' ASSIGN InitVal { 
     auto var_def = new ArrayInitializedVarDefAST();
     var_def->ident = unique_ptr<string>($1);
     var_def->const_exp = unique_ptr<ValueAST>($3);
-    var_def->init_val = unique_ptr<CompoundInitValueAST>(static_cast<CompoundInitValueAST*>($6));
+    var_def->init_val_list = unique_ptr<InitValListAST>(static_cast<InitValListAST*>($6));
     $$ = var_def;
   }
   ;
@@ -554,13 +554,10 @@ InitVal
     $$ = init_val;
   }
   | '{' '}' { 
-    auto init_val = new ThreeInitValAST();
-    $$ = init_val;
+    $$ = new InitValListAST();
   }
   | '{' initval_exp_list '}' { 
-    auto init_val = new ThreeInitValAST();
-    init_val->init_val_list = unique_ptr<InitValListAST>(static_cast<InitValListAST*>($2));
-    $$ = init_val;
+    $$ = $2;
   }
   ;
 
@@ -584,9 +581,9 @@ LVal
     $$ = lval_ast; 
   }
   | IDENT '[' Exp ']' { 
-    auto lval_ast = new ArrayLValueAST(); 
+    auto lval_ast = new LValAST(); 
     lval_ast->ident = unique_ptr<string>($1);
-    lval_ast->exp = unique_ptr<ValueAST>($3);
+    lval_ast->index_exp.push_back(unique_ptr<ValueAST>($3));
     $$ = lval_ast; 
   }
   ;

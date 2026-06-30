@@ -2,6 +2,7 @@
 #include <iostream>
 #include <cassert>
 
+// 用于store命令的右值
 std::string LValAST::DumpOnlyAddress(Context& context) const { 
   auto sym = context.scope->lookup(*ident);
   if (sym == nullptr) {
@@ -12,8 +13,15 @@ std::string LValAST::DumpOnlyAddress(Context& context) const {
     return std::get<std::string>(sym->value);
   } else if (sym->kind == SymbolKind::CONSTANT) {
     std::cerr << "Error: LVal " << *ident << " is a constant\n";
+  } else if (sym->kind == SymbolKind::ARRAY) {
+    auto ret_reg = context.NewReg();
+    
+    std::cout << "  " << ret_reg << " = getelemptr " << 
+    std::get<ArrayInformation>(sym->value).address << ", " 
+    << std::to_string(index_exp[0]->getValue(context)) << "\n";
+    return ret_reg;
   } else {
-    std::cerr << "Error: LVal " << *ident << " is not a variable or constant\n";
+    std::cerr << "Error: LVal " << *ident << " is not a variable or array\n";
   }
   return "";
 }
@@ -167,11 +175,6 @@ int LValAST::getValue(Context& context) const {
   }
 }
 
-int ArrayLValueAST::getValue(Context& context) const { 
-  assert(false);
-  return 0;
-}
-
 int ConstExpAST::getValue(Context& context) const { 
   return exp->getValue(context);
 }
@@ -195,11 +198,6 @@ std::vector<int> CompoundConstInitValueAST::getValues(Context& context) const {
 
 int InitValAST::getValue(Context& context) const { 
   return exp->getValue(context);
-}
-
-int CompoundInitValueAST::getValue(Context& context) const { 
-  assert(false);
-  return 0;
 }
 
 std::vector<int> InitValListAST::getValue(Context& context) const { 

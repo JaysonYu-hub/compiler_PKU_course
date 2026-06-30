@@ -53,7 +53,6 @@ std::string CodeGenerator::Generate(const BaseAST& node) {
   if (const auto* p = dynamic_cast<const LAndLOrExpAST*>(&node)) return Generate(*p);
   if (const auto* p = dynamic_cast<const BinaryLogicalOrExprAST*>(&node)) return Generate(*p);
   if (const auto* p = dynamic_cast<const LValAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ArrayLValueAST*>(&node)) return Generate(*p);
   if (const auto* p = dynamic_cast<const ConstExpAST*>(&node)) return Generate(*p);
   if (const auto* p = dynamic_cast<const ConstDefAST*>(&node)) return Generate(*p);
   if (const auto* p = dynamic_cast<const ArrayConstDefAST*>(&node)) return Generate(*p);
@@ -72,7 +71,6 @@ std::string CodeGenerator::Generate(const BaseAST& node) {
   if (const auto* p = dynamic_cast<const ArrayInitializedVarDefAST*>(&node)) return Generate(*p);
   if (const auto* p = dynamic_cast<const InitValAST*>(&node)) return Generate(*p);
   if (const auto* p = dynamic_cast<const InitValListAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const CompoundInitValueAST*>(&node)) return Generate(*p);
 
   return "";
 }
@@ -166,7 +164,7 @@ std::string CodeGenerator::Generate(const FuncDefAST& node) {
   if (node.block) {
     Generate(*node.block);
   }
-  
+  // 函数返回值没有返回值
   if (!context.cur_block_has_terminator && *node.type == "void") {
     std::cout << "  ret\n";
   }
@@ -648,25 +646,19 @@ std::string CodeGenerator::Generate(const LValAST& node) {
     return new_reg;
   } else if (sym->kind == SymbolKind::CONSTANT) {
     return std::to_string(std::get<int>(sym->value));
-  } else {
+  } else if (sym->kind == SymbolKind::ARRAY) {
+    auto temp = context.NewReg();
+    auto index = Generate(*node.index_exp[0]);
+    auto result = context.NewReg();
+    std::cout << "  " << temp << " = getelemptr " << std::get<ArrayInformation>(sym->value).address << ", " << index << "\n";
+    std::cout << "  " << result << " = load " << temp << "\n";
+    return result;
+  }
+  else
+  {
     std::cout << "Error: LVal " << *node.ident << " is not a variable or constant\n";
     return "";
   }
-}
-
-std::string CodeGenerator::Generate(const ArrayLValueAST& node) {
-  std::shared_ptr<Symbol> sym = context.scope->lookup(*node.ident);
-  if (!sym) {
-    std::cerr << "Error: LVal " << *node.ident << " not found\n";
-    return "";
-  }
-  assert(sym->kind == SymbolKind::ARRAY);
-  auto temp = context.NewReg();
-  auto index = Generate(*node.exp);
-  auto result = context.NewReg();
-  std::cout << "  " << temp << " = getelementptr " << std::get<ArrayInformation>(sym->value).address << ", " << index << "\n";
-  std::cout << "  " << result << " = load " << temp << "\n";
-  return result;
 }
 
 std::string CodeGenerator::Generate(const ConstExpAST& node) {
@@ -711,7 +703,7 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
     std::cout << "  " << address  << " = alloc [i32, " << arr_size << "]\n";
     for (int i = 0; i < arr_size; i++) {
       auto temp = context.NewReg();
-      std::cout << "  " << temp << " = " << "getelementptr " << address << ", " << i << "\n";
+      std::cout << "  " << temp << " = " << "getelemptr " << address << ", " << i << "\n";
       std::cout << "  store " << init_vals[i] << ", " << temp << "\n";
     }
   }
@@ -837,7 +829,7 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
   auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::ARRAY);
   sym->value = ArrayInformation(b_type, arr_size);
   if (context.scope->isGlobal()) {
-    auto raw_init_vals = node.init_val->init_val_list->getValue(context);
+    auto raw_init_vals = node.init_val_list->getValue(context);
     auto init_vals = std::vector<std::string>(arr_size);
     for (size_t i = 0; i < raw_init_vals.size(); i++) {
       init_vals[i] = std::to_string(raw_init_vals[i]);
@@ -855,7 +847,7 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
     std::cout << "global " << address << " = alloc [i32, " << arr_size << "], {" << str << "}\n";
   } else {
     std::vector<std::string> init_vals;
-    for (auto& val : node.init_val->init_val_list->init_vals) {
+    for (auto& val : node.init_val_list->init_vals) {
       init_vals.push_back(Generate(*val));
     }
     for (size_t i = init_vals.size(); i < (size_t)arr_size; i++) {
@@ -864,7 +856,7 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
     std::cout << "  " << address  << " = alloc [i32, " << arr_size << "]\n";
     for (int i = 0; i < arr_size; i++) {
       auto temp = context.NewReg();
-      std::cout << "  " << temp << " = " << "getelementptr " << address << ", " << i << "\n";
+      std::cout << "  " << temp << " = " << "getelemptr " << address << ", " << i << "\n";
       std::cout << "  store " << init_vals[i] << ", " << temp << "\n";
     }
   }
@@ -883,9 +875,3 @@ std::string CodeGenerator::Generate(const InitValListAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const CompoundInitValueAST& node) {
-  if (node.init_val_list) {
-    return Generate(*node.init_val_list);
-  }
-  return "";
-}

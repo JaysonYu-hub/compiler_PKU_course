@@ -87,7 +87,7 @@ enum class SymbolKind { CONSTANT, VARIABLE, FUNCTION, ARRAY, CONST_ARRAY};
  * 对于变量，变量值为address
  * 对于常量，变量值为const_value
  * 对于函数，变量值为FuncInformation
- * 对于数组，变量值为数组长度
+ * 对于数组，变量值为ArrayInformation
 */
 struct Symbol {
 public:
@@ -640,19 +640,11 @@ using ThreeLOrExpAST = BinaryLogicalOrExprAST;
 class LValAST : public ValueAST {
 public:
   std::unique_ptr<std::string> ident;
+  std::vector<std::unique_ptr<ValueAST>> index_exp; 
   LValAST() = default; 
   std::string DumpOnlyAddress(Context& context) const;
   int getValue(Context& context) const override;
 };
-
-class ArrayLValueAST : public ValueAST {
-public:
-  std::unique_ptr<std::string> ident;
-  std::unique_ptr<ValueAST> exp;
-  ArrayLValueAST() = default; 
-  int getValue(Context& context) const override;
-};
-using FourLValAST = ArrayLValueAST;
 
 // ConstExp ::= Exp
 class ConstExpAST : public ValueAST {
@@ -766,12 +758,12 @@ class ArrayVarDefAST : public BaseAST {
   ArrayVarDefAST() = default; 
 };
 using FourVarDefAST = ArrayVarDefAST;
-class CompoundInitValueAST;
+class InitValListAST;
 class ArrayInitializedVarDefAST : public BaseAST { 
   public:
   std::unique_ptr<std::string> ident;
   std::unique_ptr<ValueAST> const_exp;
-  std::unique_ptr<CompoundInitValueAST> init_val;
+  std::unique_ptr<InitValListAST> init_val_list;
   ArrayInitializedVarDefAST() = default; 
 };
 using SixVarDefAST = ArrayInitializedVarDefAST;
@@ -791,10 +783,3 @@ public:
   std::vector<int> getValue(Context& context) const;
 };
 
-class CompoundInitValueAST : public ValueAST {
-public:
-  std::unique_ptr<InitValListAST> init_val_list;
-  CompoundInitValueAST() = default; 
-  int getValue(Context& context) const override;
-};
-using ThreeInitValAST = CompoundInitValueAST;
