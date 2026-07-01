@@ -219,10 +219,15 @@ namespace IR {
     void Visit(const koopa_raw_jump_t &jump);
     void Visit(const koopa_raw_call_t &call, koopa_raw_value_t value);
     void Visit(const koopa_raw_global_alloc_t &alloc, koopa_raw_value_t value);
+    void Visit(const koopa_raw_get_elem_ptr_t &get_elem_ptr, koopa_raw_value_t value);
+    void Visit(const koopa_raw_get_ptr_t &get_ptr, koopa_raw_value_t value);
+    
     // 遍历函数的指令以得到分配的空间
     void VisitFuncIns(const koopa_raw_slice_t &slice, IR::FuncInformation &func_information);
     void VisitFuncIns(const koopa_raw_value_t &value, IR::FuncInformation &func_information);
 
     void SetStackSpace(IR::FuncInformation &func_information);
+    int GetTypeSize(koopa_raw_type_t ty);
+    RegObj LoadPointerToReg(koopa_raw_value_t value);
   };
 };

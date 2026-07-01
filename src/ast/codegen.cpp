@@ -827,7 +827,7 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
   std::string b_type = *context.decl_type_context;
   auto arr_size = node.const_exp->getValue(context);
   auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::ARRAY);
-  sym->value = ArrayInformation(b_type, arr_size);
+  sym->value = ArrayInformation(address, arr_size);
   if (context.scope->isGlobal()) {
     auto raw_init_vals = node.init_val_list->getValue(context);
     auto init_vals = std::vector<std::string>(arr_size);

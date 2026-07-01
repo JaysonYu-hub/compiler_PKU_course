@@ -131,10 +131,17 @@ void IR::IRVisitor::Visit(const koopa_raw_value_t &value) {
       Visit(kind.data.store);
       break;
     case KOOPA_RVT_ALLOC:
+    {
       // 访问 alloc 指令
-      reg_name = context.GetAddress(ObjKind::LOCAL_VAR_ADD);
+      assert(value->ty->tag == KOOPA_RTT_POINTER);
+      auto base_ty = value->ty->data.pointer.base;
+      int size = GetTypeSize(base_ty);
+      for (int i = 0; i < size / 4; i++) {
+        reg_name = context.GetAddress(ObjKind::LOCAL_VAR_ADD);
+      }
       SetReg(value, reg_name);
       break;
+    }
     case KOOPA_RVT_BRANCH:
       Visit(kind.data.branch);
       break;
@@ -150,6 +157,12 @@ void IR::IRVisitor::Visit(const koopa_raw_value_t &value) {
       break;
     case KOOPA_RVT_GLOBAL_ALLOC:
       Visit(kind.data.global_alloc, value);
+      break;
+    case KOOPA_RVT_GET_ELEM_PTR:
+      Visit(kind.data.get_elem_ptr, value);
+      break;
+    case KOOPA_RVT_GET_PTR:
+      Visit(kind.data.get_ptr, value);
       break;
     default:
       // 其他类型暂时遇不到
@@ -175,7 +188,7 @@ void IR::IRVisitor::Visit(const koopa_raw_return_t &ret) {
   // 访问 return 指令
   // ret %2 | ret 3
   if (ret.value != nullptr) {
-    RegObj reg_name = GetReg(ret.value);  
+    RegObj reg_name = GetAdd(ret.value);  
     std::cout << "  # " << "ret " << reg_name.reg_name << std::endl;
     if (reg_name.kind == ObjKind::LOCAL_VAR_ADD) {
       std::cout << "  lw a0, " << reg_name.reg_name << std::endl;
@@ -200,8 +213,8 @@ void IR::IRVisitor::Visit(const koopa_raw_binary_t &binary, koopa_raw_value_t va
   // 访问 binary 指令
   // %1 = add %0, %1 | %1 = add %0, 3
   // %1 = add %0, %1 这里的%0只是一个value指针，需要判断是否为address
-  RegObj lhs_reg = GetReg(binary.lhs);
-  RegObj rhs_reg = GetReg(binary.rhs);
+  RegObj lhs_reg = GetAdd(binary.lhs);
+  RegObj rhs_reg = GetAdd(binary.rhs);
   // 注意GetReg的调用次数
   ObjKind lhs_reg_kind = lhs_reg.kind;
   ObjKind rhs_reg_kind = rhs_reg.kind;
@@ -275,45 +288,61 @@ void IR::IRVisitor::Visit(const koopa_raw_binary_t &binary, koopa_raw_value_t va
 }
 
 void IR::IRVisitor::Visit(const koopa_raw_load_t &load, koopa_raw_value_t value) {
-  // 访问 load 指令
-  // %0 = load @x(local_add/global_add)
-  // assert(GetReg(load.src).kind == ObjKind::LOCAL_VAR_ADD);
   RegObj dest_address = context.GetAddress(ObjKind::LOCAL_VAR_ADD);
-  RegObj src_reg = GetReg(load.src);
 
-  std::cout << "  # " << dest_address.reg_name << " = load " << src_reg.reg_name << std::endl;
-  RegObj temp;
-  if (src_reg.kind == ObjKind::LOCAL_VAR_ADD) {
-    temp = AddToReg(src_reg);
-  } else if (src_reg.kind == ObjKind::GLOBAL_VAR_ADD) { 
-    temp = AddToReg(GlobalVarToAdd(src_reg));
+  if (load.src->kind.tag == KOOPA_RVT_ALLOC) {
+    // 局部变量：直接加载它的值
+    RegObj src_reg = GetAdd(load.src);
+    assert(src_reg.kind == ObjKind::LOCAL_VAR_ADD);
+    RegObj temp = AddToReg(src_reg);
+    std::cout << "  # " << dest_address.reg_name << " = load " << src_reg.reg_name << std::endl;
+    std::cout << "  sw " << temp.reg_name << ", " << dest_address.reg_name << std::endl;
+  } else if (load.src->kind.tag == KOOPA_RVT_GLOBAL_ALLOC) {
+    // 全局变量：加载它的值
+    RegObj src_reg = GetAdd(load.src);
+    assert(src_reg.kind == ObjKind::GLOBAL_VAR_ADD);
+    RegObj temp = AddToReg(GlobalVarToAdd(src_reg));
+    std::cout << "  # " << dest_address.reg_name << " = load " << src_reg.reg_name << std::endl;
+    std::cout << "  sw " << temp.reg_name << ", " << dest_address.reg_name << std::endl;
+  } else {
+    // 从一个计算出的指针指向的地址加载值
+    RegObj addr_reg = GetTemReg(load.src); // 加载指针本身的值（即目标物理地址）
+    RegObj val_reg = context.t_reg_builder.NewReg(); 
+    std::cout << "  # " << dest_address.reg_name << " = load from pointer in " << addr_reg.reg_name << std::endl;
+    std::cout << "  lw " << val_reg.reg_name << ", 0(" << addr_reg.reg_name << ")\n";
+    std::cout << "  sw " << val_reg.reg_name << ", " << dest_address.reg_name << std::endl;
   }
-  std::cout << "  sw " << temp.reg_name << ", " << dest_address.reg_name << std::endl;
   SetReg(value, dest_address);
   context.t_reg_builder.Reset();
 }
 
 void IR::IRVisitor::Visit(const koopa_raw_store_t &store) {
-  // 访问 store 指令
-  // store %0, @x(栈地址，全局地址) | store 10, @x | store @x(函数参数/栈地址), @y
-  RegObj src_reg = GetReg(store.value);
-  RegObj dest_reg = GetReg(store.dest);
-
+  RegObj src_reg = GetAdd(store.value);
   if (src_reg.kind == ObjKind::FUNC_PARAM_ADD 
     || src_reg.kind == ObjKind::LOCAL_VAR_ADD
     || src_reg.kind == ObjKind::RA_ADD ) {
     src_reg = AddToReg(src_reg);
   }
   
-  if (dest_reg.kind == ObjKind::GLOBAL_VAR_ADD) {
-    dest_reg = GlobalVarToAdd(dest_reg);
-  }
-  assert(dest_reg.kind == ObjKind::LOCAL_VAR_ADD || dest_reg.kind == ObjKind::TEMP_ADD);
-  
   std::string src_reg_name = src_reg.reg_name;
-  std::string dest_address = dest_reg.reg_name;
-  std::cout << "  # " << "store " << src_reg_name << ", " << dest_address << std::endl;
-  std::cout << "  sw " << src_reg_name << ", " << dest_address << std::endl;
+
+  if (store.dest->kind.tag == KOOPA_RVT_ALLOC) {
+    RegObj dest_reg = GetAdd(store.dest);
+    assert(dest_reg.kind == ObjKind::LOCAL_VAR_ADD);
+    std::cout << "  # store " << src_reg_name << ", " << dest_reg.reg_name << std::endl;
+    std::cout << "  sw " << src_reg_name << ", " << dest_reg.reg_name << std::endl;
+  } else if (store.dest->kind.tag == KOOPA_RVT_GLOBAL_ALLOC) {
+    RegObj dest_reg = GetAdd(store.dest);
+    assert(dest_reg.kind == ObjKind::GLOBAL_VAR_ADD);
+    RegObj addr_reg = GlobalVarToAdd(dest_reg);
+    std::cout << "  # store " << src_reg_name << ", " << addr_reg.reg_name << std::endl;
+    std::cout << "  sw " << src_reg_name << ", " << addr_reg.reg_name << std::endl;
+  } else {
+    // 写入一个计算出的内存地址：%dest 保存的是目标地址本身，需要解引用写入
+    RegObj addr_reg = GetTemReg(store.dest);
+    std::cout << "  # store " << src_reg_name << ", 0(" << addr_reg.reg_name << ")" << std::endl;
+    std::cout << "  sw " << src_reg_name << ", 0(" << addr_reg.reg_name << ")" << std::endl;
+  }
   context.t_reg_builder.Reset();
 }
 
@@ -390,6 +419,52 @@ void IR::IRVisitor::Visit(const koopa_raw_global_alloc_t &alloc, koopa_raw_value
   SetReg(value, RegObj(var_name, ObjKind::GLOBAL_VAR_ADD));
 }
 
+void IR::IRVisitor::Visit(const koopa_raw_get_elem_ptr_t &get_elem_ptr, koopa_raw_value_t value) {
+  assert(get_elem_ptr.src->ty->tag == KOOPA_RTT_POINTER);
+  auto base_ty = get_elem_ptr.src->ty->data.pointer.base;
+  assert(base_ty->tag == KOOPA_RTT_ARRAY);
+  
+  int elem_size = GetTypeSize(base_ty->data.array.base); // 获取子元素大小
+  RegObj raw_add_reg = LoadPointerToReg(get_elem_ptr.src);
+  RegObj index_reg = GetTemReg(get_elem_ptr.index);
+
+  RegObj size_reg = context.t_reg_builder.NewReg();
+  RegObj offset_reg = context.t_reg_builder.NewReg();
+  std::cout << "  li " << size_reg.reg_name << ", " << elem_size << "\n";
+  std::cout << "  mul " << offset_reg.reg_name << ", " << index_reg.reg_name << ", " << size_reg.reg_name << "\n";
+  context.t_reg_builder.Reset();
+
+  RegObj temp_reg = context.t_reg_builder.NewReg();
+  std::cout << "  add " << temp_reg.reg_name << ", " << raw_add_reg.reg_name << ", " << offset_reg.reg_name << "\n";
+  
+  RegObj dest_reg = context.GetAddress(ObjKind::LOCAL_VAR_ADD);
+  std::cout << "  sw " << temp_reg.reg_name << ", " << dest_reg.reg_name << "\n";
+  SetReg(value, dest_reg); 
+  context.t_reg_builder.Reset();
+}
+
+void IR::IRVisitor::Visit(const koopa_raw_get_ptr_t &get_ptr, koopa_raw_value_t value) {
+  assert(get_ptr.src->ty->tag == KOOPA_RTT_POINTER);
+  auto base_ty = get_ptr.src->ty->data.pointer.base;
+  
+  int elem_size = GetTypeSize(base_ty); // 基类型即为所指元素的大小
+  RegObj raw_add_reg = LoadPointerToReg(get_ptr.src);
+  RegObj index_reg = GetTemReg(get_ptr.index);
+
+  RegObj size_reg = context.t_reg_builder.NewReg();
+  RegObj offset_reg = context.t_reg_builder.NewReg();
+  std::cout << "  li " << size_reg.reg_name << ", " << elem_size << "\n";
+  std::cout << "  mul " << offset_reg.reg_name << ", " << index_reg.reg_name << ", " << size_reg.reg_name << "\n";
+  context.t_reg_builder.Reset();
+
+  RegObj temp_reg = context.t_reg_builder.NewReg();
+  std::cout << "  add " << temp_reg.reg_name << ", " << raw_add_reg.reg_name << ", " << offset_reg.reg_name << "\n";
+  
+  RegObj dest_reg = context.GetAddress(ObjKind::LOCAL_VAR_ADD);
+  std::cout << "  sw " << temp_reg.reg_name << ", " << dest_reg.reg_name << "\n";
+  SetReg(value, dest_reg); 
+  context.t_reg_builder.Reset();
+}
 // 用于统计函数内有返回值的指令数
 void IR::IRVisitor::VisitFuncIns(const koopa_raw_slice_t &slice, IR::FuncInformation &func_info) {
   for (size_t i = 0; i < slice.len; ++i) {
@@ -412,16 +487,18 @@ void IR::IRVisitor::VisitFuncIns(const koopa_raw_slice_t &slice, IR::FuncInforma
 void IR::IRVisitor::VisitFuncIns(const koopa_raw_value_t &value, IR::FuncInformation &func_info) {
   // 根据指令类型判断后续需要如何访问
   const auto &ty = value->ty;
-  if (ty->tag != KOOPA_RTT_UNIT) {
+  if (ty->tag == KOOPA_RTT_UNIT) {
+  } else if (value->kind.tag == KOOPA_RVT_ALLOC) {
+    // 局部变量分配：计算基类型的大小，累加对应的 4 字节槽位数
+    int slots = GetTypeSize(ty->data.pointer.base) / 4;
+    func_info.return_ins_number += slots;
+  } else {
     func_info.return_ins_number += 1;
   }
 
   auto tag = value->kind.tag;
   if (tag == KOOPA_RVT_CALL) {
     func_info.if_call = true;
-  }
-
-  if (value->kind.tag == KOOPA_RVT_CALL) {
     int len = value->kind.data.call.args.len;
     if (len > func_info.max_param_num) {
       func_info.max_param_num = len;
@@ -429,3 +506,43 @@ void IR::IRVisitor::VisitFuncIns(const koopa_raw_value_t &value, IR::FuncInforma
   }
 }
 
+int IR::IRVisitor::GetTypeSize(koopa_raw_type_t ty) {
+  if (ty->tag == KOOPA_RTT_INT32) {
+    return 4;
+  } else if (ty->tag == KOOPA_RTT_POINTER) {
+    return 4;
+  } else if (ty->tag == KOOPA_RTT_ARRAY) {
+    return ty->data.array.len * GetTypeSize(ty->data.array.base);
+  }
+  return 0;
+}
+
+IR::RegObj IR::IRVisitor::LoadPointerToReg(koopa_raw_value_t value) {
+  RegObj reg = GetAdd(value);
+  RegObj load_reg = context.t_reg_builder.NewReg();
+  if (value->kind.tag == KOOPA_RVT_ALLOC) {
+    // 栈上分配的局部数组：计算其首地址
+    assert(reg.kind == ObjKind::LOCAL_VAR_ADD);
+    std::string offset_str = reg.reg_name.substr(0, reg.reg_name.find('('));
+    int offset = std::stoi(offset_str);
+    if (offset >= -2048 && offset <= 2047) {
+      std::cout << "  addi " << load_reg.reg_name << ", sp, " << offset << "\n";
+    } else {
+      std::cout << "  li " << load_reg.reg_name << ", " << offset << "\n";
+      std::cout << "  add " << load_reg.reg_name << ", sp, " << load_reg.reg_name << "\n";
+    }
+  } else if (value->kind.tag == KOOPA_RVT_GLOBAL_ALLOC) {
+    // 全局变量：使用 la 加载首地址
+    assert(reg.kind == ObjKind::GLOBAL_VAR_ADD);
+    std::cout << "  la " << load_reg.reg_name << ", " << reg.reg_name << "\n";
+  } else {
+    // 已经是存储在寄存器或栈上的指针（例如 getelemptr 的结果或指针参数）
+    if (reg.kind == ObjKind::TEMP_REG || reg.kind == ObjKind::FUNC_PARAM_REG) {
+      std::cout << "  mv " << load_reg.reg_name << ", " << reg.reg_name << "\n";
+    } else {
+      // 存储在栈上，通过 lw 读取指针的值
+      std::cout << "  lw " << load_reg.reg_name << ", " << reg.reg_name << "\n";
+    }
+  }
+  return load_reg;
+}
