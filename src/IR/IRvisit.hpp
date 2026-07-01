@@ -74,7 +74,12 @@ namespace IR {
     public:
     TempRegBuilder t_reg_builder;
     CallStackInfo call_stack_info;
-    std::unordered_map<koopa_raw_value_t, RegObj> value_reg_map; // 存储指令对应的寄存器名字
+    /**  
+     * 存储指令对应的栈地址寄存器名字
+     * 或者全局变量对应的名字
+     * 或者函数参数对应的寄存器名字/栈地址
+     * */
+    std::unordered_map<koopa_raw_value_t, RegObj> value_reg_map; 
     RegObj GetAddress(ObjKind kind) {
       switch (kind) {
         case ObjKind::RA_ADD: {
@@ -144,14 +149,32 @@ namespace IR {
       // 访问 raw program
       Visit(program);
     } 
-    RegObj GetReg(koopa_raw_value_t value) {
+
       /** 
-       * 根据value对应的tag的类型来决定如何获取寄存器
-       * 如果能从表里找到正常返回
-       * 如果是数字就先Visit一下
+       * 从表中获取value对应的栈地址
+       * 或者是相关函数的寄存器名
        * */      
+    RegObj GetMap(koopa_raw_value_t value) {
       if (value_reg_map.find(value) != value_reg_map.end()) {
         return value_reg_map[value];
+      }
+      return RegObj("RegNameError");
+    }
+    // 目前仅用于建立value到栈空间的映射
+    void SetMap(koopa_raw_value_t value, RegObj reg) {
+      value_reg_map[value] = reg;
+    }
+    /** 用于表达式右边的整数,栈地址和全局地址
+     * 
+     * 把value的返回值加载到临时寄存器中并返回
+     * 如果是整数类型会先visit,
+     * 如果是地址类型会先加载, 
+     * 如果是全局变量会先加载地址再加载值
+     * 注意使用此函数结束后需要resst()临时寄存器 
+     * */
+    RegObj GetTemReg(koopa_raw_value_t value) {
+      if (value->kind.tag == KOOPA_RVT_ALLOC || value->kind.tag == KOOPA_RVT_GLOBAL_ALLOC) {
+        return LoadPointerToReg(value);
       }
       if (value->kind.tag == KOOPA_RVT_INTEGER) {
         int val = value->kind.data.integer.value;
@@ -162,34 +185,27 @@ namespace IR {
         // std::cout << "GetRegCall" << std::endl;
         return RegObj(Visit(value->kind.data.integer), ObjKind::TEMP_REG);
       }
-      return RegObj("RegNameError");
-    }
-    // 目前仅用于建立value到栈空间的映射
-    void SetReg(koopa_raw_value_t value, RegObj reg) {
-      value_reg_map[value] = reg;
-    }
-    /** 
-     * 把value的返回值加载到临时寄存器中并返回
-     * 如果是地址类型会先加载, 
-     * 注意使用此函数结束后需要resst()临时寄存器 
-     * */
-    RegObj GetTemReg(koopa_raw_value_t value) {
       if (value_reg_map.find(value) != value_reg_map.end()) {
         RegObj reg = value_reg_map[value];
-        RegObj load_reg = context.t_reg_builder.NewReg();
-        std::cout << "  lw " << load_reg.reg_name << ", " << reg.reg_name << "\n";
-        return load_reg;
+        if (reg.kind == ObjKind::FUNC_PARAM_REG || reg.kind == ObjKind::TEMP_REG) {
+          return reg;
+        }
+        return AddToReg(reg);
       } else {
-        return GetReg(value);
+        assert(false);
       }
     }
-    // 把地址寄存器加载到临时寄存器中
+    // 把地址寄存器或全局变量加载到临时寄存器中
     RegObj AddToReg(RegObj reg) {
       assert(reg.kind == ObjKind::FUNC_PARAM_ADD ||
       reg.kind == ObjKind::LOCAL_VAR_ADD ||
       reg.kind == ObjKind::RA_ADD ||
-      reg.kind == ObjKind::TEMP_ADD
+      reg.kind == ObjKind::TEMP_ADD ||
+      reg.kind == ObjKind::GLOBAL_VAR_ADD
       );
+      if (reg.kind == ObjKind::GLOBAL_VAR_ADD) {
+        reg = GlobalVarToAdd(reg);
+      }
       RegObj load_reg = context.t_reg_builder.NewReg();
       std::cout << "  lw " << load_reg.reg_name << ", " << reg.reg_name << "\n";
       return load_reg;
