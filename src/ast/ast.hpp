@@ -6,6 +6,7 @@
 #include <iostream>
 #include <variant>
 #include <cassert>
+#include "IR/custom_ir.hpp"
 
 class CodeGenerator;
 
@@ -211,7 +212,41 @@ public:
   std::vector<WhileLabelContext> while_label_contexts;
   std::shared_ptr<std::string> decl_type_context;
 
-  Context() : reg_builder(), scope(std::make_shared<Scope>(scope_ident_builder)) {}
+  // C++ IR 内存表示数据成员
+  std::shared_ptr<IR::IRProgram> ir_program;
+  IR::IRFunction* current_func = nullptr;
+  IR::IRBasicBlock* current_block = nullptr;
+  std::unordered_map<std::string, std::shared_ptr<IR::IRValue>> ir_values;
+
+  void SetIRValue(const std::string& name, std::shared_ptr<IR::IRValue> val) {
+    ir_values[name] = val;
+  }
+
+  void AddNewBlock(const std::string& name) {
+    if (current_func) {
+      auto block = std::make_shared<IR::IRBasicBlock>(name);
+      current_func->blocks.push_back(block);
+      current_block = block.get();
+    }
+  }
+
+  std::shared_ptr<IR::IRValue> GetIRValue(const std::string& name) {
+    if (ir_values.find(name) != ir_values.end()) {
+      return ir_values[name];
+    }
+    if (!name.empty() && name[0] != '%' && name[0] != '@') {
+      try {
+        int val = std::stoi(name);
+        auto const_val = std::make_shared<IR::IRConstant>(val);
+        ir_values[name] = const_val;
+        return const_val;
+      } catch (...) {
+      }
+    }
+    return nullptr;
+  }
+
+  Context() : reg_builder(), scope(std::make_shared<Scope>(scope_ident_builder)), ir_program(std::make_shared<IR::IRProgram>()) {}
   void enterNewScope() {
     std::string new_ident = scope_ident_builder.NewNum();
     scope = std::make_shared<Scope>(scope, new_ident);

@@ -50,6 +50,8 @@ int main(int argc, const char *argv[]) {
   cout << endl;
   cout.rdbuf(coutbuf); // 恢复原来的缓冲区
   
+  clog << "--- Custom C++ IR Dump ---\n" << context.ir_program->DumpText() << "-------------------------\n";
+  
   if (mode == "-riscv") {
     koopa_program_t program;
     koopa_error_code_t ret_code = koopa_parse_from_file(output, &program);

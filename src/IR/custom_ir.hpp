@@ -23,6 +23,9 @@ namespace IR {
     
     // 生成对应的 Koopa IR 文本表示
     virtual std::string DumpText() const = 0;
+
+    // 作为操作数使用时的名字（常量返回自身，指令返回寄存器名）
+    virtual std::string GetOperandName() const = 0;
     
     // 获取当前 Value 的数据类型
     virtual IRType GetType() const = 0;
@@ -41,19 +44,33 @@ namespace IR {
       return std::to_string(val);
     }
 
+    std::string GetOperandName() const override {
+      return std::to_string(val);
+    }
+
     IRType GetType() const override {
       return IRType::IR_INT32;
     }
   };
 
-  // 基础指令类，代表所有具有 SSA 寄存器名称的 IR 指令
+  // 基础指令类，代表所有 IR 指令（包括有返回值和无返回值的）
   class IRInstruction : public IRValue {
+  public:
+    virtual ~IRInstruction() = default;
+  };
+
+  // 具有 SSA 寄存器返回值的指令基类（如二元计算等）
+  class IRNameInstruction : public IRInstruction {
   protected:
     std::string name; // SSA 寄存器名，如 "%0", "%1" 等
   public:
-    explicit IRInstruction(std::string name) : name(std::move(name)) {}
+    explicit IRNameInstruction(std::string name) : name(std::move(name)) {}
 
     std::string GetName() const { return name; }
+
+    std::string GetOperandName() const override {
+      return name;
+    }
   };
 
   // 二元计算操作符
@@ -91,14 +108,14 @@ namespace IR {
   }
 
   // 二元计算指令类
-  class IRBinary : public IRInstruction {
+  class IRBinary : public IRNameInstruction {
   private:
     IRBinaryOp op;
     std::shared_ptr<IRValue> lhs;
     std::shared_ptr<IRValue> rhs;
   public:
     IRBinary(std::string name, IRBinaryOp op, std::shared_ptr<IRValue> lhs, std::shared_ptr<IRValue> rhs)
-      : IRInstruction(std::move(name)), op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {
+      : IRNameInstruction(std::move(name)), op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {
       assert(this->lhs != nullptr && this->rhs != nullptr);
     }
 
@@ -107,12 +124,38 @@ namespace IR {
     std::shared_ptr<IRValue> GetRhs() const { return rhs; }
 
     std::string DumpText() const override {
-      return name + " = " + OpToString(op) + " " + lhs->DumpText() + ", " + rhs->DumpText();
+      return name + " = " + OpToString(op) + " " + lhs->GetOperandName() + ", " + rhs->GetOperandName();
     }
 
     IRType GetType() const override {
       // 在 SysY 中，二元计算的返回值目前都是 i32 整数
       return IRType::IR_INT32;
+    }
+  };
+
+  // 返回指令类（无 SSA 寄存器名）
+  class IRReturn : public IRInstruction {
+  private:
+    std::shared_ptr<IRValue> val; // 可以为 nullptr
+  public:
+    explicit IRReturn(std::shared_ptr<IRValue> val = nullptr) : val(std::move(val)) {}
+
+    std::shared_ptr<IRValue> GetValue() const { return val; }
+
+    std::string DumpText() const override {
+      if (val) {
+        return "ret " + val->GetOperandName();
+      }
+      return "ret";
+    }
+
+    std::string GetOperandName() const override {
+      assert(false && "Void instruction cannot be used as an operand");
+      return "";
+    }
+
+    IRType GetType() const override {
+      return IRType::IR_VOID;
     }
   };
 
@@ -174,4 +217,4 @@ namespace IR {
     }
   };
 
-} // namespace IR
+}

@@ -145,6 +145,12 @@ std::string CodeGenerator::Generate(const FuncDefAST& node) {
   auto symbol = std::make_shared<Symbol>(*node.ident, SymbolKind::FUNCTION, FuncInformation(*node.type));
   context.scope->define(symbol);
 
+  // 初始化内存表示的 IRFunction
+  IR::IRType ret_type = (*node.type == "void") ? IR::IRType::IR_VOID : IR::IRType::IR_INT32;
+  auto func = std::make_shared<IR::IRFunction>(*node.ident, ret_type);
+  context.ir_program->funcs.push_back(func);
+  context.current_func = func.get();
+
   context.enterNewScope();
   std::cout << "fun @" << *node.ident << "(";
   if (node.func_f_params) {
@@ -156,6 +162,8 @@ std::string CodeGenerator::Generate(const FuncDefAST& node) {
   }
   std::cout << " {\n";
   std::cout << "\%entry:\n";
+  context.AddNewBlock("\%entry"); //添加 %entry 内存基本块
+
   context.cur_block_has_terminator = false;
   if (node.func_f_params) {
     ParamLocalization(*node.func_f_params);
@@ -167,10 +175,18 @@ std::string CodeGenerator::Generate(const FuncDefAST& node) {
   // 函数返回值没有返回值
   if (!context.cur_block_has_terminator && *node.type == "void") {
     std::cout << "  ret\n";
+    if (context.current_block) {
+      auto inst = std::make_shared<IR::IRReturn>(nullptr);
+      context.current_block->AddInstruction(inst);
+    }
   }
 
   std::cout << "}\n";
   context.exitScope();
+  
+  // 函数生成结束，重置活动指针
+  context.current_func = nullptr;
+  context.current_block = nullptr;
   return "";
 }
 
@@ -245,12 +261,16 @@ std::string CodeGenerator::Generate(const IfUnmatchedStmtAST& node) {
   std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
   std::cout << "  br " << cond_reg << ", " << if_label << ", " << end_label << "\n";
   std::cout << if_label << ":\n";
+  context.AddNewBlock(if_label);
+
   context.cur_block_has_terminator = false;
   Generate(*node.if_stmt);
   if (!context.cur_block_has_terminator) {
     std::cout << "  jump " << end_label << "\n";
   }
   std::cout << end_label << ":\n";
+  context.AddNewBlock(end_label);
+
   context.cur_block_has_terminator = false;
   return "";
 }
@@ -262,6 +282,8 @@ std::string CodeGenerator::Generate(const IfElseUnmatchedStmtAST& node) {
   std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
   std::cout << "  br " << cond_reg << ", " << if_label << ", " << else_label << "\n";
   std::cout << if_label << ":\n";
+  context.AddNewBlock(if_label);
+
   context.cur_block_has_terminator = false;
   Generate(*node.if_stmt);
   bool then_has_terminator = context.cur_block_has_terminator;
@@ -269,6 +291,8 @@ std::string CodeGenerator::Generate(const IfElseUnmatchedStmtAST& node) {
     std::cout << "  jump " << end_label << "\n";
   }
   std::cout << else_label << ":\n";
+  context.AddNewBlock(else_label);
+
   context.cur_block_has_terminator = false;
   Generate(*node.else_stmt);
   bool else_has_terminator = context.cur_block_has_terminator;
@@ -277,6 +301,7 @@ std::string CodeGenerator::Generate(const IfElseUnmatchedStmtAST& node) {
   }
   if (!then_has_terminator || !else_has_terminator) {
     std::cout << end_label << ":\n";
+    context.AddNewBlock(end_label);
   } else {
     context.cur_block_has_terminator = true;
   }
@@ -285,12 +310,20 @@ std::string CodeGenerator::Generate(const IfElseUnmatchedStmtAST& node) {
 
 std::string CodeGenerator::Generate(const ReturnStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
+  std::string ret_val = "";
   if (node.exp) {
-    std::string ret_val = Generate(*node.exp);
+    ret_val = Generate(*node.exp);
     std::cout << "  ret " << ret_val << "\n";
   } else {
     std::cout << "  ret\n";
   }
+
+  if (context.current_block) {
+    auto val = node.exp ? context.GetIRValue(ret_val) : nullptr;
+    auto inst = std::make_shared<IR::IRReturn>(val);
+    context.current_block->AddInstruction(inst);
+  }
+
   context.cur_block_has_terminator = true;
   return "";
 }
@@ -332,6 +365,8 @@ std::string CodeGenerator::Generate(const IfMatchedStmtAST& node) {
   std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
   std::cout << "  br " << cond_reg << ", " << if_label << ", " << else_label << "\n";
   std::cout << if_label << ":\n";
+  context.AddNewBlock(if_label);
+
   context.cur_block_has_terminator = false;
   Generate(*node.if_stmt);
   bool then_has_terminator = context.cur_block_has_terminator;
@@ -339,6 +374,8 @@ std::string CodeGenerator::Generate(const IfMatchedStmtAST& node) {
     std::cout << "  jump " << end_label << "\n";
   }
   std::cout << else_label << ":\n";
+  context.AddNewBlock(else_label);
+
   context.cur_block_has_terminator = false;
   Generate(*node.else_stmt);
   bool else_has_terminator = context.cur_block_has_terminator;
@@ -347,6 +384,7 @@ std::string CodeGenerator::Generate(const IfMatchedStmtAST& node) {
   }
   if (!then_has_terminator || !else_has_terminator) {
     std::cout << end_label << ":\n";
+    context.AddNewBlock(end_label);
   } else {
     context.cur_block_has_terminator = true;
   }
@@ -363,14 +401,20 @@ std::string CodeGenerator::Generate(const WhileStmtAST& node) {
   context.enterNewWhileScope(loop_label, continue_loop_label, end_label);
   std::cout << "  jump " << loop_label << "\n";
   std::cout << loop_label << ":\n";
+  context.AddNewBlock(loop_label);
+
   std::string cond_reg = Generate(*node.while_exp);
   std::cout << "  br " << cond_reg << ", " << continue_loop_label << ", " << end_label << "\n";
   std::cout << continue_loop_label << ":\n";
+  context.AddNewBlock(continue_loop_label);
+
   Generate(*node.while_stmt);
   if (!context.cur_block_has_terminator) {
     std::cout << "  jump " << loop_label << "\n";
   }
   std::cout << end_label << ":\n";
+  context.AddNewBlock(end_label);
+
   context.cur_block_has_terminator = false;
   context.exitWhileScope();
   return "";
@@ -382,6 +426,7 @@ std::string CodeGenerator::Generate(const BreakStmtAST& node) {
   std::cout << "  jump " << while_label_context.while_label_end << "\n";
   std::string tool_label = while_label_context.while_label_continue + NumBuilder::GetNum();
   std::cout << tool_label << ":\n";
+  context.AddNewBlock(tool_label);
   return "";
 }
 
@@ -391,6 +436,7 @@ std::string CodeGenerator::Generate(const ContinueStmtAST& node) {
   std::cout << "  jump " << while_label_context.while_label_begin << "\n";
   std::string tool_label = while_label_context.while_label_continue + NumBuilder::GetNum();
   std::cout << tool_label << ":\n";
+  context.AddNewBlock(tool_label);
   return "";
 }
 
@@ -409,11 +455,25 @@ std::string CodeGenerator::Generate(const UnaryOPExpAST& node) {
   else if (node.op->op == "-") {
     std::string dest_reg = context.NewReg();
     std::cout << "  " << dest_reg << " = sub 0, " << src_reg << "\n";
+    if (context.current_block) {
+      auto lhs = context.GetIRValue("0");
+      auto rhs = context.GetIRValue(src_reg);
+      auto inst = std::make_shared<IR::IRBinary>(dest_reg, IR::IRBinaryOp::SUB, lhs, rhs);
+      context.current_block->AddInstruction(inst);
+      context.SetIRValue(dest_reg, inst);
+    }
     return dest_reg;
   }
   else if (node.op->op == "!") {
     std::string dest_reg = context.NewReg();
     std::cout << "  " << dest_reg << " = eq 0, " << src_reg << "\n";
+    if (context.current_block) {
+      auto lhs = context.GetIRValue("0");
+      auto rhs = context.GetIRValue(src_reg);
+      auto inst = std::make_shared<IR::IRBinary>(dest_reg, IR::IRBinaryOp::EQ, lhs, rhs);
+      context.current_block->AddInstruction(inst);
+      context.SetIRValue(dest_reg, inst);
+    }
     return dest_reg;
   }
   return "";
@@ -490,12 +550,24 @@ std::string CodeGenerator::Generate(const BinaryMulExprAST& node) {
   std::string lhs_reg = Generate(*node.mul_exp);
   std::string rhs_reg = Generate(*node.unary_exp);
   std::string dest_reg = context.NewReg();
+  IR::IRBinaryOp op = IR::IRBinaryOp::MUL;
   if (node.op->op == "*") {
     std::cout << "  " << dest_reg << " = mul " << lhs_reg << ", " << rhs_reg << "\n";
+    op = IR::IRBinaryOp::MUL;
   } else if (node.op->op == "/") {
     std::cout << "  " << dest_reg << " = div " << lhs_reg << ", " << rhs_reg << "\n";
+    op = IR::IRBinaryOp::DIV;
   } else if (node.op->op == "%") {
     std::cout << "  " << dest_reg << " = mod " << lhs_reg << ", " << rhs_reg << "\n";
+    op = IR::IRBinaryOp::MOD;
+  }
+
+  if (context.current_block) {
+    auto lhs = context.GetIRValue(lhs_reg);
+    auto rhs = context.GetIRValue(rhs_reg);
+    auto inst = std::make_shared<IR::IRBinary>(dest_reg, op, lhs, rhs);
+    context.current_block->AddInstruction(inst);
+    context.SetIRValue(dest_reg, inst);
   }
   return dest_reg;
 }
@@ -511,10 +583,21 @@ std::string CodeGenerator::Generate(const BinaryAddExprAST& node) {
   std::string lhs_reg = Generate(*node.add_exp);
   std::string rhs_reg = Generate(*node.mul_exp);
   std::string dest_reg = context.NewReg();
+  IR::IRBinaryOp op = IR::IRBinaryOp::ADD;
   if (node.op->op == "+") {
     std::cout << "  " << dest_reg << " = add " << lhs_reg << ", " << rhs_reg << "\n";
+    op = IR::IRBinaryOp::ADD;
   } else if (node.op->op == "-") {
     std::cout << "  " << dest_reg << " = sub " << lhs_reg << ", " << rhs_reg << "\n";
+    op = IR::IRBinaryOp::SUB;
+  }
+
+  if (context.current_block) {
+    auto lhs = context.GetIRValue(lhs_reg);
+    auto rhs = context.GetIRValue(rhs_reg);
+    auto inst = std::make_shared<IR::IRBinary>(dest_reg, op, lhs, rhs);
+    context.current_block->AddInstruction(inst);
+    context.SetIRValue(dest_reg, inst);
   }
   return dest_reg;
 }
@@ -530,14 +613,27 @@ std::string CodeGenerator::Generate(const BinaryRelExprAST& node) {
   std::string lhs_reg = Generate(*node.rel_exp);
   std::string rhs_reg = Generate(*node.add_exp);
   std::string dest_reg = context.NewReg();
+  IR::IRBinaryOp op = IR::IRBinaryOp::LT;
   if (node.op->op == "<") {
     std::cout << "  " << dest_reg << " = lt " << lhs_reg << ", " << rhs_reg << "\n";
+    op = IR::IRBinaryOp::LT;
   } else if (node.op->op == ">") {
     std::cout << "  " << dest_reg << " = gt " << lhs_reg << ", " << rhs_reg << "\n";
+    op = IR::IRBinaryOp::GT;
   } else if (node.op->op == "<=") {
     std::cout << "  " << dest_reg << " = le " << lhs_reg << ", " << rhs_reg << "\n";
+    op = IR::IRBinaryOp::LE;
   } else if (node.op->op == ">=") {
     std::cout << "  " << dest_reg << " = ge " << lhs_reg << ", " << rhs_reg << "\n";
+    op = IR::IRBinaryOp::GE;
+  }
+
+  if (context.current_block) {
+    auto lhs = context.GetIRValue(lhs_reg);
+    auto rhs = context.GetIRValue(rhs_reg);
+    auto inst = std::make_shared<IR::IRBinary>(dest_reg, op, lhs, rhs);
+    context.current_block->AddInstruction(inst);
+    context.SetIRValue(dest_reg, inst);
   }
   return dest_reg;
 }
@@ -553,10 +649,21 @@ std::string CodeGenerator::Generate(const BinaryEqExprAST& node) {
   std::string lhs_reg = Generate(*node.eq_exp);
   std::string rhs_reg = Generate(*node.rel_exp);
   std::string dest_reg = context.NewReg();
+  IR::IRBinaryOp op = IR::IRBinaryOp::EQ;
   if (node.op->op == "==") {
     std::cout << "  " << dest_reg << " = eq " << lhs_reg << ", " << rhs_reg << "\n";
+    op = IR::IRBinaryOp::EQ;
   } else if (node.op->op == "!=") {
     std::cout << "  " << dest_reg << " = ne " << lhs_reg << ", " << rhs_reg << "\n";
+    op = IR::IRBinaryOp::NE;
+  }
+
+  if (context.current_block) {
+    auto lhs = context.GetIRValue(lhs_reg);
+    auto rhs = context.GetIRValue(rhs_reg);
+    auto inst = std::make_shared<IR::IRBinary>(dest_reg, op, lhs, rhs);
+    context.current_block->AddInstruction(inst);
+    context.SetIRValue(dest_reg, inst);
   }
   return dest_reg;
 }
