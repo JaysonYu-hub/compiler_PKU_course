@@ -1,0 +1,177 @@
+#pragma once
+
+#include <string>
+#include <memory>
+#include <vector>
+#include <cstdint>
+#include <cassert>
+
+namespace IR {
+
+  // IR 数据类型
+  enum class IRType {
+    IR_INT32,
+    IR_VOID,
+    IR_POINTER,
+    IR_ARRAY
+  };
+
+  // 基础 Value 类，代表所有可以作为操作数的目标（如常量、指令的返回值等）
+  class IRValue : public std::enable_shared_from_this<IRValue> {
+  public:
+    virtual ~IRValue() = default;
+    
+    // 生成对应的 Koopa IR 文本表示
+    virtual std::string DumpText() const = 0;
+    
+    // 获取当前 Value 的数据类型
+    virtual IRType GetType() const = 0;
+  };
+
+  // 整型常量类
+  class IRConstant : public IRValue {
+  private:
+    int32_t val;
+  public:
+    explicit IRConstant(int32_t val) : val(val) {}
+    
+    int32_t GetValue() const { return val; }
+
+    std::string DumpText() const override {
+      return std::to_string(val);
+    }
+
+    IRType GetType() const override {
+      return IRType::IR_INT32;
+    }
+  };
+
+  // 基础指令类，代表所有具有 SSA 寄存器名称的 IR 指令
+  class IRInstruction : public IRValue {
+  protected:
+    std::string name; // SSA 寄存器名，如 "%0", "%1" 等
+  public:
+    explicit IRInstruction(std::string name) : name(std::move(name)) {}
+
+    std::string GetName() const { return name; }
+  };
+
+  // 二元计算操作符
+  enum class IRBinaryOp {
+    ADD, SUB, MUL, DIV, MOD, // 算术运算符
+    AND, OR, XOR,            // 位运算符
+    SHL, SHR, SAR,           // 移位运算符
+    EQ, NE,                  // 等于、不等于
+    LT, LE, GT, GE           // 比较运算符
+  };
+
+  // 将操作符枚举转换为 Koopa IR 的文本关键字
+  inline std::string OpToString(IRBinaryOp op) {
+    switch (op) {
+      case IRBinaryOp::ADD: return "add";
+      case IRBinaryOp::SUB: return "sub";
+      case IRBinaryOp::MUL: return "mul";
+      case IRBinaryOp::DIV: return "div";
+      case IRBinaryOp::MOD: return "mod";
+      case IRBinaryOp::AND: return "and";
+      case IRBinaryOp::OR:  return "or";
+      case IRBinaryOp::XOR: return "xor";
+      case IRBinaryOp::SHL: return "shl";
+      case IRBinaryOp::SHR: return "shr";
+      case IRBinaryOp::SAR: return "sar";
+      case IRBinaryOp::EQ:  return "eq";
+      case IRBinaryOp::NE:  return "ne";
+      case IRBinaryOp::LT:  return "lt";
+      case IRBinaryOp::LE:  return "le";
+      case IRBinaryOp::GT:  return "gt";
+      case IRBinaryOp::GE:  return "ge";
+      default: assert(false && "Invalid binary operator");
+    }
+    return "";
+  }
+
+  // 二元计算指令类
+  class IRBinary : public IRInstruction {
+  private:
+    IRBinaryOp op;
+    std::shared_ptr<IRValue> lhs;
+    std::shared_ptr<IRValue> rhs;
+  public:
+    IRBinary(std::string name, IRBinaryOp op, std::shared_ptr<IRValue> lhs, std::shared_ptr<IRValue> rhs)
+      : IRInstruction(std::move(name)), op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {
+      assert(this->lhs != nullptr && this->rhs != nullptr);
+    }
+
+    IRBinaryOp GetOp() const { return op; }
+    std::shared_ptr<IRValue> GetLhs() const { return lhs; }
+    std::shared_ptr<IRValue> GetRhs() const { return rhs; }
+
+    std::string DumpText() const override {
+      return name + " = " + OpToString(op) + " " + lhs->DumpText() + ", " + rhs->DumpText();
+    }
+
+    IRType GetType() const override {
+      // 在 SysY 中，二元计算的返回值目前都是 i32 整数
+      return IRType::IR_INT32;
+    }
+  };
+
+  // 基本块类
+  class IRBasicBlock {
+  public:
+    std::string name;
+    std::vector<std::shared_ptr<IRInstruction>> insts;
+
+    explicit IRBasicBlock(std::string name) : name(std::move(name)) {}
+
+    void AddInstruction(std::shared_ptr<IRInstruction> inst) {
+      insts.push_back(std::move(inst));
+    }
+
+    std::string DumpText() const {
+      std::string text = name + ":\n";
+      for (const auto& inst : insts) {
+        text += "  " + inst->DumpText() + "\n";
+      }
+      return text;
+    }
+  };
+
+  // 函数类
+  class IRFunction {
+  public:
+    std::string name;
+    IRType ret_type;
+    std::vector<std::shared_ptr<IRBasicBlock>> blocks;
+
+    IRFunction(std::string name, IRType ret_type) : name(std::move(name)), ret_type(ret_type) {}
+
+    std::string DumpText() const {
+      std::string text = "fun @" + name + "()";
+      if (ret_type != IRType::IR_VOID) {
+        text += " : i32";
+      }
+      text += " {\n";
+      for (const auto& block : blocks) {
+        text += block->DumpText();
+      }
+      text += "}\n";
+      return text;
+    }
+  };
+
+  // 程序根类
+  class IRProgram {
+  public:
+    std::vector<std::shared_ptr<IRFunction>> funcs;
+
+    std::string DumpText() const {
+      std::string text;
+      for (const auto& func : funcs) {
+        text += func->DumpText() + "\n";
+      }
+      return text;
+    }
+  };
+
+} // namespace IR

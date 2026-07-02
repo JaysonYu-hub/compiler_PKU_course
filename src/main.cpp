@@ -7,7 +7,8 @@
 #include "ast/ast.hpp"
 #include "ast/codegen.hpp"
 #include "koopa.h"
-#include "IR/IRvisit.hpp"
+#include "riscv/riscv.hpp"
+#include "IR/custom_ir.hpp"
 
 using namespace std;
 
@@ -22,7 +23,7 @@ extern int yyparse(unique_ptr<BaseAST> &ast);
 
 int main(int argc, const char *argv[]) {
   Context context = Context();  
-  IR::IRVisitor ir_visitor;
+  Back::IRVisitor ir_visitor;
   // 解析命令行参数. 测试脚本/评测平台要求你的编译器能接收如下参数:
   // compiler 模式 输入文件 -o 输出文件
   assert(argc == 5);
