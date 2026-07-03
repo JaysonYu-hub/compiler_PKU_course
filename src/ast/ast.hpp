@@ -239,6 +239,13 @@ public:
     }
   }
 
+  void AddGlobal(std::shared_ptr<IR::IRGlobalAlloc> global) {
+    if (global && ir_program) {
+      ir_program->globals.push_back(global);
+      SetIRValue(global->GetOperandName(), global);
+    }
+  }
+
   std::shared_ptr<IR::IRValue> GetIRValue(const std::string& name) {
     if (ir_values.find(name) != ir_values.end()) {
       return ir_values[name];

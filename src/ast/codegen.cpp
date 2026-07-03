@@ -1022,13 +1022,18 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
   }
   if (context.scope->isGlobal()) {
     std::string str;
+    std::vector<int32_t> init_nums(arr_size, 0);
     for (int i = 0; i < arr_size; i++) {
       str += init_vals[i];
+      init_nums[i] = std::stoi(init_vals[i]);
       if (i != arr_size - 1) {
         str += ", ";
       }
     }
     std::cout << "global " << address << " = alloc [i32, " << arr_size << "], {" << str << "}\n";
+    std::string arr_type = "[i32, " + std::to_string(arr_size) + "]";
+    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, false, init_nums);
+    context.AddGlobal(global_alloc);
   } else {
     std::cout << "  " << address  << " = alloc [i32, " << arr_size << "]\n";
     for (int i = 0; i < arr_size; i++) {
@@ -1114,7 +1119,8 @@ std::string CodeGenerator::Generate(const SimpleVarDefAST& node) {
 
   if (context.scope->isGlobal()) {
     std::cout << "global " << address << " = alloc " << b_type << ", " << "zeroinit\n";
-    context.SetIRValue(address, std::make_shared<IR::IRSymbol>(address));
+    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, b_type, true, std::vector<int32_t>{});
+    context.AddGlobal(global_alloc);
   } else {
     std::cout << "  " << address << " = alloc " << b_type << "\n";
     if (context.current_block) {
@@ -1132,8 +1138,10 @@ std::string CodeGenerator::Generate(const InitializedVarDefAST& node) {
   std::string b_type = *context.decl_type_context;
   auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE, address);
   if (context.scope->isGlobal()) {
-    std::cout << "global " << address << " = alloc " << b_type << ", " << node.init_val->getValue(context) << "\n";
-    context.SetIRValue(address, std::make_shared<IR::IRSymbol>(address));
+    int init_val = node.init_val->getValue(context);
+    std::cout << "global " << address << " = alloc " << b_type << ", " << init_val << "\n";
+    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, b_type, false, std::vector<int32_t>{init_val});
+    context.AddGlobal(global_alloc);
   } else {
     std::cout << "  " << address << " = alloc " << b_type << "\n";
     auto alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type);
@@ -1158,7 +1166,9 @@ std::string CodeGenerator::Generate(const ArrayVarDefAST& node) {
 
   if (context.scope->isGlobal()) {
     std::cout << "global " << address << " = alloc [" << b_type << ", " << arr_size << "]\n";
-    context.SetIRValue(address, std::make_shared<IR::IRSymbol>(address));
+    std::string arr_type = "[" + b_type + ", " + std::to_string(arr_size) + "]";
+    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, true, std::vector<int32_t>{});
+    context.AddGlobal(global_alloc);
   } else {
     std::cout << "  " << address << " = alloc [" << b_type << ", " << arr_size << "]\n";
   }
@@ -1174,21 +1184,21 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
   sym->value = ArrayInformation(address, arr_size);
   if (context.scope->isGlobal()) {
     auto raw_init_vals = node.init_val_list->getValue(context);
-    auto init_vals = std::vector<std::string>(arr_size);
-    for (size_t i = 0; i < raw_init_vals.size(); i++) {
-      init_vals[i] = std::to_string(raw_init_vals[i]);
-    }
-    for (size_t i = raw_init_vals.size(); i < (size_t)arr_size; i++) {
-      init_vals[i] = "0";
+    std::vector<int32_t> init_nums(arr_size, 0);
+    for (size_t i = 0; i < raw_init_vals.size() && i < (size_t)arr_size; i++) {
+      init_nums[i] = raw_init_vals[i];
     }
     std::string str;
     for (int i = 0; i < arr_size; i++) {
-      str += init_vals[i];
+      str += std::to_string(init_nums[i]);
       if (i != arr_size - 1) {
         str += ", ";
       }
     }
     std::cout << "global " << address << " = alloc [i32, " << arr_size << "], {" << str << "}\n";
+    std::string arr_type = "[i32, " + std::to_string(arr_size) + "]";
+    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, false, init_nums);
+    context.AddGlobal(global_alloc);
   } else {
     std::vector<std::string> init_vals;
     for (auto& val : node.init_val_list->init_vals) {

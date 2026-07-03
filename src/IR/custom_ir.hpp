@@ -73,6 +73,47 @@ namespace IR {
     }
   };
 
+  // 全局变量分配类
+  class IRGlobalAlloc : public IRValue {
+  private:
+    std::string name;
+    std::string type;
+    bool is_zeroinit;
+    std::vector<int32_t> init_vals;
+  public:
+    IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<int32_t> init_vals)
+      : name(std::move(name)), type(std::move(type)), is_zeroinit(is_zeroinit), init_vals(std::move(init_vals)) {}
+
+    bool IsZeroInit() const { return is_zeroinit; }
+    const std::vector<int32_t>& GetInitVals() const { return init_vals; }
+
+    std::string DumpText() const override {
+      if (is_zeroinit) {
+        return "global " + name + " = alloc " + type + ", zeroinit";
+      }
+      if (init_vals.size() == 1) {
+        return "global " + name + " = alloc " + type + ", " + std::to_string(init_vals[0]);
+      }
+      std::string str = "{";
+      for (size_t i = 0; i < init_vals.size(); i++) {
+        str += std::to_string(init_vals[i]);
+        if (i != init_vals.size() - 1) {
+          str += ", ";
+        }
+      }
+      str += "}";
+      return "global " + name + " = alloc " + type + ", " + str;
+    }
+
+    std::string GetOperandName() const override {
+      return name;
+    }
+
+    IRType GetType() const override {
+      return IRType::IR_POINTER;
+    }
+  };
+
   // 基础指令类，代表所有 IR 指令（包括有返回值和无返回值的）
   class IRInstruction : public IRValue {
   public:
@@ -342,10 +383,17 @@ namespace IR {
   // 程序根类
   class IRProgram {
   public:
+    std::vector<std::shared_ptr<IRGlobalAlloc>> globals;
     std::vector<std::shared_ptr<IRFunction>> funcs;
 
     std::string DumpText() const {
       std::string text;
+      for (const auto& global : globals) {
+        text += global->DumpText() + "\n";
+      }
+      if (!globals.empty()) {
+        text += "\n";
+      }
       for (const auto& func : funcs) {
         text += func->DumpText() + "\n";
       }
