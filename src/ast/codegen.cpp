@@ -272,17 +272,33 @@ std::string CodeGenerator::Generate(const IfUnmatchedStmtAST& node) {
   std::string cond_reg = Generate(*node.if_exp);
   std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
   std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
+
+  auto then_bb = std::make_shared<IR::IRBasicBlock>(if_label);
+  auto end_bb = std::make_shared<IR::IRBasicBlock>(end_label);
+  context.SetIRValue(if_label, then_bb);
+  context.SetIRValue(end_label, end_bb);
+
   std::cout << "  br " << cond_reg << ", " << if_label << ", " << end_label << "\n";
+  if (context.current_block) {
+    auto cond_val = context.GetIRValue(cond_reg);
+    auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, end_bb);
+    context.current_block->AddInstruction(br_inst);
+  }
+
   std::cout << if_label << ":\n";
-  context.AddNewBlock(if_label);
+  context.AddExistingBlock(then_bb);
 
   context.cur_block_has_terminator = false;
   Generate(*node.if_stmt);
   if (!context.cur_block_has_terminator) {
     std::cout << "  jump " << end_label << "\n";
+    if (context.current_block) {
+      auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
+      context.current_block->AddInstruction(jump_inst);
+    }
   }
   std::cout << end_label << ":\n";
-  context.AddNewBlock(end_label);
+  context.AddExistingBlock(end_bb);
 
   context.cur_block_has_terminator = false;
   return "";
@@ -293,28 +309,50 @@ std::string CodeGenerator::Generate(const IfElseUnmatchedStmtAST& node) {
   std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
   std::string else_label = LabelBuilder::GetLabel("else", cond_reg);
   std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
+
+  auto then_bb = std::make_shared<IR::IRBasicBlock>(if_label);
+  auto else_bb = std::make_shared<IR::IRBasicBlock>(else_label);
+  auto end_bb = std::make_shared<IR::IRBasicBlock>(end_label);
+  context.SetIRValue(if_label, then_bb);
+  context.SetIRValue(else_label, else_bb);
+  context.SetIRValue(end_label, end_bb);
+
   std::cout << "  br " << cond_reg << ", " << if_label << ", " << else_label << "\n";
+  if (context.current_block) {
+    auto cond_val = context.GetIRValue(cond_reg);
+    auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, else_bb);
+    context.current_block->AddInstruction(br_inst);
+  }
+
   std::cout << if_label << ":\n";
-  context.AddNewBlock(if_label);
+  context.AddExistingBlock(then_bb);
 
   context.cur_block_has_terminator = false;
   Generate(*node.if_stmt);
   bool then_has_terminator = context.cur_block_has_terminator;
   if (!then_has_terminator) {
     std::cout << "  jump " << end_label << "\n";
+    if (context.current_block) {
+      auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
+      context.current_block->AddInstruction(jump_inst);
+    }
   }
   std::cout << else_label << ":\n";
-  context.AddNewBlock(else_label);
+  context.AddExistingBlock(else_bb);
 
   context.cur_block_has_terminator = false;
   Generate(*node.else_stmt);
   bool else_has_terminator = context.cur_block_has_terminator;
   if (!else_has_terminator) {
     std::cout << "  jump " << end_label << "\n";
+    if (context.current_block) {
+      auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
+      context.current_block->AddInstruction(jump_inst);
+    }
   }
   if (!then_has_terminator || !else_has_terminator) {
     std::cout << end_label << ":\n";
-    context.AddNewBlock(end_label);
+    context.AddExistingBlock(end_bb);
   } else {
     context.cur_block_has_terminator = true;
   }
@@ -382,28 +420,50 @@ std::string CodeGenerator::Generate(const IfMatchedStmtAST& node) {
   std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
   std::string else_label = LabelBuilder::GetLabel("else", cond_reg);
   std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
+
+  auto then_bb = std::make_shared<IR::IRBasicBlock>(if_label);
+  auto else_bb = std::make_shared<IR::IRBasicBlock>(else_label);
+  auto end_bb = std::make_shared<IR::IRBasicBlock>(end_label);
+  context.SetIRValue(if_label, then_bb);
+  context.SetIRValue(else_label, else_bb);
+  context.SetIRValue(end_label, end_bb);
+
   std::cout << "  br " << cond_reg << ", " << if_label << ", " << else_label << "\n";
+  if (context.current_block) {
+    auto cond_val = context.GetIRValue(cond_reg);
+    auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, else_bb);
+    context.current_block->AddInstruction(br_inst);
+  }
+
   std::cout << if_label << ":\n";
-  context.AddNewBlock(if_label);
+  context.AddExistingBlock(then_bb);
 
   context.cur_block_has_terminator = false;
   Generate(*node.if_stmt);
   bool then_has_terminator = context.cur_block_has_terminator;
   if (!then_has_terminator) {
     std::cout << "  jump " << end_label << "\n";
+    if (context.current_block) {
+      auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
+      context.current_block->AddInstruction(jump_inst);
+    }
   }
   std::cout << else_label << ":\n";
-  context.AddNewBlock(else_label);
+  context.AddExistingBlock(else_bb);
 
   context.cur_block_has_terminator = false;
   Generate(*node.else_stmt);
   bool else_has_terminator = context.cur_block_has_terminator;
   if (!else_has_terminator) {
     std::cout << "  jump " << end_label << "\n";
+    if (context.current_block) {
+      auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
+      context.current_block->AddInstruction(jump_inst);
+    }
   }
   if (!then_has_terminator || !else_has_terminator) {
     std::cout << end_label << ":\n";
-    context.AddNewBlock(end_label);
+    context.AddExistingBlock(end_bb);
   } else {
     context.cur_block_has_terminator = true;
   }
@@ -417,22 +477,42 @@ std::string CodeGenerator::Generate(const WhileStmtAST& node) {
   std::string continue_loop_label = LabelBuilder::GetLabel("while_body");
   std::string end_label = LabelBuilder::GetLabel("end");
 
+  auto loop_bb = std::make_shared<IR::IRBasicBlock>(loop_label);
+  auto continue_loop_bb = std::make_shared<IR::IRBasicBlock>(continue_loop_label);
+  auto end_bb = std::make_shared<IR::IRBasicBlock>(end_label);
+  context.SetIRValue(loop_label, loop_bb);
+  context.SetIRValue(continue_loop_label, continue_loop_bb);
+  context.SetIRValue(end_label, end_bb);
+
   context.enterNewWhileScope(loop_label, continue_loop_label, end_label);
   std::cout << "  jump " << loop_label << "\n";
+  if (context.current_block) {
+    auto jump_inst = std::make_shared<IR::IRJump>(loop_bb);
+    context.current_block->AddInstruction(jump_inst);
+  }
   std::cout << loop_label << ":\n";
-  context.AddNewBlock(loop_label);
+  context.AddExistingBlock(loop_bb);
 
   std::string cond_reg = Generate(*node.while_exp);
   std::cout << "  br " << cond_reg << ", " << continue_loop_label << ", " << end_label << "\n";
+  if (context.current_block) {
+    auto cond_val = context.GetIRValue(cond_reg);
+    auto br_inst = std::make_shared<IR::IRBranch>(cond_val, continue_loop_bb, end_bb);
+    context.current_block->AddInstruction(br_inst);
+  }
   std::cout << continue_loop_label << ":\n";
-  context.AddNewBlock(continue_loop_label);
+  context.AddExistingBlock(continue_loop_bb);
 
   Generate(*node.while_stmt);
   if (!context.cur_block_has_terminator) {
     std::cout << "  jump " << loop_label << "\n";
+    if (context.current_block) {
+      auto jump_inst = std::make_shared<IR::IRJump>(loop_bb);
+      context.current_block->AddInstruction(jump_inst);
+    }
   }
   std::cout << end_label << ":\n";
-  context.AddNewBlock(end_label);
+  context.AddExistingBlock(end_bb);
 
   context.cur_block_has_terminator = false;
   context.exitWhileScope();
@@ -443,6 +523,13 @@ std::string CodeGenerator::Generate(const BreakStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   WhileLabelContext while_label_context = context.GetWhileLabel();
   std::cout << "  jump " << while_label_context.while_label_end << "\n";
+
+  auto end_bb = context.GetIRValue(while_label_context.while_label_end);
+  if (context.current_block && end_bb) {
+    auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
+    context.current_block->AddInstruction(jump_inst);
+  }
+
   std::string tool_label = while_label_context.while_label_continue + NumBuilder::GetNum();
   std::cout << tool_label << ":\n";
   context.AddNewBlock(tool_label);
@@ -453,6 +540,13 @@ std::string CodeGenerator::Generate(const ContinueStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   WhileLabelContext while_label_context = context.GetWhileLabel();
   std::cout << "  jump " << while_label_context.while_label_begin << "\n";
+
+  auto begin_bb = context.GetIRValue(while_label_context.while_label_begin);
+  if (context.current_block && begin_bb) {
+    auto jump_inst = std::make_shared<IR::IRJump>(begin_bb);
+    context.current_block->AddInstruction(jump_inst);
+  }
+
   std::string tool_label = while_label_context.while_label_continue + NumBuilder::GetNum();
   std::cout << tool_label << ":\n";
   context.AddNewBlock(tool_label);
@@ -702,22 +796,74 @@ std::string CodeGenerator::Generate(const BinaryLogicalAndExprAST& node) {
     std::cout << "  // " << temp_address << " : " << lhs_reg << " && " << "rhs_reg\n";
     std::string then_label = LabelBuilder::GetLabel("and_calc_rhs");
     std::string end_label = LabelBuilder::GetLabel("and_end");
+
+    auto then_bb = std::make_shared<IR::IRBasicBlock>(then_label);
+    auto end_bb = std::make_shared<IR::IRBasicBlock>(end_label);
+    context.SetIRValue(then_label, then_bb);
+    context.SetIRValue(end_label, end_bb);
+
     std::cout << "  " << temp_address << " = alloc i32\n";
     std::cout << "  " << "store 0, " << temp_address << "\n";
+
+    if (context.current_block) {
+      auto alloc_inst = std::make_shared<IR::IRAlloc>(temp_address, "i32");
+      context.current_block->AddInstruction(alloc_inst);
+      context.SetIRValue(temp_address, alloc_inst);
+
+      auto const_zero = context.GetIRValue("0");
+      auto store_zero = std::make_shared<IR::IRStore>(const_zero, alloc_inst);
+      context.current_block->AddInstruction(store_zero);
+    }
+
     std::cout << "  br " << lhs_reg << " , " << then_label << " , " << end_label << "\n";
+    if (context.current_block) {
+      auto lhs_val = context.GetIRValue(lhs_reg);
+      auto br_inst = std::make_shared<IR::IRBranch>(lhs_val, then_bb, end_bb);
+      context.current_block->AddInstruction(br_inst);
+    }
+
     // then块
     std::cout << then_label << ":\n";
+    context.AddExistingBlock(then_bb);
     context.cur_block_has_terminator = false;
+
     std::string rhs_reg = Generate(*node.eq_exp);
     std::string temp_reg = context.NewReg();
     std::cout << "  " <<  temp_reg << " = ne " << rhs_reg << ", 0\n";
-    std::cout << "  " << "store " << temp_reg << ", " << temp_address << "\n";
+
+    if (context.current_block) {
+      auto rhs_val = context.GetIRValue(rhs_reg);
+      auto const_zero = context.GetIRValue("0");
+      auto ne_inst = std::make_shared<IR::IRBinary>(temp_reg, IR::IRBinaryOp::NE, rhs_val, const_zero);
+      context.current_block->AddInstruction(ne_inst);
+      context.SetIRValue(temp_reg, ne_inst);
+
+      auto alloc_inst = context.GetIRValue(temp_address);
+      auto store_inst = std::make_shared<IR::IRStore>(ne_inst, alloc_inst);
+      context.current_block->AddInstruction(store_inst);
+    }
+
     std::cout << "  jump " << end_label << "\n";
+    if (context.current_block) {
+      auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
+      context.current_block->AddInstruction(jump_inst);
+    }
+
+    // end块
     std::cout << end_label << ":\n";
+    context.AddExistingBlock(end_bb);
     context.cur_block_has_terminator = false;
 
     std::string return_reg = context.NewReg();
     std::cout << "  " << return_reg << " = load " << temp_address << "\n";
+
+    if (context.current_block) {
+      auto alloc_inst = context.GetIRValue(temp_address);
+      auto load_inst = std::make_shared<IR::IRLoad>(return_reg, alloc_inst);
+      context.current_block->AddInstruction(load_inst);
+      context.SetIRValue(return_reg, load_inst);
+    }
+
     return return_reg;
   }
   return "";
@@ -734,26 +880,77 @@ std::string CodeGenerator::Generate(const BinaryLogicalOrExprAST& node) {
   if (node.op->op == "||") {
     std::string lhs_reg = Generate(*node.lor_exp);
     std::string temp_address = context.NewReg();
-
     std::cout << "  // " << temp_address << " : " << lhs_reg << " || " << "rhs_reg" << "\n";
     std::string then_label = LabelBuilder::GetLabel("or_calc_rhs", temp_address);
     std::string end_label = LabelBuilder::GetLabel("or_end", temp_address);
+
+    auto then_bb = std::make_shared<IR::IRBasicBlock>(then_label);
+    auto end_bb = std::make_shared<IR::IRBasicBlock>(end_label);
+    context.SetIRValue(then_label, then_bb);
+    context.SetIRValue(end_label, end_bb);
+
     std::cout << "  " << temp_address << " = alloc i32\n";
     std::cout << "  " << "store 1, " << temp_address << "\n";
+
+    if (context.current_block) {
+      auto alloc_inst = std::make_shared<IR::IRAlloc>(temp_address, "i32");
+      context.current_block->AddInstruction(alloc_inst);
+      context.SetIRValue(temp_address, alloc_inst);
+
+      auto const_one = context.GetIRValue("1");
+      auto store_one = std::make_shared<IR::IRStore>(const_one, alloc_inst);
+      context.current_block->AddInstruction(store_one);
+    }
+
     std::cout << "  " << "br " << lhs_reg <<", " << end_label << ", " << then_label << "\n";
+    if (context.current_block) {
+      auto lhs_val = context.GetIRValue(lhs_reg);
+      auto br_inst = std::make_shared<IR::IRBranch>(lhs_val, end_bb, then_bb);
+      context.current_block->AddInstruction(br_inst);
+    }
+
     // then块
     std::cout << then_label << ":\n";
+    context.AddExistingBlock(then_bb);
     context.cur_block_has_terminator = false;
+
     std::string rhs_reg = Generate(*node.land_exp);
     std::string temp_reg = context.NewReg();
     std::cout << "  " << temp_reg << " = ne 0, " << rhs_reg << "\n";
-    std::cout << "  " << "store " << temp_reg << ", " << temp_address << "\n";
+
+    if (context.current_block) {
+      auto rhs_val = context.GetIRValue(rhs_reg);
+      auto const_zero = context.GetIRValue("0");
+      auto ne_inst = std::make_shared<IR::IRBinary>(temp_reg, IR::IRBinaryOp::NE, const_zero, rhs_val);
+      context.current_block->AddInstruction(ne_inst);
+      context.SetIRValue(temp_reg, ne_inst);
+
+      auto alloc_inst = context.GetIRValue(temp_address);
+      auto store_inst = std::make_shared<IR::IRStore>(ne_inst, alloc_inst);
+      context.current_block->AddInstruction(store_inst);
+    }
+
     std::cout << "  jump " << end_label << "\n";
+    if (context.current_block) {
+      auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
+      context.current_block->AddInstruction(jump_inst);
+    }
+
+    // end块
     std::cout << end_label << ":\n";
+    context.AddExistingBlock(end_bb);
     context.cur_block_has_terminator = false;
 
     std::string return_reg = context.NewReg();
     std::cout << "  " << return_reg << " = load " << temp_address << "\n";
+
+    if (context.current_block) {
+      auto alloc_inst = context.GetIRValue(temp_address);
+      auto load_inst = std::make_shared<IR::IRLoad>(return_reg, alloc_inst);
+      context.current_block->AddInstruction(load_inst);
+      context.SetIRValue(return_reg, load_inst);
+    }
+
     return return_reg;
   }
   return "";

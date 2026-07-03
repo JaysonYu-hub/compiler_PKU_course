@@ -221,9 +221,19 @@ public:
     ir_values[name] = val;
   }
 
-  void AddNewBlock(const std::string& name) {
+  std::shared_ptr<IR::IRBasicBlock> AddNewBlock(const std::string& name) {
     if (current_func) {
       auto block = std::make_shared<IR::IRBasicBlock>(name);
+      current_func->blocks.push_back(block);
+      current_block = block.get();
+      SetIRValue(name, block);
+      return block;
+    }
+    return nullptr;
+  }
+
+  void AddExistingBlock(std::shared_ptr<IR::IRBasicBlock> block) {
+    if (current_func && block) {
       current_func->blocks.push_back(block);
       current_block = block.get();
     }

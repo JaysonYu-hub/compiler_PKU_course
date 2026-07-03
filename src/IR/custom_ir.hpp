@@ -82,6 +82,10 @@ namespace IR {
       assert(false && "Void instruction cannot be used as an operand");
       return "";
     }
+
+    IRType GetType() const override {
+      return IRType::IR_VOID;
+    };
   };
 
   // 具有 SSA 寄存器返回值的指令基类（如二元计算等）
@@ -132,6 +136,28 @@ namespace IR {
     return "";
   }
 
+  // 把类型枚举转换为字符串
+  inline std::string TypeToString(IRType type) {
+    switch (type) {
+      case IRType::IR_INT32: return "i32";
+      case IRType::IR_VOID:  return "void";
+      case IRType::IR_POINTER: return "ptr";
+      case IRType::IR_ARRAY: return "array";
+      default: assert(false && "Invalid IR type");
+    }
+    return "";
+  }
+
+  // 把字符串转换为类型枚举
+  inline IRType StringToType(const std::string &type) {
+    if (type == "i32") return IRType::IR_INT32;
+    if (type == "void") return IRType::IR_VOID;
+    if (type == "ptr") return IRType::IR_POINTER;
+    if (type == "array") return IRType::IR_ARRAY;
+    assert(false && "Invalid IR type");
+    return IRType::IR_VOID;
+  }
+
   // 二元计算指令类
   class IRBinary : public IRNameInstruction {
   private:
@@ -161,12 +187,12 @@ namespace IR {
   // alloc 指令类
   class IRAlloc : public IRNameInstruction {
   private:
-    std::string type;
+    IR::IRType type;
   public:
-    explicit IRAlloc(std::string name, std::string type) : IRNameInstruction(std::move(name)), type(std::move(type)) {}
-
+    IRAlloc(std::string name, IR::IRType type) : IRNameInstruction(std::move(name)), type(std::move(type)) {}
+    IRAlloc(std::string name, std::string type) : IRNameInstruction(std::move(name)), type(StringToType(type)) {}
     std::string DumpText() const override {
-      return name + " = alloc " + type;
+      return name + " = alloc " + TypeToString(type);
     }
 
     IRType GetType() const override {
@@ -187,9 +213,6 @@ namespace IR {
     std::string DumpText() const override {
       return "store " + val->GetOperandName() + ", " + ptr->GetOperandName();
     }
-    IRType GetType() const override {
-      return IRType::IR_VOID;
-    } 
   };
 
   // load 指令类
@@ -211,6 +234,42 @@ namespace IR {
     }
   };
 
+  // jump 指令类
+  class IRJump : public IRInstruction {
+  private:
+    std::shared_ptr<IRValue> target;
+  public:
+    explicit IRJump(std::shared_ptr<IRValue> target) : target(std::move(target)) {
+      assert(this->target != nullptr);
+    }
+
+    std::shared_ptr<IRValue> GetTarget() const { return target; }
+
+    std::string DumpText() const override {
+      return "jump " + target->GetOperandName();
+    }
+  };
+
+  // branch 指令类
+  class IRBranch : public IRInstruction {
+  private:
+    std::shared_ptr<IRValue> cond;
+    std::shared_ptr<IRValue> then_target;
+    std::shared_ptr<IRValue> else_target;
+  public:
+    IRBranch(std::shared_ptr<IRValue> cond, std::shared_ptr<IRValue> then_target, std::shared_ptr<IRValue> else_target)
+      : cond(std::move(cond)), then_target(std::move(then_target)), else_target(std::move(else_target)) {
+      assert(this->cond != nullptr && this->then_target != nullptr && this->else_target != nullptr);
+      }
+    std::shared_ptr<IRValue> GetCond() const { return cond; }
+    std::shared_ptr<IRValue> GetThenTarget() const { return then_target; }
+    std::shared_ptr<IRValue> GetElseTarget() const { return else_target; }
+
+    std::string DumpText() const override {
+      return "br " + cond->GetOperandName() + ", " + then_target->GetOperandName() + ", " + else_target->GetOperandName();
+    }
+  };
+
 
   // 返回指令类
   class IRReturn : public IRInstruction {
@@ -227,19 +286,10 @@ namespace IR {
       }
       return "ret";
     }
-
-    std::string GetOperandName() const override {
-      assert(false && "Void instruction cannot be used as an operand");
-      return "";
-    }
-
-    IRType GetType() const override {
-      return IRType::IR_VOID;
-    }
   };
 
   // 基本块类
-  class IRBasicBlock {
+  class IRBasicBlock : public IRValue {
   public:
     std::string name;
     std::vector<std::shared_ptr<IRInstruction>> insts;
@@ -250,12 +300,19 @@ namespace IR {
       insts.push_back(std::move(inst));
     }
 
-    std::string DumpText() const {
+    std::string DumpText() const override {
       std::string text = name + ":\n";
       for (const auto& inst : insts) {
         text += "  " + inst->DumpText() + "\n";
       }
       return text;
+    }
+
+    std::string GetOperandName() const override {
+      return name;
+    }
+    IRType GetType() const override {
+      return IRType::IR_VOID;
     }
   };
 
