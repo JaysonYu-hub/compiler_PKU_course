@@ -216,6 +216,19 @@ void CodeGenerator::ParamLocalization(const FuncFParamAST& node) {
   context.scope->define(symbol);
   std::cout << "  " << address << " = " << "alloc " << *node.type << "\n";
   std::cout << "  store " << "@" + *node.ident << ", " << address << "\n";
+
+  if (context.current_block) {
+    std::string param_name = "@" + *node.ident;
+    auto param_sym = std::make_shared<IR::IRSymbol>(param_name);
+    context.SetIRValue(param_name, param_sym);
+
+    auto alloc_inst = std::make_shared<IR::IRAlloc>(address, *node.type);
+    context.current_block->AddInstruction(alloc_inst);
+    context.SetIRValue(address, alloc_inst);
+
+    auto store_inst = std::make_shared<IR::IRStore>(param_sym, alloc_inst);
+    context.current_block->AddInstruction(store_inst);
+  }
 }
 
 std::string CodeGenerator::Generate(const BlockAST& node) {
@@ -334,6 +347,12 @@ std::string CodeGenerator::Generate(const AssignStmtAST& node) {
     std::string rhs_reg = Generate(*node.exp);
     std::string lhs_reg = node.lval->DumpOnlyAddress(context);
     std::cout << "  store " << rhs_reg << ", " << lhs_reg << "\n";
+    if (context.current_block) {
+      auto val = context.GetIRValue(rhs_reg);
+      auto ptr = context.GetIRValue(lhs_reg);
+      auto inst = std::make_shared<IR::IRStore>(val, ptr);
+      context.current_block->AddInstruction(inst);
+    }
   }
   return "";
 }
@@ -747,12 +766,19 @@ std::string CodeGenerator::Generate(const LValAST& node) {
     return "";
   }
   if (sym->kind == SymbolKind::VARIABLE) {
-    std::string address = std::get<std::string>(sym->value);
+    std::string ptr = std::get<std::string>(sym->value);
     std::string new_reg = context.NewReg();
-    std::cout << "  " << new_reg << " = load " << address << "\n";
+    std::cout << "  " << new_reg << " = load " << ptr << "\n";
+
+    auto ptr_val = context.GetIRValue(ptr);
+    auto load_inst = std::make_shared<IR::IRLoad>(new_reg, ptr_val);
+    context.current_block->AddInstruction(load_inst);
+    context.SetIRValue(new_reg, load_inst);
     return new_reg;
   } else if (sym->kind == SymbolKind::CONSTANT) {
-    return std::to_string(std::get<int>(sym->value));
+    std::string int_value = std::to_string(std::get<int>(sym->value));
+    context.GetIRValue(int_value);
+    return int_value;
   } else if (sym->kind == SymbolKind::ARRAY) {
     auto temp = context.NewReg();
     auto index = Generate(*node.index_exp[0]);
@@ -891,8 +917,14 @@ std::string CodeGenerator::Generate(const SimpleVarDefAST& node) {
 
   if (context.scope->isGlobal()) {
     std::cout << "global " << address << " = alloc " << b_type << ", " << "zeroinit\n";
+    context.SetIRValue(address, std::make_shared<IR::IRSymbol>(address));
   } else {
     std::cout << "  " << address << " = alloc " << b_type << "\n";
+    if (context.current_block) {
+      auto alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type);
+      context.current_block->AddInstruction(alloc_inst);
+      context.SetIRValue(address, alloc_inst);
+    }
   }
   context.scope->define(sym);
   return "";
@@ -904,10 +936,17 @@ std::string CodeGenerator::Generate(const InitializedVarDefAST& node) {
   auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE, address);
   if (context.scope->isGlobal()) {
     std::cout << "global " << address << " = alloc " << b_type << ", " << node.init_val->getValue(context) << "\n";
+    context.SetIRValue(address, std::make_shared<IR::IRSymbol>(address));
   } else {
     std::cout << "  " << address << " = alloc " << b_type << "\n";
+    auto alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type);
+    context.current_block->AddInstruction(alloc_inst);
+    context.SetIRValue(address, alloc_inst);
+
     std::string init_val_reg = Generate(*node.init_val);
     std::cout << "  " << "store " << init_val_reg << ", " << address << "\n";
+    auto store_inst = std::make_shared<IR::IRStore>(context.GetIRValue(init_val_reg), context.GetIRValue(address));
+    context.current_block->AddInstruction(store_inst);
   }
   context.scope->define(sym);
   return "";
@@ -922,6 +961,7 @@ std::string CodeGenerator::Generate(const ArrayVarDefAST& node) {
 
   if (context.scope->isGlobal()) {
     std::cout << "global " << address << " = alloc [" << b_type << ", " << arr_size << "]\n";
+    context.SetIRValue(address, std::make_shared<IR::IRSymbol>(address));
   } else {
     std::cout << "  " << address << " = alloc [" << b_type << ", " << arr_size << "]\n";
   }

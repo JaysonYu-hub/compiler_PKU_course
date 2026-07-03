@@ -211,8 +211,7 @@ public:
   bool cur_block_has_terminator = false;
   std::vector<WhileLabelContext> while_label_contexts;
   std::shared_ptr<std::string> decl_type_context;
-
-  // C++ IR 内存表示数据成员
+  // 用于内存IR
   std::shared_ptr<IR::IRProgram> ir_program;
   IR::IRFunction* current_func = nullptr;
   IR::IRBasicBlock* current_block = nullptr;
@@ -234,6 +233,7 @@ public:
     if (ir_values.find(name) != ir_values.end()) {
       return ir_values[name];
     }
+    // 不再利用前缀推导变量，仅自动解析纯整数字符串常量
     if (!name.empty() && name[0] != '%' && name[0] != '@') {
       try {
         int val = std::stoi(name);

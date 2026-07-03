@@ -53,10 +53,35 @@ namespace IR {
     }
   };
 
+  // 符号/变量引用类
+  class IRSymbol : public IRValue {
+  private:
+    std::string name;
+  public:
+    explicit IRSymbol(std::string name) : name(std::move(name)) {}
+
+    std::string DumpText() const override {
+      return name;
+    }
+
+    std::string GetOperandName() const override {
+      return name;
+    }
+
+    IRType GetType() const override {
+      return IRType::IR_POINTER;
+    }
+  };
+
   // 基础指令类，代表所有 IR 指令（包括有返回值和无返回值的）
   class IRInstruction : public IRValue {
   public:
     virtual ~IRInstruction() = default;
+
+    std::string GetOperandName() const override {
+      assert(false && "Void instruction cannot be used as an operand");
+      return "";
+    }
   };
 
   // 具有 SSA 寄存器返回值的指令基类（如二元计算等）
@@ -132,8 +157,62 @@ namespace IR {
       return IRType::IR_INT32;
     }
   };
+  
+  // alloc 指令类
+  class IRAlloc : public IRNameInstruction {
+  private:
+    std::string type;
+  public:
+    explicit IRAlloc(std::string name, std::string type) : IRNameInstruction(std::move(name)), type(std::move(type)) {}
 
-  // 返回指令类（无 SSA 寄存器名）
+    std::string DumpText() const override {
+      return name + " = alloc " + type;
+    }
+
+    IRType GetType() const override {
+      return IRType::IR_POINTER;
+    }
+  };
+
+  // store 指令类
+  class IRStore : public IRInstruction {
+  private:
+    std::shared_ptr<IRValue> val;
+    std::shared_ptr<IRValue> ptr;
+  public:
+    IRStore(std::shared_ptr<IRValue> val, std::shared_ptr<IRValue> ptr)
+      : val(std::move(val)), ptr(std::move(ptr)) {
+      assert(this->ptr != nullptr && this->val != nullptr);
+      }
+    std::string DumpText() const override {
+      return "store " + val->GetOperandName() + ", " + ptr->GetOperandName();
+    }
+    IRType GetType() const override {
+      return IRType::IR_VOID;
+    } 
+  };
+
+  // load 指令类
+  class IRLoad : public IRNameInstruction {
+  private:
+    std::shared_ptr<IRValue> ptr;
+  public:
+    explicit IRLoad(std::string name, std::shared_ptr<IRValue> ptr)
+      : IRNameInstruction(std::move(name)), ptr(std::move(ptr)) {
+      assert(this->ptr != nullptr);
+    }
+
+    std::shared_ptr<IRValue> GetPtr() const { return ptr; }
+    std::string DumpText() const override {
+      return name + " = load " + ptr->GetOperandName();
+    }
+    IRType GetType() const override {
+      return IRType::IR_INT32;
+    }
+  };
+
+
+  // 返回指令类
   class IRReturn : public IRInstruction {
   private:
     std::shared_ptr<IRValue> val; // 可以为 nullptr
