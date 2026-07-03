@@ -88,6 +88,16 @@ decl @stoptime()
 
 )";
     std::cout << library_decl;
+
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("getint", IR::IRType::IR_INT32, std::vector<IR::IRType>{}));
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("getch", IR::IRType::IR_INT32, std::vector<IR::IRType>{}));
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("getarray", IR::IRType::IR_INT32, std::vector<IR::IRType>{IR::IRType::IR_POINTER}));
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("putint", IR::IRType::IR_VOID, std::vector<IR::IRType>{IR::IRType::IR_INT32}));
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("putch", IR::IRType::IR_VOID, std::vector<IR::IRType>{IR::IRType::IR_INT32}));
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("putarray", IR::IRType::IR_VOID, std::vector<IR::IRType>{IR::IRType::IR_INT32, IR::IRType::IR_POINTER}));
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("starttime", IR::IRType::IR_VOID, std::vector<IR::IRType>{}));
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("stoptime", IR::IRType::IR_VOID, std::vector<IR::IRType>{}));
+
     auto symbol = std::make_shared<Symbol>("getint", SymbolKind::FUNCTION, FuncInformation("i32"));
     context.scope->define(symbol);
     symbol = std::make_shared<Symbol>("getch", SymbolKind::FUNCTION, FuncInformation("i32"));
@@ -150,6 +160,7 @@ std::string CodeGenerator::Generate(const FuncDefAST& node) {
   auto func = std::make_shared<IR::IRFunction>(*node.ident, ret_type);
   context.ir_program->funcs.push_back(func);
   context.current_func = func.get();
+  context.SetIRValue("@" + *node.ident, func);
 
   context.enterNewScope();
   std::cout << "fun @" << *node.ident << "(";
@@ -219,8 +230,13 @@ void CodeGenerator::ParamLocalization(const FuncFParamAST& node) {
 
   if (context.current_block) {
     std::string param_name = "@" + *node.ident;
-    auto param_sym = std::make_shared<IR::IRSymbol>(param_name);
+    IR::IRType param_type = (*node.type == "i32") ? IR::IRType::IR_INT32 : IR::IRType::IR_VOID;
+    auto param_sym = std::make_shared<IR::IRFuncParam>(param_name, param_type);
     context.SetIRValue(param_name, param_sym);
+
+    if (context.current_func) {
+      context.current_func->params.push_back(param_sym);
+    }
 
     auto alloc_inst = std::make_shared<IR::IRAlloc>(address, *node.type);
     context.current_block->AddInstruction(alloc_inst);
@@ -606,18 +622,41 @@ std::string CodeGenerator::Generate(const FuncCallExpAST& node) {
     std::cerr << "func " << func_name << " not found" << "\n";
   }
   auto func_inf = std::get<FuncInformation>(func_symbol->value);
+
+  context.arg_stack.push_back({}); // Push new argument list to stack
+
   std::string param;
   if (node.func_r_params) {
     param = Generate(*node.func_r_params);
   } else {
     param = "";
   }
+
+  auto args = std::move(context.arg_stack.back());
+  context.arg_stack.pop_back(); // Pop it
+
+  auto target_func = context.GetIRValue("@" + func_name);
+  if (!target_func) {
+    target_func = std::make_shared<IR::IRSymbol>("@" + func_name);
+  }
+
   if (func_inf.ret_type != "void") {
     std::string func_reg = context.NewReg();
     std::cout << "  " << func_reg << " = call @" << func_name << "(" << param << ")\n";
+
+    if (context.current_block) {
+      auto call_inst = std::make_shared<IR::IRCall>(func_reg, target_func, args, IR::IRType::IR_INT32);
+      context.current_block->AddInstruction(call_inst);
+      context.SetIRValue(func_reg, call_inst);
+    }
     return func_reg;
   } else {
     std::cout << "  call @" << func_name << "(" << param << ")" << "\n";
+
+    if (context.current_block) {
+      auto call_inst = std::make_shared<IR::IRCall>("", target_func, args, IR::IRType::IR_VOID);
+      context.current_block->AddInstruction(call_inst);
+    }
     return "";
   }
 }
@@ -625,9 +664,18 @@ std::string CodeGenerator::Generate(const FuncCallExpAST& node) {
 std::string CodeGenerator::Generate(const FuncRParamsAST& node) {
   std::string params;
   if (node.func_r_params.size() > 0) {
-    params += Generate(*node.func_r_params[0]);
+    std::string arg0 = Generate(*node.func_r_params[0]);
+    if (!context.arg_stack.empty()) {
+      context.arg_stack.back().push_back(context.GetIRValue(arg0));
+    }
+    params += arg0;
+
     for (size_t i = 1; i < node.func_r_params.size(); i++) {
-      params = params + ", " + Generate(*node.func_r_params[i]);
+      std::string argi = Generate(*node.func_r_params[i]);
+      if (!context.arg_stack.empty()) {
+        context.arg_stack.back().push_back(context.GetIRValue(argi));
+      }
+      params = params + ", " + argi;
     }
   }
   return params;

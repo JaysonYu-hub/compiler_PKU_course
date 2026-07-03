@@ -114,6 +114,27 @@ namespace IR {
     }
   };
 
+  // 函数形参类
+  class IRFuncParam : public IRValue {
+  private:
+    std::string name;
+    IRType type;
+  public:
+    IRFuncParam(std::string name, IRType type) : name(std::move(name)), type(type) {}
+
+    std::string DumpText() const override {
+      return name + ": " + (type == IRType::IR_INT32 ? "i32" : "/* other */");
+    }
+
+    std::string GetOperandName() const override {
+      return name;
+    }
+
+    IRType GetType() const override {
+      return type;
+    }
+  };
+
   // 基础指令类，代表所有 IR 指令（包括有返回值和无返回值的）
   class IRInstruction : public IRValue {
   public:
@@ -329,6 +350,52 @@ namespace IR {
     }
   };
 
+  // 函数调用指令类（支持有/无返回值）
+  class IRCall : public IRInstruction {
+  private:
+    std::string name; // 返回值寄存器名，若为 void 则为空
+    std::shared_ptr<IRValue> func;
+    std::vector<std::shared_ptr<IRValue>> args;
+    IRType ret_type;
+  public:
+    IRCall(std::string name, std::shared_ptr<IRValue> func, std::vector<std::shared_ptr<IRValue>> args, IRType ret_type)
+      : name(std::move(name)), func(std::move(func)), args(std::move(args)), ret_type(ret_type) {
+      assert(this->func != nullptr);
+    }
+
+    bool HasReturnValue() const { return !name.empty(); }
+    std::shared_ptr<IRValue> GetFunc() const { return func; }
+    const std::vector<std::shared_ptr<IRValue>>& GetArgs() const { return args; }
+
+    std::string DumpText() const override {
+      std::string str;
+      if (HasReturnValue()) {
+        str += name + " = ";
+      }
+      str += "call " + func->GetOperandName() + "(";
+      for (size_t i = 0; i < args.size(); i++) {
+        str += args[i]->GetOperandName();
+        if (i != args.size() - 1) {
+          str += ", ";
+        }
+      }
+      str += ")";
+      return str;
+    }
+
+    std::string GetOperandName() const override {
+      if (HasReturnValue()) {
+        return name;
+      }
+      assert(false && "Void call instruction cannot be used as an operand");
+      return "";
+    }
+
+    IRType GetType() const override {
+      return ret_type;
+    }
+  };
+
   // 基本块类
   class IRBasicBlock : public IRValue {
   public:
@@ -357,17 +424,63 @@ namespace IR {
     }
   };
 
-  // 函数类
-  class IRFunction {
+  // 库函数声明类
+  class IRFuncDecl : public IRValue {
   public:
     std::string name;
     IRType ret_type;
+    std::vector<IRType> param_types;
+  public:
+    IRFuncDecl(std::string name, IRType ret_type, std::vector<IRType> param_types)
+      : name(std::move(name)), ret_type(ret_type), param_types(std::move(param_types)) {}
+
+    std::string DumpText() const override {
+      std::string text = "decl @" + name + "(";
+      for (size_t i = 0; i < param_types.size(); i++) {
+        if (param_types[i] == IRType::IR_INT32) {
+          text += "i32";
+        } else if (param_types[i] == IRType::IR_POINTER) {
+          text += "*i32";
+        }
+        if (i != param_types.size() - 1) {
+          text += ", ";
+        }
+      }
+      text += ")";
+      if (ret_type != IRType::IR_VOID) {
+        text += " : i32";
+      }
+      return text;
+    }
+
+    std::string GetOperandName() const override {
+      return "@" + name;
+    }
+
+    IRType GetType() const override {
+      return ret_type;
+    }
+  };
+
+  // 函数类
+  class IRFunction : public IRValue {
+  public:
+    std::string name;
+    IRType ret_type;
+    std::vector<std::shared_ptr<IRFuncParam>> params;
     std::vector<std::shared_ptr<IRBasicBlock>> blocks;
 
     IRFunction(std::string name, IRType ret_type) : name(std::move(name)), ret_type(ret_type) {}
 
-    std::string DumpText() const {
-      std::string text = "fun @" + name + "()";
+    std::string DumpText() const override {
+      std::string text = "fun @" + name + "(";
+      for (size_t i = 0; i < params.size(); i++) {
+        text += params[i]->DumpText();
+        if (i != params.size() - 1) {
+          text += ", ";
+        }
+      }
+      text += ")";
       if (ret_type != IRType::IR_VOID) {
         text += " : i32";
       }
@@ -378,16 +491,31 @@ namespace IR {
       text += "}\n";
       return text;
     }
+
+    std::string GetOperandName() const override {
+      return "@" + name;
+    }
+
+    IRType GetType() const override {
+      return ret_type;
+    }
   };
 
   // 程序根类
   class IRProgram {
   public:
+    std::vector<std::shared_ptr<IRFuncDecl>> decls;
     std::vector<std::shared_ptr<IRGlobalAlloc>> globals;
     std::vector<std::shared_ptr<IRFunction>> funcs;
 
     std::string DumpText() const {
       std::string text;
+      for (const auto& decl : decls) {
+        text += decl->DumpText() + "\n";
+      }
+      if (!decls.empty()) {
+        text += "\n";
+      }
       for (const auto& global : globals) {
         text += global->DumpText() + "\n";
       }

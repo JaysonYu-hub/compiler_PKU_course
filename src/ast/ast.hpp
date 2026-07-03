@@ -216,6 +216,7 @@ public:
   IR::IRFunction* current_func = nullptr;
   IR::IRBasicBlock* current_block = nullptr;
   std::unordered_map<std::string, std::shared_ptr<IR::IRValue>> ir_values;
+  std::vector<std::vector<std::shared_ptr<IR::IRValue>>> arg_stack;
 
   void SetIRValue(const std::string& name, std::shared_ptr<IR::IRValue> val) {
     ir_values[name] = val;
@@ -243,6 +244,13 @@ public:
     if (global && ir_program) {
       ir_program->globals.push_back(global);
       SetIRValue(global->GetOperandName(), global);
+    }
+  }
+
+  void AddDecl(std::shared_ptr<IR::IRFuncDecl> decl) {
+    if (decl && ir_program) {
+      ir_program->decls.push_back(decl);
+      SetIRValue(decl->GetOperandName(), decl);
     }
   }
 
