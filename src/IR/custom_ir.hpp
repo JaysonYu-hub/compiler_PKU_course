@@ -203,7 +203,7 @@ namespace IR {
     switch (type) {
       case IRType::IR_INT32: return "i32";
       case IRType::IR_VOID:  return "void";
-      case IRType::IR_POINTER: return "ptr";
+      case IRType::IR_POINTER: return "*i32";
       case IRType::IR_ARRAY: return "array";
       default: assert(false && "Invalid IR type");
     }
@@ -214,7 +214,7 @@ namespace IR {
   inline IRType StringToType(const std::string &type) {
     if (type == "i32") return IRType::IR_INT32;
     if (type == "void") return IRType::IR_VOID;
-    if (type == "ptr") return IRType::IR_POINTER;
+    if (type == "ptr" || type == "*i32") return IRType::IR_POINTER;
     if (type == "array") return IRType::IR_ARRAY;
     assert(false && "Invalid IR type");
     return IRType::IR_VOID;
@@ -250,10 +250,20 @@ namespace IR {
   class IRAlloc : public IRNameInstruction {
   private:
     IR::IRType type;
+    int array_size; // 0 for scalar, >0 for array
   public:
-    IRAlloc(std::string name, IR::IRType type) : IRNameInstruction(std::move(name)), type(std::move(type)) {}
-    IRAlloc(std::string name, std::string type) : IRNameInstruction(std::move(name)), type(StringToType(type)) {}
+    IRAlloc(std::string name, IR::IRType type, int array_size = 0)
+      : IRNameInstruction(std::move(name)), type(std::move(type)), array_size(array_size) {}
+    IRAlloc(std::string name, std::string type, int array_size = 0)
+      : IRNameInstruction(std::move(name)), type(StringToType(type)), array_size(array_size) {}
+
+    int GetArraySize() const { return array_size; }
+    bool IsArray() const { return array_size > 0; }
+
     std::string DumpText() const override {
+      if (IsArray()) {
+        return name + " = alloc [i32, " + std::to_string(array_size) + "]";
+      }
       return name + " = alloc " + TypeToString(type);
     }
 
@@ -293,6 +303,52 @@ namespace IR {
     }
     IRType GetType() const override {
       return IRType::IR_INT32;
+    }
+  };
+
+  // getelemptr 指令类
+  class IRGetElemPtr : public IRNameInstruction {
+  private:
+    std::shared_ptr<IRValue> arr;
+    std::shared_ptr<IRValue> index;
+  public:
+    IRGetElemPtr(std::string name, std::shared_ptr<IRValue> arr, std::shared_ptr<IRValue> index)
+      : IRNameInstruction(std::move(name)), arr(std::move(arr)), index(std::move(index)) {
+      assert(this->arr != nullptr && this->index != nullptr);
+    }
+
+    std::shared_ptr<IRValue> GetArr() const { return arr; }
+    std::shared_ptr<IRValue> GetIndex() const { return index; }
+
+    std::string DumpText() const override {
+      return name + " = getelemptr " + arr->GetOperandName() + ", " + index->GetOperandName();
+    }
+
+    IRType GetType() const override {
+      return IRType::IR_POINTER;
+    }
+  };
+
+  // getptr 指令类
+  class IRGetPtr : public IRNameInstruction {
+  private:
+    std::shared_ptr<IRValue> ptr;
+    std::shared_ptr<IRValue> index;
+  public:
+    IRGetPtr(std::string name, std::shared_ptr<IRValue> ptr, std::shared_ptr<IRValue> index)
+      : IRNameInstruction(std::move(name)), ptr(std::move(ptr)), index(std::move(index)) {
+      assert(this->ptr != nullptr && this->index != nullptr);
+    }
+
+    std::shared_ptr<IRValue> GetPtr() const { return ptr; }
+    std::shared_ptr<IRValue> GetIndex() const { return index; }
+
+    std::string DumpText() const override {
+      return name + " = getptr " + ptr->GetOperandName() + ", " + index->GetOperandName();
+    }
+
+    IRType GetType() const override {
+      return IRType::IR_POINTER;
     }
   };
 

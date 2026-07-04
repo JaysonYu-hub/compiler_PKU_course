@@ -399,13 +399,70 @@ std::string CodeGenerator::Generate(const AssignStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   if (node.lval) {
     std::string rhs_reg = Generate(*node.exp);
-    std::string lhs_reg = node.lval->DumpOnlyAddress(context);
+    auto sym = context.scope->lookup(*node.lval->ident);
+    if (sym == nullptr) {
+      std::cerr << "Error: LVal " << *node.lval->ident << " not found\n";
+      return "";
+    }
+
+    std::string lhs_reg;
+    std::shared_ptr<IR::IRValue> ptr_val = nullptr;
+
+    if (sym->kind == SymbolKind::VARIABLE) {
+      std::string ptr = std::get<std::string>(sym->value);
+      if (node.lval->index_exp.empty()) {
+        // 普通标量变量写入
+        lhs_reg = ptr;
+        ptr_val = context.GetIRValue(ptr);
+      } else {
+        // 对指针形参进行索引写入，如 x[i] = expr
+        std::string loaded_ptr = context.NewReg();
+        std::cout << "  " << loaded_ptr << " = load " << ptr << "\n";
+
+        std::shared_ptr<IR::IRLoad> load_ptr_inst = nullptr;
+        if (context.current_block) {
+          auto ptr_val_loc = context.GetIRValue(ptr);
+          load_ptr_inst = std::make_shared<IR::IRLoad>(loaded_ptr, ptr_val_loc);
+          context.current_block->AddInstruction(load_ptr_inst);
+          context.SetIRValue(loaded_ptr, load_ptr_inst);
+        }
+
+        auto index_reg = Generate(*node.lval->index_exp[0]);
+        lhs_reg = context.NewReg();
+        std::cout << "  " << lhs_reg << " = getptr " << loaded_ptr << ", " << index_reg << "\n";
+
+        std::shared_ptr<IR::IRGetPtr> getptr_inst = nullptr;
+        if (context.current_block) {
+          auto ptr_val_val = context.GetIRValue(loaded_ptr);
+          auto index_val = context.GetIRValue(index_reg);
+          getptr_inst = std::make_shared<IR::IRGetPtr>(lhs_reg, ptr_val_val, index_val);
+          context.current_block->AddInstruction(getptr_inst);
+          context.SetIRValue(lhs_reg, getptr_inst);
+        }
+        ptr_val = getptr_inst;
+      }
+    } else if (sym->kind == SymbolKind::ARRAY || sym->kind == SymbolKind::CONST_ARRAY) {
+      // 对局部/全局数组元素进行写入，如 arr[i] = expr
+      auto arr_info = std::get<ArrayInformation>(sym->value);
+      auto index_reg = Generate(*node.lval->index_exp[0]);
+      lhs_reg = context.NewReg();
+      std::cout << "  " << lhs_reg << " = getelemptr " << arr_info.address << ", " << index_reg << "\n";
+
+      if (context.current_block) {
+        auto arr_val = context.GetIRValue(arr_info.address);
+        auto index_val = context.GetIRValue(index_reg);
+        auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(lhs_reg, arr_val, index_val);
+        context.current_block->AddInstruction(getelemptr_inst);
+        context.SetIRValue(lhs_reg, getelemptr_inst);
+        ptr_val = getelemptr_inst;
+      }
+    }
+
     std::cout << "  store " << rhs_reg << ", " << lhs_reg << "\n";
     if (context.current_block) {
       auto val = context.GetIRValue(rhs_reg);
-      auto ptr = context.GetIRValue(lhs_reg);
-      auto inst = std::make_shared<IR::IRStore>(val, ptr);
-      context.current_block->AddInstruction(inst);
+      auto store_inst = std::make_shared<IR::IRStore>(val, ptr_val);
+      context.current_block->AddInstruction(store_inst);
     }
   }
   return "";
@@ -1012,29 +1069,80 @@ std::string CodeGenerator::Generate(const LValAST& node) {
   }
   if (sym->kind == SymbolKind::VARIABLE) {
     std::string ptr = std::get<std::string>(sym->value);
-    std::string new_reg = context.NewReg();
-    std::cout << "  " << new_reg << " = load " << ptr << "\n";
+    if (node.index_exp.empty()) {
+      // 普通标量变量读取
+      std::string new_reg = context.NewReg();
+      std::cout << "  " << new_reg << " = load " << ptr << "\n";
 
-    auto ptr_val = context.GetIRValue(ptr);
-    auto load_inst = std::make_shared<IR::IRLoad>(new_reg, ptr_val);
-    context.current_block->AddInstruction(load_inst);
-    context.SetIRValue(new_reg, load_inst);
-    return new_reg;
+      if (context.current_block) {
+        auto ptr_val = context.GetIRValue(ptr);
+        auto load_inst = std::make_shared<IR::IRLoad>(new_reg, ptr_val);
+        context.current_block->AddInstruction(load_inst);
+        context.SetIRValue(new_reg, load_inst);
+      }
+      return new_reg;
+    } else {
+      // 对指针形参进行索引读取，如 x[i]
+      std::string loaded_ptr = context.NewReg();
+      std::cout << "  " << loaded_ptr << " = load " << ptr << "\n";
+
+      std::shared_ptr<IR::IRLoad> load_ptr_inst = nullptr;
+      if (context.current_block) {
+        auto ptr_val = context.GetIRValue(ptr);
+        load_ptr_inst = std::make_shared<IR::IRLoad>(loaded_ptr, ptr_val);
+        context.current_block->AddInstruction(load_ptr_inst);
+        context.SetIRValue(loaded_ptr, load_ptr_inst);
+      }
+
+      auto index_reg = Generate(*node.index_exp[0]);
+      std::string addr_reg = context.NewReg();
+      std::cout << "  " << addr_reg << " = getptr " << loaded_ptr << ", " << index_reg << "\n";
+
+      std::shared_ptr<IR::IRGetPtr> getptr_inst = nullptr;
+      if (context.current_block) {
+        auto ptr_val = context.GetIRValue(loaded_ptr);
+        auto index_val = context.GetIRValue(index_reg);
+        getptr_inst = std::make_shared<IR::IRGetPtr>(addr_reg, ptr_val, index_val);
+        context.current_block->AddInstruction(getptr_inst);
+        context.SetIRValue(addr_reg, getptr_inst);
+      }
+
+      std::string final_reg = context.NewReg();
+      std::cout << "  " << final_reg << " = load " << addr_reg << "\n";
+      if (context.current_block) {
+        auto load_final_inst = std::make_shared<IR::IRLoad>(final_reg, getptr_inst);
+        context.current_block->AddInstruction(load_final_inst);
+        context.SetIRValue(final_reg, load_final_inst);
+      }
+      return final_reg;
+    }
   } else if (sym->kind == SymbolKind::CONSTANT) {
     std::string int_value = std::to_string(std::get<int>(sym->value));
     context.GetIRValue(int_value);
     return int_value;
-  } else if (sym->kind == SymbolKind::ARRAY) {
+  } else if (sym->kind == SymbolKind::ARRAY || sym->kind == SymbolKind::CONST_ARRAY) {
+    // 对局部/全局数组元素进行读取，如 arr[i]
+    auto arr_info = std::get<ArrayInformation>(sym->value);
     auto temp = context.NewReg();
     auto index = Generate(*node.index_exp[0]);
     auto result = context.NewReg();
-    std::cout << "  " << temp << " = getelemptr " << std::get<ArrayInformation>(sym->value).address << ", " << index << "\n";
+    std::cout << "  " << temp << " = getelemptr " << arr_info.address << ", " << index << "\n";
     std::cout << "  " << result << " = load " << temp << "\n";
+
+    if (context.current_block) {
+      auto arr_val = context.GetIRValue(arr_info.address);
+      auto index_val = context.GetIRValue(index);
+      auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(temp, arr_val, index_val);
+      context.current_block->AddInstruction(getelemptr_inst);
+      context.SetIRValue(temp, getelemptr_inst);
+
+      auto load_inst = std::make_shared<IR::IRLoad>(result, getelemptr_inst);
+      context.current_block->AddInstruction(load_inst);
+      context.SetIRValue(result, load_inst);
+    }
     return result;
-  }
-  else
-  {
-    std::cout << "Error: LVal " << *node.ident << " is not a variable or constant\n";
+  } else {
+    std::cout << "Error: LVal " << *node.ident << " is not a variable, constant, or array\n";
     return "";
   }
 }
@@ -1084,10 +1192,27 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
     context.AddGlobal(global_alloc);
   } else {
     std::cout << "  " << address  << " = alloc [i32, " << arr_size << "]\n";
+    std::shared_ptr<IR::IRAlloc> alloc_inst = nullptr;
+    if (context.current_block) {
+      alloc_inst = std::make_shared<IR::IRAlloc>(address, "i32", arr_size);
+      context.current_block->AddInstruction(alloc_inst);
+      context.SetIRValue(address, alloc_inst);
+    }
     for (int i = 0; i < arr_size; i++) {
       auto temp = context.NewReg();
       std::cout << "  " << temp << " = " << "getelemptr " << address << ", " << i << "\n";
       std::cout << "  store " << init_vals[i] << ", " << temp << "\n";
+
+      if (context.current_block) {
+        auto idx_val = context.GetIRValue(std::to_string(i));
+        auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(temp, alloc_inst, idx_val);
+        context.current_block->AddInstruction(getelemptr_inst);
+        context.SetIRValue(temp, getelemptr_inst);
+
+        auto val = context.GetIRValue(init_vals[i]);
+        auto store_inst = std::make_shared<IR::IRStore>(val, getelemptr_inst);
+        context.current_block->AddInstruction(store_inst);
+      }
     }
   }
   context.scope->define(sym);
@@ -1219,6 +1344,11 @@ std::string CodeGenerator::Generate(const ArrayVarDefAST& node) {
     context.AddGlobal(global_alloc);
   } else {
     std::cout << "  " << address << " = alloc [" << b_type << ", " << arr_size << "]\n";
+    if (context.current_block) {
+      auto alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type, arr_size);
+      context.current_block->AddInstruction(alloc_inst);
+      context.SetIRValue(address, alloc_inst);
+    }
   }
   context.scope->define(sym);
   return "";
@@ -1256,10 +1386,27 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
       init_vals.push_back("0");
     }
     std::cout << "  " << address  << " = alloc [i32, " << arr_size << "]\n";
+    std::shared_ptr<IR::IRAlloc> alloc_inst = nullptr;
+    if (context.current_block) {
+      alloc_inst = std::make_shared<IR::IRAlloc>(address, "i32", arr_size);
+      context.current_block->AddInstruction(alloc_inst);
+      context.SetIRValue(address, alloc_inst);
+    }
     for (int i = 0; i < arr_size; i++) {
       auto temp = context.NewReg();
       std::cout << "  " << temp << " = " << "getelemptr " << address << ", " << i << "\n";
       std::cout << "  store " << init_vals[i] << ", " << temp << "\n";
+
+      if (context.current_block) {
+        auto idx_val = context.GetIRValue(std::to_string(i));
+        auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(temp, alloc_inst, idx_val);
+        context.current_block->AddInstruction(getelemptr_inst);
+        context.SetIRValue(temp, getelemptr_inst);
+
+        auto val = context.GetIRValue(init_vals[i]);
+        auto store_inst = std::make_shared<IR::IRStore>(val, getelemptr_inst);
+        context.current_block->AddInstruction(store_inst);
+      }
     }
   }
   context.scope->define(sym);
