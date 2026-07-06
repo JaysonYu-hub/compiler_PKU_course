@@ -74,9 +74,20 @@ class FuncInformation {
 class ArrayInformation { 
   public:
   std::string address;
-  int size;
-  ArrayInformation() : size(0) {}
-  ArrayInformation(std::string address, int size) : address(address), size(size) {}
+  std::vector<int> dims;
+  std::vector<int> const_values;
+  bool is_param = false;
+  ArrayInformation() = default;
+  ArrayInformation(std::string address, std::vector<int> dims, std::vector<int> const_values = {}, bool is_param = false) 
+    : address(std::move(address)), dims(std::move(dims)), const_values(std::move(const_values)), is_param(is_param) {}
+
+  int GetTotalSize() const {
+    int total = 1;
+    for (int d : dims) {
+      total *= d;
+    }
+    return total;
+  }
 };
 
 enum class SymbolKind { CONSTANT, VARIABLE, FUNCTION, ARRAY, CONST_ARRAY};
@@ -334,6 +345,12 @@ public:
   virtual int getValue(Context& context) const = 0;
 };
 
+class ArrayDimensionsAST : public BaseAST {
+public:
+  std::vector<std::unique_ptr<ValueAST>> dims;
+  ArrayDimensionsAST() = default;
+};
+
 // CompUnit ::= end_comp_unit
 class CompUnitAST : public BaseAST {
 public:
@@ -388,6 +405,8 @@ class FuncFParamAST : public BaseAST {
 public:
   std::unique_ptr<std::string> type;
   std::unique_ptr<std::string> ident;
+  bool is_array = false;
+  std::vector<std::unique_ptr<ValueAST>> array_dims;
   FuncFParamAST() = default; 
 };
 
@@ -725,7 +744,7 @@ class CompoundConstInitValueAST;
 class ArrayConstDefAST : public BaseAST { 
   public:
   std::unique_ptr<std::string> ident;
-  std::unique_ptr<ValueAST> const_exp;
+  std::vector<std::unique_ptr<ValueAST>> const_exps;
   std::unique_ptr<CompoundConstInitValueAST> const_init_val;
   ArrayConstDefAST() = default;
 };
@@ -814,15 +833,16 @@ using ThreeVarAST = InitializedVarDefAST;
 class ArrayVarDefAST : public BaseAST { 
   public:
   std::unique_ptr<std::string> ident;
-  std::unique_ptr<ValueAST> const_exp;
+  std::vector<std::unique_ptr<ValueAST>> const_exps;
   ArrayVarDefAST() = default; 
 };
 using FourVarDefAST = ArrayVarDefAST;
+
 class InitValListAST;
 class ArrayInitializedVarDefAST : public BaseAST { 
   public:
   std::unique_ptr<std::string> ident;
-  std::unique_ptr<ValueAST> const_exp;
+  std::vector<std::unique_ptr<ValueAST>> const_exps;
   std::unique_ptr<InitValListAST> init_val_list;
   ArrayInitializedVarDefAST() = default; 
 };
@@ -836,10 +856,11 @@ public:
   int getValue(Context& context) const override;
 };
 
-class InitValListAST : public BaseAST {
+class InitValListAST : public ValueAST {
 public:
   std::vector<std::unique_ptr<ValueAST>> init_vals;
   InitValListAST() = default; 
-  std::vector<int> getValue(Context& context) const;
+  int getValue(Context& context) const override { return 0; }
+  std::vector<int> getValues(Context& context) const;
 };
 

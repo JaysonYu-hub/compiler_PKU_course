@@ -211,8 +211,24 @@ std::string CodeGenerator::Generate(const FuncFParamsAST& node) {
   return "";
 }
 
+static std::string GetParamType(const FuncFParamAST& node, Context& context) {
+  if (!node.is_array) {
+    return *node.type;
+  }
+  std::string base_type = "i32";
+  std::vector<int> dims;
+  for (auto& expr : node.array_dims) {
+    dims.push_back(expr->getValue(context));
+  }
+  std::string arr_type = base_type;
+  for (auto it = dims.rbegin(); it != dims.rend(); ++it) {
+    arr_type = "[" + arr_type + ", " + std::to_string(*it) + "]";
+  }
+  return "*" + arr_type;
+}
+
 std::string CodeGenerator::Generate(const FuncFParamAST& node) {
-  return "@" + *node.ident + ": " + *node.type;
+  return "@" + *node.ident + ": " + GetParamType(node, context);
 }
 
 void CodeGenerator::ParamLocalization(const FuncFParamsAST& node) {
@@ -223,22 +239,35 @@ void CodeGenerator::ParamLocalization(const FuncFParamsAST& node) {
 
 void CodeGenerator::ParamLocalization(const FuncFParamAST& node) {
   std::string address = context.GetAddress(*node.ident);
-  auto symbol = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE, address);
-  context.scope->define(symbol);
-  std::cout << "  " << address << " = " << "alloc " << *node.type << "\n";
+  std::string param_type_str = GetParamType(node, context);
+
+  if (node.is_array) {
+    std::vector<int> dims;
+    for (auto& expr : node.array_dims) {
+      dims.push_back(expr->getValue(context));
+    }
+    auto symbol = std::make_shared<Symbol>(*node.ident, SymbolKind::ARRAY);
+    symbol->value = ArrayInformation(address, dims, {}, true); // is_param = true
+    context.scope->define(symbol);
+  } else {
+    auto symbol = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE, address);
+    context.scope->define(symbol);
+  }
+
+  std::cout << "  " << address << " = " << "alloc " << param_type_str << "\n";
   std::cout << "  store " << "@" + *node.ident << ", " << address << "\n";
 
   if (context.current_block) {
     std::string param_name = "@" + *node.ident;
-    IR::IRType param_type = (*node.type == "i32") ? IR::IRType::IR_INT32 : IR::IRType::IR_VOID;
-    auto param_sym = std::make_shared<IR::IRFuncParam>(param_name, param_type);
+    IR::IRType param_type = (!node.is_array && *node.type == "i32") ? IR::IRType::IR_INT32 : IR::IRType::IR_POINTER;
+    auto param_sym = std::make_shared<IR::IRFuncParam>(param_name, param_type, param_type_str);
     context.SetIRValue(param_name, param_sym);
 
     if (context.current_func) {
       context.current_func->params.push_back(param_sym);
     }
 
-    auto alloc_inst = std::make_shared<IR::IRAlloc>(address, *node.type);
+    auto alloc_inst = std::make_shared<IR::IRAlloc>(address, param_type_str);
     context.current_block->AddInstruction(alloc_inst);
     context.SetIRValue(address, alloc_inst);
 
@@ -410,51 +439,67 @@ std::string CodeGenerator::Generate(const AssignStmtAST& node) {
 
     if (sym->kind == SymbolKind::VARIABLE) {
       std::string ptr = std::get<std::string>(sym->value);
-      if (node.lval->index_exp.empty()) {
-        // 普通标量变量写入
-        lhs_reg = ptr;
-        ptr_val = context.GetIRValue(ptr);
-      } else {
-        // 对指针形参进行索引写入，如 x[i] = expr
-        std::string loaded_ptr = context.NewReg();
-        std::cout << "  " << loaded_ptr << " = load " << ptr << "\n";
+      lhs_reg = ptr;
+      ptr_val = context.GetIRValue(ptr);
+    } else if (sym->kind == SymbolKind::ARRAY || sym->kind == SymbolKind::CONST_ARRAY) {
+      auto arr_info = std::get<ArrayInformation>(sym->value);
+      
+      std::string prev_reg = arr_info.address;
+      std::shared_ptr<IR::IRValue> prev_val = context.GetIRValue(arr_info.address);
 
-        std::shared_ptr<IR::IRLoad> load_ptr_inst = nullptr;
+      if (arr_info.is_param) {
+        std::string loaded_ptr = context.NewReg();
+        std::cout << "  " << loaded_ptr << " = load " << prev_reg << "\n";
         if (context.current_block) {
-          auto ptr_val_loc = context.GetIRValue(ptr);
-          load_ptr_inst = std::make_shared<IR::IRLoad>(loaded_ptr, ptr_val_loc);
+          auto load_ptr_inst = std::make_shared<IR::IRLoad>(loaded_ptr, prev_val);
           context.current_block->AddInstruction(load_ptr_inst);
           context.SetIRValue(loaded_ptr, load_ptr_inst);
+          prev_val = load_ptr_inst;
         }
-
-        auto index_reg = Generate(*node.lval->index_exp[0]);
-        lhs_reg = context.NewReg();
-        std::cout << "  " << lhs_reg << " = getptr " << loaded_ptr << ", " << index_reg << "\n";
-
-        std::shared_ptr<IR::IRGetPtr> getptr_inst = nullptr;
-        if (context.current_block) {
-          auto ptr_val_val = context.GetIRValue(loaded_ptr);
-          auto index_val = context.GetIRValue(index_reg);
-          getptr_inst = std::make_shared<IR::IRGetPtr>(lhs_reg, ptr_val_val, index_val);
-          context.current_block->AddInstruction(getptr_inst);
-          context.SetIRValue(lhs_reg, getptr_inst);
-        }
-        ptr_val = getptr_inst;
+        prev_reg = loaded_ptr;
       }
-    } else if (sym->kind == SymbolKind::ARRAY || sym->kind == SymbolKind::CONST_ARRAY) {
-      // 对局部/全局数组元素进行写入，如 arr[i] = expr
-      auto arr_info = std::get<ArrayInformation>(sym->value);
-      auto index_reg = Generate(*node.lval->index_exp[0]);
-      lhs_reg = context.NewReg();
-      std::cout << "  " << lhs_reg << " = getelemptr " << arr_info.address << ", " << index_reg << "\n";
 
-      if (context.current_block) {
-        auto arr_val = context.GetIRValue(arr_info.address);
-        auto index_val = context.GetIRValue(index_reg);
-        auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(lhs_reg, arr_val, index_val);
-        context.current_block->AddInstruction(getelemptr_inst);
-        context.SetIRValue(lhs_reg, getelemptr_inst);
-        ptr_val = getelemptr_inst;
+      for (size_t i = 0; i < node.lval->index_exp.size(); i++) {
+        auto index_reg = Generate(*node.lval->index_exp[i]);
+        std::string addr_reg = context.NewReg();
+        if (arr_info.is_param && i == 0) {
+          std::cout << "  " << addr_reg << " = getptr " << prev_reg << ", " << index_reg << "\n";
+          if (context.current_block) {
+            auto index_val = context.GetIRValue(index_reg);
+            auto getptr_inst = std::make_shared<IR::IRGetPtr>(addr_reg, prev_val, index_val);
+            context.current_block->AddInstruction(getptr_inst);
+            context.SetIRValue(addr_reg, getptr_inst);
+            prev_val = getptr_inst;
+          }
+        } else {
+          std::cout << "  " << addr_reg << " = getelemptr " << prev_reg << ", " << index_reg << "\n";
+          if (context.current_block) {
+            auto index_val = context.GetIRValue(index_reg);
+            auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val);
+            context.current_block->AddInstruction(getelemptr_inst);
+            context.SetIRValue(addr_reg, getelemptr_inst);
+            prev_val = getelemptr_inst;
+          }
+        }
+        prev_reg = addr_reg;
+      }
+
+      int total_dims = arr_info.dims.size() + (arr_info.is_param ? 1 : 0);
+      if (node.lval->index_exp.size() < (size_t)total_dims) {
+        std::string addr_reg = context.NewReg();
+        std::cout << "  " << addr_reg << " = getelemptr " << prev_reg << ", 0\n";
+        if (context.current_block) {
+          auto index_val = context.GetIRValue("0");
+          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val);
+          context.current_block->AddInstruction(getelemptr_inst);
+          context.SetIRValue(addr_reg, getelemptr_inst);
+          prev_val = getelemptr_inst;
+        }
+        lhs_reg = addr_reg;
+        ptr_val = prev_val;
+      } else {
+        lhs_reg = prev_reg;
+        ptr_val = prev_val;
       }
     }
 
@@ -1069,78 +1114,95 @@ std::string CodeGenerator::Generate(const LValAST& node) {
   }
   if (sym->kind == SymbolKind::VARIABLE) {
     std::string ptr = std::get<std::string>(sym->value);
-    if (node.index_exp.empty()) {
-      // 普通标量变量读取
-      std::string new_reg = context.NewReg();
-      std::cout << "  " << new_reg << " = load " << ptr << "\n";
+    std::string new_reg = context.NewReg();
+    std::cout << "  " << new_reg << " = load " << ptr << "\n";
 
-      if (context.current_block) {
-        auto ptr_val = context.GetIRValue(ptr);
-        auto load_inst = std::make_shared<IR::IRLoad>(new_reg, ptr_val);
-        context.current_block->AddInstruction(load_inst);
-        context.SetIRValue(new_reg, load_inst);
-      }
-      return new_reg;
-    } else {
-      // 对指针形参进行索引读取，如 x[i]
-      std::string loaded_ptr = context.NewReg();
-      std::cout << "  " << loaded_ptr << " = load " << ptr << "\n";
-
-      std::shared_ptr<IR::IRLoad> load_ptr_inst = nullptr;
-      if (context.current_block) {
-        auto ptr_val = context.GetIRValue(ptr);
-        load_ptr_inst = std::make_shared<IR::IRLoad>(loaded_ptr, ptr_val);
-        context.current_block->AddInstruction(load_ptr_inst);
-        context.SetIRValue(loaded_ptr, load_ptr_inst);
-      }
-
-      auto index_reg = Generate(*node.index_exp[0]);
-      std::string addr_reg = context.NewReg();
-      std::cout << "  " << addr_reg << " = getptr " << loaded_ptr << ", " << index_reg << "\n";
-
-      std::shared_ptr<IR::IRGetPtr> getptr_inst = nullptr;
-      if (context.current_block) {
-        auto ptr_val = context.GetIRValue(loaded_ptr);
-        auto index_val = context.GetIRValue(index_reg);
-        getptr_inst = std::make_shared<IR::IRGetPtr>(addr_reg, ptr_val, index_val);
-        context.current_block->AddInstruction(getptr_inst);
-        context.SetIRValue(addr_reg, getptr_inst);
-      }
-
-      std::string final_reg = context.NewReg();
-      std::cout << "  " << final_reg << " = load " << addr_reg << "\n";
-      if (context.current_block) {
-        auto load_final_inst = std::make_shared<IR::IRLoad>(final_reg, getptr_inst);
-        context.current_block->AddInstruction(load_final_inst);
-        context.SetIRValue(final_reg, load_final_inst);
-      }
-      return final_reg;
+    if (context.current_block) {
+      auto ptr_val = context.GetIRValue(ptr);
+      auto load_inst = std::make_shared<IR::IRLoad>(new_reg, ptr_val);
+      context.current_block->AddInstruction(load_inst);
+      context.SetIRValue(new_reg, load_inst);
     }
+    return new_reg;
   } else if (sym->kind == SymbolKind::CONSTANT) {
     std::string int_value = std::to_string(std::get<int>(sym->value));
     context.GetIRValue(int_value);
     return int_value;
   } else if (sym->kind == SymbolKind::ARRAY || sym->kind == SymbolKind::CONST_ARRAY) {
-    // 对局部/全局数组元素进行读取，如 arr[i]
     auto arr_info = std::get<ArrayInformation>(sym->value);
-    auto temp = context.NewReg();
-    auto index = Generate(*node.index_exp[0]);
-    auto result = context.NewReg();
-    std::cout << "  " << temp << " = getelemptr " << arr_info.address << ", " << index << "\n";
-    std::cout << "  " << result << " = load " << temp << "\n";
+    
+    std::string prev_reg = arr_info.address;
+    std::shared_ptr<IR::IRValue> prev_val = context.GetIRValue(arr_info.address);
 
-    if (context.current_block) {
-      auto arr_val = context.GetIRValue(arr_info.address);
-      auto index_val = context.GetIRValue(index);
-      auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(temp, arr_val, index_val);
-      context.current_block->AddInstruction(getelemptr_inst);
-      context.SetIRValue(temp, getelemptr_inst);
-
-      auto load_inst = std::make_shared<IR::IRLoad>(result, getelemptr_inst);
-      context.current_block->AddInstruction(load_inst);
-      context.SetIRValue(result, load_inst);
+    if (arr_info.is_param) {
+      std::string loaded_ptr = context.NewReg();
+      std::cout << "  " << loaded_ptr << " = load " << prev_reg << "\n";
+      if (context.current_block) {
+        auto load_ptr_inst = std::make_shared<IR::IRLoad>(loaded_ptr, prev_val);
+        context.current_block->AddInstruction(load_ptr_inst);
+        context.SetIRValue(loaded_ptr, load_ptr_inst);
+        prev_val = load_ptr_inst;
+      }
+      prev_reg = loaded_ptr;
     }
-    return result;
+
+    for (size_t i = 0; i < node.index_exp.size(); i++) {
+      auto index_reg = Generate(*node.index_exp[i]);
+      std::string addr_reg = context.NewReg();
+      if (arr_info.is_param && i == 0) {
+        std::cout << "  " << addr_reg << " = getptr " << prev_reg << ", " << index_reg << "\n";
+        if (context.current_block) {
+          auto index_val = context.GetIRValue(index_reg);
+          auto getptr_inst = std::make_shared<IR::IRGetPtr>(addr_reg, prev_val, index_val);
+          context.current_block->AddInstruction(getptr_inst);
+          context.SetIRValue(addr_reg, getptr_inst);
+          prev_val = getptr_inst;
+        }
+      } else {
+        std::cout << "  " << addr_reg << " = getelemptr " << prev_reg << ", " << index_reg << "\n";
+        if (context.current_block) {
+          auto index_val = context.GetIRValue(index_reg);
+          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val);
+          context.current_block->AddInstruction(getelemptr_inst);
+          context.SetIRValue(addr_reg, getelemptr_inst);
+          prev_val = getelemptr_inst;
+        }
+      }
+      prev_reg = addr_reg;
+    }
+
+    bool need_decay = false;
+    if (!arr_info.is_param) {
+      need_decay = node.index_exp.size() < arr_info.dims.size();
+    } else {
+      need_decay = node.index_exp.size() > 0 && (node.index_exp.size() - 1) < arr_info.dims.size();
+    }
+    if (need_decay) {
+      std::string addr_reg = context.NewReg();
+      std::cout << "  " << addr_reg << " = getelemptr " << prev_reg << ", 0\n";
+      if (context.current_block) {
+        auto index_val = context.GetIRValue("0");
+        auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val);
+        context.current_block->AddInstruction(getelemptr_inst);
+        context.SetIRValue(addr_reg, getelemptr_inst);
+        prev_val = getelemptr_inst;
+      }
+      return addr_reg;
+    } else {
+      int total_dims = arr_info.dims.size() + (arr_info.is_param ? 1 : 0);
+      if (node.index_exp.size() == (size_t)total_dims) {
+        std::string final_reg = context.NewReg();
+        std::cout << "  " << final_reg << " = load " << prev_reg << "\n";
+        if (context.current_block) {
+          auto load_final_inst = std::make_shared<IR::IRLoad>(final_reg, prev_val);
+          context.current_block->AddInstruction(load_final_inst);
+          context.SetIRValue(final_reg, load_final_inst);
+        }
+        return final_reg;
+      } else {
+        return prev_reg;
+      }
+    }
   } else {
     std::cout << "Error: LVal " << *node.ident << " is not a variable, constant, or array\n";
     return "";
@@ -1161,21 +1223,159 @@ std::string CodeGenerator::Generate(const ConstDefAST& node) {
   return "";
 }
 
+static void FillConstInitVal(const BaseAST& node, 
+                             const std::vector<int>& dims, 
+                             const std::vector<int>& sub_sizes, 
+                             int parent_level, 
+                             int& index, 
+                             std::vector<int32_t>& flat_vals, 
+                             Context& context) {
+  if (const auto* p = dynamic_cast<const ConstExpConstInitValAST*>(&node)) {
+    int val = p->const_exp->getValue(context);
+    if (index < (int)flat_vals.size()) {
+      flat_vals[index] = val;
+    }
+    index++;
+  } else if (const auto* p = dynamic_cast<const CompoundConstInitValueAST*>(&node)) {
+    if (index % dims.back() != 0) {
+      return;
+    }
+    int target_level = -1;
+    for (int k = parent_level + 1; k < (int)dims.size(); k++) {
+      if (index % sub_sizes[k] == 0) {
+        target_level = k;
+        break;
+      }
+    }
+    if (target_level == -1) return;
+
+    int start_index = index;
+    int sub_size = sub_sizes[target_level];
+
+    if (p->const_init_val_list) {
+      for (const auto& child : p->const_init_val_list->const_init_vals) {
+        FillConstInitVal(*child, dims, sub_sizes, target_level, index, flat_vals, context);
+      }
+    }
+    if (index < start_index + sub_size) {
+      index = start_index + sub_size;
+    }
+  }
+}
+
+static void FillConstInitValFromInitVal(const BaseAST& node, 
+                                        const std::vector<int>& dims, 
+                                        const std::vector<int>& sub_sizes, 
+                                        int parent_level, 
+                                        int& index, 
+                                        std::vector<int32_t>& flat_vals, 
+                                        Context& context) {
+  if (const auto* p = dynamic_cast<const InitValAST*>(&node)) {
+    int val = p->exp->getValue(context);
+    if (index < (int)flat_vals.size()) {
+      flat_vals[index] = val;
+    }
+    index++;
+  } else if (const auto* p = dynamic_cast<const InitValListAST*>(&node)) {
+    if (index % dims.back() != 0) {
+      return;
+    }
+    int target_level = -1;
+    for (int k = parent_level + 1; k < (int)dims.size(); k++) {
+      if (index % sub_sizes[k] == 0) {
+        target_level = k;
+        break;
+      }
+    }
+    if (target_level == -1) return;
+
+    int start_index = index;
+    int sub_size = sub_sizes[target_level];
+
+    for (const auto& child : p->init_vals) {
+      FillConstInitValFromInitVal(*child, dims, sub_sizes, target_level, index, flat_vals, context);
+    }
+    if (index < start_index + sub_size) {
+      index = start_index + sub_size;
+    }
+  }
+}
+
+static void FillInitValRegs(const BaseAST& node, 
+                            const std::vector<int>& dims, 
+                            const std::vector<int>& sub_sizes, 
+                            int parent_level, 
+                            int& index, 
+                            std::vector<std::string>& flat_vals, 
+                            CodeGenerator& gen, 
+                            Context& context) {
+  if (const auto* p = dynamic_cast<const InitValAST*>(&node)) {
+    std::string val = gen.Generate(*p->exp);
+    if (index < (int)flat_vals.size()) {
+      flat_vals[index] = val;
+    }
+    index++;
+  } else if (const auto* p = dynamic_cast<const InitValListAST*>(&node)) {
+    if (index % dims.back() != 0) {
+      return;
+    }
+    int target_level = -1;
+    for (int k = parent_level + 1; k < (int)dims.size(); k++) {
+      if (index % sub_sizes[k] == 0) {
+        target_level = k;
+        break;
+      }
+    }
+    if (target_level == -1) return;
+
+    int start_index = index;
+    int sub_size = sub_sizes[target_level];
+
+    for (const auto& child : p->init_vals) {
+      FillInitValRegs(*child, dims, sub_sizes, target_level, index, flat_vals, gen, context);
+    }
+    if (index < start_index + sub_size) {
+      index = start_index + sub_size;
+    }
+  }
+}
+
 std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
-  auto raw_init_vals = node.const_init_val->getValues(context);
-  auto arr_size = node.const_exp->getValue(context);
+  std::vector<int> dims;
+  int arr_size = 1;
+  for (auto& expr : node.const_exps) {
+    int val = expr->getValue(context);
+    dims.push_back(val);
+    arr_size *= val;
+  }
+
+  std::vector<int> sub_sizes(dims.size());
+  if (!dims.empty()) {
+    sub_sizes.back() = dims.back();
+    for (int k = (int)dims.size() - 2; k >= 0; --k) {
+      sub_sizes[k] = dims[k] * sub_sizes[k+1];
+    }
+  }
+
+  std::vector<int32_t> init_vals_int(arr_size, 0);
+  int fill_index = 0;
+  FillConstInitVal(*node.const_init_val, dims, sub_sizes, -1, fill_index, init_vals_int, context);
+
   auto address = context.GetAddress(*node.ident);
-  ArrayInformation arr_info(address, arr_size);
-  auto sym = std::make_shared<Symbol>(address, SymbolKind::CONST_ARRAY);
+  ArrayInformation arr_info(address, dims, init_vals_int);
+  auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::CONST_ARRAY);
   sym->value = arr_info;
 
   auto init_vals = std::vector<std::string>(arr_size);
-  for (size_t i = 0; i < raw_init_vals.size(); i++) {
-    init_vals[i] = std::to_string(raw_init_vals[i]);
+  for (int i = 0; i < arr_size; i++) {
+    init_vals[i] = std::to_string(init_vals_int[i]);
   }
-  for (size_t i = raw_init_vals.size(); i < (size_t)arr_size; i++) {
-    init_vals[i] = "0";
+
+  std::string arr_type = "i32";
+  for (auto it = dims.rbegin(); it != dims.rend(); ++it) {
+    arr_type = "[" + arr_type + ", " + std::to_string(*it) + "]";
   }
+
   if (context.scope->isGlobal()) {
     std::string str;
     std::vector<int32_t> init_nums(arr_size, 0);
@@ -1186,31 +1386,46 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
         str += ", ";
       }
     }
-    std::cout << "global " << address << " = alloc [i32, " << arr_size << "], {" << str << "}\n";
-    std::string arr_type = "[i32, " + std::to_string(arr_size) + "]";
-    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, false, init_nums);
+    std::cout << "global " << address << " = alloc " << arr_type << ", {" << str << "}\n";
+    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, false, init_nums, dims);
     context.AddGlobal(global_alloc);
   } else {
-    std::cout << "  " << address  << " = alloc [i32, " << arr_size << "]\n";
+    std::cout << "  " << address  << " = alloc " << arr_type << "\n";
     std::shared_ptr<IR::IRAlloc> alloc_inst = nullptr;
     if (context.current_block) {
-      alloc_inst = std::make_shared<IR::IRAlloc>(address, "i32", arr_size);
+      alloc_inst = std::make_shared<IR::IRAlloc>(address, "i32", dims);
       context.current_block->AddInstruction(alloc_inst);
       context.SetIRValue(address, alloc_inst);
     }
     for (int i = 0; i < arr_size; i++) {
-      auto temp = context.NewReg();
-      std::cout << "  " << temp << " = " << "getelemptr " << address << ", " << i << "\n";
-      std::cout << "  store " << init_vals[i] << ", " << temp << "\n";
+      // 展开扁平索引 i 到多维索引
+      std::vector<int> idxs(dims.size());
+      int temp_idx = i;
+      for (int j = (int)dims.size() - 1; j >= 0; --j) {
+        idxs[j] = temp_idx % dims[j];
+        temp_idx /= dims[j];
+      }
 
+      std::string prev_reg = address;
+      std::shared_ptr<IR::IRValue> prev_val = alloc_inst;
+
+      for (size_t j = 0; j < idxs.size(); j++) {
+        std::string next_reg = context.NewReg();
+        std::cout << "  " << next_reg << " = getelemptr " << prev_reg << ", " << idxs[j] << "\n";
+        if (context.current_block) {
+          auto idx_val = context.GetIRValue(std::to_string(idxs[j]));
+          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(next_reg, prev_val, idx_val);
+          context.current_block->AddInstruction(getelemptr_inst);
+          context.SetIRValue(next_reg, getelemptr_inst);
+          prev_val = getelemptr_inst;
+        }
+        prev_reg = next_reg;
+      }
+
+      std::cout << "  store " << init_vals[i] << ", " << prev_reg << "\n";
       if (context.current_block) {
-        auto idx_val = context.GetIRValue(std::to_string(i));
-        auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(temp, alloc_inst, idx_val);
-        context.current_block->AddInstruction(getelemptr_inst);
-        context.SetIRValue(temp, getelemptr_inst);
-
         auto val = context.GetIRValue(init_vals[i]);
-        auto store_inst = std::make_shared<IR::IRStore>(val, getelemptr_inst);
+        auto store_inst = std::make_shared<IR::IRStore>(val, prev_val);
         context.current_block->AddInstruction(store_inst);
       }
     }
@@ -1333,19 +1548,29 @@ std::string CodeGenerator::Generate(const InitializedVarDefAST& node) {
 std::string CodeGenerator::Generate(const ArrayVarDefAST& node) {
   std::string address = context.GetAddress(*node.ident);
   std::string b_type = *context.decl_type_context;
-  auto arr_size = node.const_exp->getValue(context);
-  auto sym = std::make_shared<Symbol>(address, SymbolKind::ARRAY);
-  sym->value = ArrayInformation(address, arr_size);
+  
+  std::vector<int> dims;
+  for (auto& expr : node.const_exps) {
+    int val = expr->getValue(context);
+    dims.push_back(val);
+  }
+
+  auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::ARRAY);
+  sym->value = ArrayInformation(address, dims);
+
+  std::string arr_type = b_type;
+  for (auto it = dims.rbegin(); it != dims.rend(); ++it) {
+    arr_type = "[" + arr_type + ", " + std::to_string(*it) + "]";
+  }
 
   if (context.scope->isGlobal()) {
-    std::cout << "global " << address << " = alloc [" << b_type << ", " << arr_size << "]\n";
-    std::string arr_type = "[" + b_type + ", " + std::to_string(arr_size) + "]";
+    std::cout << "global " << address << " = alloc " << arr_type << "\n";
     auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, true, std::vector<int32_t>{});
     context.AddGlobal(global_alloc);
   } else {
-    std::cout << "  " << address << " = alloc [" << b_type << ", " << arr_size << "]\n";
+    std::cout << "  " << address << " = alloc " << arr_type << "\n";
     if (context.current_block) {
-      auto alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type, arr_size);
+      auto alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type, dims);
       context.current_block->AddInstruction(alloc_inst);
       context.SetIRValue(address, alloc_inst);
     }
@@ -1357,15 +1582,36 @@ std::string CodeGenerator::Generate(const ArrayVarDefAST& node) {
 std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
   std::string address = context.GetAddress(*node.ident);
   std::string b_type = *context.decl_type_context;
-  auto arr_size = node.const_exp->getValue(context);
+  
+  std::vector<int> dims;
+  int arr_size = 1;
+  for (auto& expr : node.const_exps) {
+    int val = expr->getValue(context);
+    dims.push_back(val);
+    arr_size *= val;
+  }
+
   auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::ARRAY);
-  sym->value = ArrayInformation(address, arr_size);
-  if (context.scope->isGlobal()) {
-    auto raw_init_vals = node.init_val_list->getValue(context);
-    std::vector<int32_t> init_nums(arr_size, 0);
-    for (size_t i = 0; i < raw_init_vals.size() && i < (size_t)arr_size; i++) {
-      init_nums[i] = raw_init_vals[i];
+  sym->value = ArrayInformation(address, dims);
+
+  std::string arr_type = "i32";
+  for (auto it = dims.rbegin(); it != dims.rend(); ++it) {
+    arr_type = "[" + arr_type + ", " + std::to_string(*it) + "]";
+  }
+
+  std::vector<int> sub_sizes(dims.size());
+  if (!dims.empty()) {
+    sub_sizes.back() = dims.back();
+    for (int k = (int)dims.size() - 2; k >= 0; --k) {
+      sub_sizes[k] = dims[k] * sub_sizes[k+1];
     }
+  }
+
+  if (context.scope->isGlobal()) {
+    std::vector<int32_t> init_nums(arr_size, 0);
+    int fill_index = 0;
+    FillConstInitValFromInitVal(*node.init_val_list, dims, sub_sizes, -1, fill_index, init_nums, context);
+
     std::string str;
     for (int i = 0; i < arr_size; i++) {
       str += std::to_string(init_nums[i]);
@@ -1373,38 +1619,49 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
         str += ", ";
       }
     }
-    std::cout << "global " << address << " = alloc [i32, " << arr_size << "], {" << str << "}\n";
-    std::string arr_type = "[i32, " + std::to_string(arr_size) + "]";
-    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, false, init_nums);
+    std::cout << "global " << address << " = alloc " << arr_type << ", {" << str << "}\n";
+    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, false, init_nums, dims);
     context.AddGlobal(global_alloc);
   } else {
-    std::vector<std::string> init_vals;
-    for (auto& val : node.init_val_list->init_vals) {
-      init_vals.push_back(Generate(*val));
-    }
-    for (size_t i = init_vals.size(); i < (size_t)arr_size; i++) {
-      init_vals.push_back("0");
-    }
-    std::cout << "  " << address  << " = alloc [i32, " << arr_size << "]\n";
+    std::vector<std::string> init_vals(arr_size, "0");
+    int fill_index = 0;
+    FillInitValRegs(*node.init_val_list, dims, sub_sizes, -1, fill_index, init_vals, *this, context);
+
+    std::cout << "  " << address  << " = alloc " << arr_type << "\n";
     std::shared_ptr<IR::IRAlloc> alloc_inst = nullptr;
     if (context.current_block) {
-      alloc_inst = std::make_shared<IR::IRAlloc>(address, "i32", arr_size);
+      alloc_inst = std::make_shared<IR::IRAlloc>(address, "i32", dims);
       context.current_block->AddInstruction(alloc_inst);
       context.SetIRValue(address, alloc_inst);
     }
     for (int i = 0; i < arr_size; i++) {
-      auto temp = context.NewReg();
-      std::cout << "  " << temp << " = " << "getelemptr " << address << ", " << i << "\n";
-      std::cout << "  store " << init_vals[i] << ", " << temp << "\n";
+      std::vector<int> idxs(dims.size());
+      int temp_idx = i;
+      for (int j = (int)dims.size() - 1; j >= 0; --j) {
+        idxs[j] = temp_idx % dims[j];
+        temp_idx /= dims[j];
+      }
 
+      std::string prev_reg = address;
+      std::shared_ptr<IR::IRValue> prev_val = alloc_inst;
+
+      for (size_t j = 0; j < idxs.size(); j++) {
+        std::string next_reg = context.NewReg();
+        std::cout << "  " << next_reg << " = getelemptr " << prev_reg << ", " << idxs[j] << "\n";
+        if (context.current_block) {
+          auto idx_val = context.GetIRValue(std::to_string(idxs[j]));
+          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(next_reg, prev_val, idx_val);
+          context.current_block->AddInstruction(getelemptr_inst);
+          context.SetIRValue(next_reg, getelemptr_inst);
+          prev_val = getelemptr_inst;
+        }
+        prev_reg = next_reg;
+      }
+
+      std::cout << "  store " << init_vals[i] << ", " << prev_reg << "\n";
       if (context.current_block) {
-        auto idx_val = context.GetIRValue(std::to_string(i));
-        auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(temp, alloc_inst, idx_val);
-        context.current_block->AddInstruction(getelemptr_inst);
-        context.SetIRValue(temp, getelemptr_inst);
-
         auto val = context.GetIRValue(init_vals[i]);
-        auto store_inst = std::make_shared<IR::IRStore>(val, getelemptr_inst);
+        auto store_inst = std::make_shared<IR::IRStore>(val, prev_val);
         context.current_block->AddInstruction(store_inst);
       }
     }

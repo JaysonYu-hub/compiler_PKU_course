@@ -80,28 +80,67 @@ namespace IR {
     std::string type;
     bool is_zeroinit;
     std::vector<int32_t> init_vals;
+    std::vector<int> array_dims;
   public:
-    IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<int32_t> init_vals)
-      : name(std::move(name)), type(std::move(type)), is_zeroinit(is_zeroinit), init_vals(std::move(init_vals)) {}
+    IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<int32_t> init_vals, std::vector<int> array_dims = {})
+      : name(std::move(name)), type(std::move(type)), is_zeroinit(is_zeroinit), init_vals(std::move(init_vals)), array_dims(std::move(array_dims)) {}
 
     bool IsZeroInit() const { return is_zeroinit; }
     const std::vector<int32_t>& GetInitVals() const { return init_vals; }
+
+    static std::string FormatNestedInitializer(const std::vector<int32_t>& vals, 
+                                               const std::vector<int>& dims, 
+                                               size_t dim_idx, 
+                                               size_t& val_idx) {
+      if (dim_idx == dims.size() - 1) {
+        std::string res = "{";
+        for (int i = 0; i < dims[dim_idx]; i++) {
+          if (val_idx < vals.size()) {
+            res += std::to_string(vals[val_idx++]);
+          } else {
+            res += "0";
+          }
+          if (i != dims[dim_idx] - 1) {
+            res += ", ";
+          }
+        }
+        res += "}";
+        return res;
+      } else {
+        std::string res = "{";
+        for (int i = 0; i < dims[dim_idx]; i++) {
+          res += FormatNestedInitializer(vals, dims, dim_idx + 1, val_idx);
+          if (i != dims[dim_idx] - 1) {
+            res += ", ";
+          }
+        }
+        res += "}";
+        return res;
+      }
+    }
 
     std::string DumpText() const override {
       if (is_zeroinit) {
         return "global " + name + " = alloc " + type + ", zeroinit";
       }
-      if (init_vals.size() == 1) {
+      if (init_vals.size() == 1 && array_dims.empty()) {
         return "global " + name + " = alloc " + type + ", " + std::to_string(init_vals[0]);
       }
-      std::string str = "{";
-      for (size_t i = 0; i < init_vals.size(); i++) {
-        str += std::to_string(init_vals[i]);
-        if (i != init_vals.size() - 1) {
-          str += ", ";
+      
+      std::string str;
+      if (!array_dims.empty()) {
+        size_t val_idx = 0;
+        str = FormatNestedInitializer(init_vals, array_dims, 0, val_idx);
+      } else {
+        str = "{";
+        for (size_t i = 0; i < init_vals.size(); i++) {
+          str += std::to_string(init_vals[i]);
+          if (i != init_vals.size() - 1) {
+            str += ", ";
+          }
         }
+        str += "}";
       }
-      str += "}";
       return "global " + name + " = alloc " + type + ", " + str;
     }
 
@@ -119,11 +158,13 @@ namespace IR {
   private:
     std::string name;
     IRType type;
+    std::string type_str;
   public:
-    IRFuncParam(std::string name, IRType type) : name(std::move(name)), type(type) {}
+    IRFuncParam(std::string name, IRType type, std::string type_str) 
+      : name(std::move(name)), type(type), type_str(std::move(type_str)) {}
 
     std::string DumpText() const override {
-      return name + ": " + (type == IRType::IR_INT32 ? "i32" : "/* other */");
+      return name + ": " + type_str;
     }
 
     std::string GetOperandName() const override {
@@ -212,9 +253,12 @@ namespace IR {
 
   // 把字符串转换为类型枚举
   inline IRType StringToType(const std::string &type) {
+    if (type.empty()) return IRType::IR_VOID;
+    if (type[0] == '*') return IRType::IR_POINTER;
+    if (type[0] == '[') return IRType::IR_ARRAY;
     if (type == "i32") return IRType::IR_INT32;
     if (type == "void") return IRType::IR_VOID;
-    if (type == "ptr" || type == "*i32") return IRType::IR_POINTER;
+    if (type == "ptr") return IRType::IR_POINTER;
     if (type == "array") return IRType::IR_ARRAY;
     assert(false && "Invalid IR type");
     return IRType::IR_VOID;
@@ -250,21 +294,27 @@ namespace IR {
   class IRAlloc : public IRNameInstruction {
   private:
     IR::IRType type;
-    int array_size; // 0 for scalar, >0 for array
+    std::vector<int> array_dims;
+    std::string alloc_type_str;
   public:
-    IRAlloc(std::string name, IR::IRType type, int array_size = 0)
-      : IRNameInstruction(std::move(name)), type(std::move(type)), array_size(array_size) {}
-    IRAlloc(std::string name, std::string type, int array_size = 0)
-      : IRNameInstruction(std::move(name)), type(StringToType(type)), array_size(array_size) {}
+    IRAlloc(std::string name, std::string type_str, std::vector<int> array_dims = {})
+      : IRNameInstruction(std::move(name)), type(StringToType(type_str)), array_dims(std::move(array_dims)), alloc_type_str(std::move(type_str)) {}
 
-    int GetArraySize() const { return array_size; }
-    bool IsArray() const { return array_size > 0; }
+    IRAlloc(std::string name, std::string type_str, int array_size)
+      : IRAlloc(std::move(name), std::move(type_str), std::vector<int>{array_size}) {}
+
+    const std::vector<int>& GetArrayDims() const { return array_dims; }
+    bool IsArray() const { return !array_dims.empty(); }
 
     std::string DumpText() const override {
       if (IsArray()) {
-        return name + " = alloc [i32, " + std::to_string(array_size) + "]";
+        std::string type_str = alloc_type_str;
+        for (auto it = array_dims.rbegin(); it != array_dims.rend(); ++it) {
+          type_str = "[" + type_str + ", " + std::to_string(*it) + "]";
+        }
+        return name + " = alloc " + type_str;
       }
-      return name + " = alloc " + TypeToString(type);
+      return name + " = alloc " + alloc_type_str;
     }
 
     IRType GetType() const override {

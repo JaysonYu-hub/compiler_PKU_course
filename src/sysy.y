@@ -46,9 +46,8 @@ using namespace std;
 %type <value_ast> RelExp EqExp LAndExp LOrExp MulExp LVal
 %type <op_ast> ComOp EquOp LOrOp LAndOp UnaryOp AddOp MulOp
 %type <int_val> Number
-%type <ast_val> Decl ConstDecl VarDecl BlockItem block_item_list const_def_list var_def_list initval_exp_list const_exp_list ConstDef VarDef
-/* 这里constinival只所以使用base而不是value是为了兼容array */
-%type <ast_val> ConstInitVal InitVal
+%type <ast_val> Decl ConstDecl VarDecl BlockItem block_item_list const_def_list var_def_list ConstDef VarDef arr_dims lval_indexes const_init_val_list init_val_list
+%type <value_ast> ConstInitVal InitVal
 %type <str_val> FuncType Type
 
 %%
@@ -125,6 +124,23 @@ FuncFParam
     auto func_f_param = new FuncFParamAST();
     func_f_param->type = unique_ptr<string>($1);
     func_f_param->ident = unique_ptr<string>($2);
+    func_f_param->is_array = false;
+    $$ = func_f_param;
+  }
+  | Type IDENT '[' ']' {
+    auto func_f_param = new FuncFParamAST();
+    func_f_param->type = unique_ptr<string>($1);
+    func_f_param->ident = unique_ptr<string>($2);
+    func_f_param->is_array = true;
+    $$ = func_f_param;
+  }
+  | Type IDENT '[' ']' arr_dims {
+    auto func_f_param = new FuncFParamAST();
+    func_f_param->type = unique_ptr<string>($1);
+    func_f_param->ident = unique_ptr<string>($2);
+    func_f_param->is_array = true;
+    auto dims = unique_ptr<ArrayDimensionsAST>(static_cast<ArrayDimensionsAST*>($5));
+    func_f_param->array_dims = std::move(dims->dims);
     $$ = func_f_param;
   }
   ;
@@ -456,15 +472,42 @@ ConstDef
   : IDENT ASSIGN ConstInitVal { 
     auto const_def = new ConstDefAST();
     const_def->ident = unique_ptr<string>($1);
-    const_def->const_init_val = unique_ptr<ValueAST>(static_cast<ValueAST*> ($3));
+    const_def->const_init_val = unique_ptr<ValueAST>($3);
     $$ = const_def;
   }
-  | IDENT '[' ConstExp ']' ASSIGN ConstInitVal { 
+  | IDENT arr_dims ASSIGN ConstInitVal {
     auto const_def = new ArrayConstDefAST();
     const_def->ident = unique_ptr<string>($1);
-    const_def->const_exp = unique_ptr<ValueAST>($3);
-    const_def->const_init_val = unique_ptr<CompoundConstInitValueAST>(static_cast<CompoundConstInitValueAST*>($6));
+    auto dims = unique_ptr<ArrayDimensionsAST>(static_cast<ArrayDimensionsAST*>($2));
+    const_def->const_exps = std::move(dims->dims);
+    const_def->const_init_val = unique_ptr<CompoundConstInitValueAST>(static_cast<CompoundConstInitValueAST*>($4));
     $$ = const_def;
+  }
+  ;
+
+arr_dims
+  : '[' ConstExp ']' {
+    auto dims = new ArrayDimensionsAST();
+    dims->dims.push_back(unique_ptr<ValueAST>($2));
+    $$ = dims;
+  }
+  | arr_dims '[' ConstExp ']' {
+    auto dims = static_cast<ArrayDimensionsAST*>($1);
+    dims->dims.push_back(unique_ptr<ValueAST>($3));
+    $$ = dims;
+  }
+  ;
+
+lval_indexes
+  : '[' Exp ']' {
+    auto dims = new ArrayDimensionsAST();
+    dims->dims.push_back(unique_ptr<ValueAST>($2));
+    $$ = dims;
+  }
+  | lval_indexes '[' Exp ']' {
+    auto dims = static_cast<ArrayDimensionsAST*>($1);
+    dims->dims.push_back(unique_ptr<ValueAST>($3));
+    $$ = dims;
   }
   ;
 
@@ -474,25 +517,28 @@ ConstInitVal
     constinit_val->const_exp = unique_ptr<ValueAST>($1); 
     $$ = constinit_val;
   }
-  | '{' '}' { auto constinit_val = new ThreeConstInitValAST(); $$ = constinit_val; }
-  | '{' const_exp_list '}' {
-    auto constinit_val = new ThreeConstInitValAST();
+  | '{' '}' { 
+    auto constinit_val = new CompoundConstInitValueAST(); 
+    constinit_val->const_init_val_list = nullptr;
+    $$ = constinit_val; 
+  }
+  | '{' const_init_val_list '}' {
+    auto constinit_val = new CompoundConstInitValueAST();
     constinit_val->const_init_val_list = unique_ptr<ConstInitValListAST>(static_cast<ConstInitValListAST*>($2));
     $$ = constinit_val;
   }
   ;
 
-const_exp_list
-  : const_exp_list ',' ConstExp {
-    auto constinit_val = (static_cast<ConstInitValListAST*>($1));
-    constinit_val->const_init_vals.push_back(unique_ptr<ValueAST>($3));
-    $$ = constinit_val;
+const_init_val_list
+  : ConstInitVal {
+    auto list = new ConstInitValListAST();
+    list->const_init_vals.push_back(unique_ptr<ValueAST>(static_cast<ValueAST*>($1)));
+    $$ = list;
   }
-  | ConstExp {
-    auto constinit_val = new ConstInitValListAST();
-     constinit_val->const_init_vals = vector<unique_ptr<ValueAST>>();
-     constinit_val->const_init_vals.push_back(unique_ptr<ValueAST>($1));
-    $$ = constinit_val;
+  | const_init_val_list ',' ConstInitVal {
+    auto list = static_cast<ConstInitValListAST*>($1);
+    list->const_init_vals.push_back(unique_ptr<ValueAST>(static_cast<ValueAST*>($3)));
+    $$ = list;
   }
   ;
 
@@ -526,23 +572,25 @@ VarDef
     var_def->ident = unique_ptr<string>($1);
     $$ = var_def;
   }
-  | IDENT '[' ConstExp ']' { 
+  | IDENT arr_dims { 
     auto var_def = new ArrayVarDefAST();
     var_def->ident = unique_ptr<string>($1);
-    var_def->const_exp = unique_ptr<ValueAST>($3);
+    auto dims = unique_ptr<ArrayDimensionsAST>(static_cast<ArrayDimensionsAST*>($2));
+    var_def->const_exps = std::move(dims->dims);
     $$ = var_def;
   }
   | IDENT ASSIGN InitVal { 
     auto var_def = new InitializedVarDefAST();
     var_def->ident = unique_ptr<string>($1);
-    var_def->init_val = unique_ptr<ValueAST>(static_cast<ValueAST*>($3));
+    var_def->init_val = unique_ptr<ValueAST>($3);
     $$ = var_def;
   }
-  | IDENT '[' ConstExp ']' ASSIGN InitVal { 
+  | IDENT arr_dims ASSIGN InitVal { 
     auto var_def = new ArrayInitializedVarDefAST();
     var_def->ident = unique_ptr<string>($1);
-    var_def->const_exp = unique_ptr<ValueAST>($3);
-    var_def->init_val_list = unique_ptr<InitValListAST>(static_cast<InitValListAST*>($6));
+    auto dims = unique_ptr<ArrayDimensionsAST>(static_cast<ArrayDimensionsAST*>($2));
+    var_def->const_exps = std::move(dims->dims);
+    var_def->init_val_list = unique_ptr<InitValListAST>(static_cast<InitValListAST*>($4));
     $$ = var_def;
   }
   ;
@@ -554,25 +602,26 @@ InitVal
     $$ = init_val;
   }
   | '{' '}' { 
-    $$ = new InitValListAST();
+    auto init_val = new InitValListAST();
+    $$ = init_val;
   }
-  | '{' initval_exp_list '}' { 
-    $$ = $2;
+  | '{' init_val_list '}' { 
+    $$ = static_cast<InitValListAST*>($2);
   }
   ;
 
-initval_exp_list
-  : Exp { 
-    auto initval_exp_list = new InitValListAST();
-    initval_exp_list->init_vals.push_back(unique_ptr<ValueAST>($1));
-    $$ = initval_exp_list;
+init_val_list
+  : InitVal {
+    auto list = new InitValListAST();
+    list->init_vals.push_back(unique_ptr<ValueAST>(static_cast<ValueAST*>($1)));
+    $$ = list;
   }
-  | initval_exp_list ',' Exp { 
-    auto initval_exp_list = static_cast<InitValListAST*>($1);
-    initval_exp_list->init_vals.push_back(unique_ptr<ValueAST>($3));
-    $$ = initval_exp_list;
+  | init_val_list ',' InitVal {
+    auto list = static_cast<InitValListAST*>($1);
+    list->init_vals.push_back(unique_ptr<ValueAST>(static_cast<ValueAST*>($3)));
+    $$ = list;
   }
-  ; 
+  ;
 
 LVal
   : IDENT { 
@@ -580,10 +629,11 @@ LVal
     lval_ast->ident = unique_ptr<string>($1);
     $$ = lval_ast; 
   }
-  | IDENT '[' Exp ']' { 
+  | IDENT lval_indexes { 
     auto lval_ast = new LValAST(); 
     lval_ast->ident = unique_ptr<string>($1);
-    lval_ast->index_exp.push_back(unique_ptr<ValueAST>($3));
+    auto dims = unique_ptr<ArrayDimensionsAST>(static_cast<ArrayDimensionsAST*>($2));
+    lval_ast->index_exp = std::move(dims->dims);
     $$ = lval_ast; 
   }
   ;

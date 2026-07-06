@@ -159,18 +159,36 @@ int BinaryLogicalOrExprAST::getValue(Context& context) const {
 }
 
 int LValAST::getValue(Context& context) const { 
-  auto sym = context.scope->lookupLocal(*ident);
+  auto sym = context.scope->lookup(*ident);
   if (sym == nullptr) {
     std::cerr << "Error: LVal " << *ident << " not found\n";
     return 0;
   }
   if (sym->kind == SymbolKind::CONSTANT) {
     return std::get<int>(sym->value);
+  } else if (sym->kind == SymbolKind::CONST_ARRAY) {
+    auto arr_info = std::get<ArrayInformation>(sym->value);
+    std::vector<int> idxs;
+    for (auto& expr : index_exp) {
+      idxs.push_back(expr->getValue(context));
+    }
+    int flat_idx = 0;
+    for (size_t i = 0; i < idxs.size(); i++) {
+      int suffix_size = 1;
+      for (size_t j = i + 1; j < arr_info.dims.size(); j++) {
+        suffix_size *= arr_info.dims[j];
+      }
+      flat_idx += idxs[i] * suffix_size;
+    }
+    if (flat_idx >= 0 && flat_idx < (int)arr_info.const_values.size()) {
+      return arr_info.const_values[flat_idx];
+    }
+    return 0;
   } else if (sym->kind == SymbolKind::VARIABLE) {
     std::cerr << "Error: LVal is a variable " << *ident << "\n";
     return 0;
   } else {
-    std::cerr << "Error: LVal " << *ident << " is not a variable or constant\n";
+    std::cerr << "Error: LVal " << *ident << " is not a variable, constant, or const array\n";
     return 0;
   }
 }
@@ -183,6 +201,18 @@ int ConstExpConstInitValAST::getValue(Context& context) const {
   return const_exp->getValue(context);
 }
 
+static void FlattenConstInitVal(const BaseAST& node, Context& context, std::vector<int>& result) {
+  if (const auto* p = dynamic_cast<const ConstExpConstInitValAST*>(&node)) {
+    result.push_back(p->const_exp->getValue(context));
+  } else if (const auto* p = dynamic_cast<const CompoundConstInitValueAST*>(&node)) {
+    if (p->const_init_val_list) {
+      for (const auto& child : p->const_init_val_list->const_init_vals) {
+        FlattenConstInitVal(*child, context, result);
+      }
+    }
+  }
+}
+
 int CompoundConstInitValueAST::getValue(Context& context) const { 
   assert(false);
   return 0;
@@ -190,9 +220,7 @@ int CompoundConstInitValueAST::getValue(Context& context) const {
 
 std::vector<int> CompoundConstInitValueAST::getValues(Context& context) const { 
   std::vector<int> init_vals;
-  for (auto& init_val : const_init_val_list->const_init_vals) {
-    init_vals.push_back(init_val->getValue(context));
-  }
+  FlattenConstInitVal(*this, context, init_vals);
   return init_vals;
 }
 
@@ -200,10 +228,18 @@ int InitValAST::getValue(Context& context) const {
   return exp->getValue(context);
 }
 
-std::vector<int> InitValListAST::getValue(Context& context) const { 
-  std::vector<int> ret;
-  for (auto& init_val : init_vals) {
-    ret.push_back(init_val->getValue(context));
+static void FlattenInitValValues(const BaseAST& node, Context& context, std::vector<int>& result) {
+  if (const auto* p = dynamic_cast<const InitValAST*>(&node)) {
+    result.push_back(p->exp->getValue(context));
+  } else if (const auto* p = dynamic_cast<const InitValListAST*>(&node)) {
+    for (const auto& child : p->init_vals) {
+      FlattenInitValValues(*child, context, result);
+    }
   }
+}
+
+std::vector<int> InitValListAST::getValues(Context& context) const { 
+  std::vector<int> ret;
+  FlattenInitValValues(*this, context, ret);
   return ret;
 }

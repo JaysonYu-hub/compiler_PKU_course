@@ -4,6 +4,7 @@
 #include <memory>
 #include <fstream>
 #include <string>
+#include <sstream>
 #include "ast/ast.hpp"
 #include "ast/codegen.hpp"
 #include "koopa.h"
@@ -12,15 +13,8 @@
 
 using namespace std;
 
-// 声明 lexer 的输入, 以及 parser 函数
-// 为什么不引用 sysy.tab.hpp 呢? 因为首先里面没有 yyin 的定义
-// 其次, 因为这个文件不是我们自己写的, 而是被 Bison 生成出来的
-// 你的代码编辑器/IDE 很可能找不到这个文件, 然后会给你报错 (虽然编译不会出错)
-// 看起来会很烦人, 于是干脆采用这种看起来 dirty 但实际很有效的手段
 extern FILE *yyin;
 extern int yyparse(unique_ptr<BaseAST> &ast);
-
-
 int main(int argc, const char *argv[]) {
   Context context = Context();  
   Back::IRVisitor ir_visitor;
@@ -40,15 +34,19 @@ int main(int argc, const char *argv[]) {
   auto ret = yyparse(ast);
   assert(!ret);
    
-  //打开输出文件
-  ofstream file(output);
-  streambuf *coutbuf = cout.rdbuf(); // 保存原来的缓冲区
-  cout.rdbuf(file.rdbuf()); // 将 cout 的缓冲区切换到文件
-  // 输出解析得到的 AST, 其实就是个字符串
+  // 运行代码生成器，临时重定向 std::cout 避免污染输出，并构建内存 IR
+  stringstream ss;
+  streambuf *coutbuf = cout.rdbuf();
+  cout.rdbuf(ss.rdbuf());
   CodeGenerator generator(context);
   generator.Generate(*ast);
-  cout << endl;
-  cout.rdbuf(coutbuf); // 恢复原来的缓冲区
+  cout.rdbuf(coutbuf);
+
+  // 使用 DumpText 将内存中的 Custom IR 写入到输出文件
+  {
+    ofstream file(output);
+    file << context.ir_program->DumpText() << endl;
+  }
   
   clog << "--- Custom C++ IR Dump ---\n" << context.ir_program->DumpText() << "-------------------------\n";
   
