@@ -77,18 +77,6 @@ std::string CodeGenerator::Generate(const BaseAST& node) {
 
 std::string CodeGenerator::Generate(const CompUnitAST& node) {
   if (node.end_comp_unit) {
-    auto library_decl = R"(decl @getint(): i32
-decl @getch(): i32
-decl @getarray(*i32): i32
-decl @putint(i32)
-decl @putch(i32)
-decl @putarray(i32, *i32)
-decl @starttime()
-decl @stoptime()
-
-)";
-    std::cout << library_decl;
-
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("getint", IR::IRType::IR_INT32, std::vector<IR::IRType>{}));
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("getch", IR::IRType::IR_INT32, std::vector<IR::IRType>{}));
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("getarray", IR::IRType::IR_INT32, std::vector<IR::IRType>{IR::IRType::IR_POINTER}));
@@ -163,16 +151,11 @@ std::string CodeGenerator::Generate(const FuncDefAST& node) {
   context.SetIRValue("@" + *node.ident, func);
 
   context.enterNewScope();
-  std::cout << "fun @" << *node.ident << "(";
   if (node.func_f_params) {
     Generate(*node.func_f_params);
   }
-  std::cout << ")";
   if (*node.type != "void") {
-    std::cout << " : " << *node.type;
   }
-  std::cout << " {\n";
-  std::cout << "\%entry:\n";
   context.AddNewBlock("\%entry"); //添加 %entry 内存基本块
 
   context.cur_block_has_terminator = false;
@@ -185,14 +168,12 @@ std::string CodeGenerator::Generate(const FuncDefAST& node) {
   }
   // 函数返回值没有返回值
   if (!context.cur_block_has_terminator && *node.type == "void") {
-    std::cout << "  ret\n";
     if (context.current_block) {
       auto inst = std::make_shared<IR::IRReturn>(nullptr);
       context.current_block->AddInstruction(inst);
     }
   }
 
-  std::cout << "}\n";
   context.exitScope();
   
   // 函数生成结束，重置活动指针
@@ -203,9 +184,7 @@ std::string CodeGenerator::Generate(const FuncDefAST& node) {
 
 std::string CodeGenerator::Generate(const FuncFParamsAST& node) {
   if (node.func_f_params.size() > 0) {
-    std::cout << Generate(*node.func_f_params[0]);
     for (size_t i = 1; i < node.func_f_params.size(); i++) {
-      std::cout << ", " << Generate(*node.func_f_params[i]);
     }
   }
   return "";
@@ -254,8 +233,6 @@ void CodeGenerator::ParamLocalization(const FuncFParamAST& node) {
     context.scope->define(symbol);
   }
 
-  std::cout << "  " << address << " = " << "alloc " << param_type_str << "\n";
-  std::cout << "  store " << "@" + *node.ident << ", " << address << "\n";
 
   if (context.current_block) {
     std::string param_name = "@" + *node.ident;
@@ -323,26 +300,22 @@ std::string CodeGenerator::Generate(const IfUnmatchedStmtAST& node) {
   context.SetIRValue(if_label, then_bb);
   context.SetIRValue(end_label, end_bb);
 
-  std::cout << "  br " << cond_reg << ", " << if_label << ", " << end_label << "\n";
   if (context.current_block) {
     auto cond_val = context.GetIRValue(cond_reg);
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, end_bb);
     context.current_block->AddInstruction(br_inst);
   }
 
-  std::cout << if_label << ":\n";
   context.AddExistingBlock(then_bb);
 
   context.cur_block_has_terminator = false;
   Generate(*node.if_stmt);
   if (!context.cur_block_has_terminator) {
-    std::cout << "  jump " << end_label << "\n";
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
     }
   }
-  std::cout << end_label << ":\n";
   context.AddExistingBlock(end_bb);
 
   context.cur_block_has_terminator = false;
@@ -362,41 +335,35 @@ std::string CodeGenerator::Generate(const IfElseUnmatchedStmtAST& node) {
   context.SetIRValue(else_label, else_bb);
   context.SetIRValue(end_label, end_bb);
 
-  std::cout << "  br " << cond_reg << ", " << if_label << ", " << else_label << "\n";
   if (context.current_block) {
     auto cond_val = context.GetIRValue(cond_reg);
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, else_bb);
     context.current_block->AddInstruction(br_inst);
   }
 
-  std::cout << if_label << ":\n";
   context.AddExistingBlock(then_bb);
 
   context.cur_block_has_terminator = false;
   Generate(*node.if_stmt);
   bool then_has_terminator = context.cur_block_has_terminator;
   if (!then_has_terminator) {
-    std::cout << "  jump " << end_label << "\n";
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
     }
   }
-  std::cout << else_label << ":\n";
   context.AddExistingBlock(else_bb);
 
   context.cur_block_has_terminator = false;
   Generate(*node.else_stmt);
   bool else_has_terminator = context.cur_block_has_terminator;
   if (!else_has_terminator) {
-    std::cout << "  jump " << end_label << "\n";
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
     }
   }
   if (!then_has_terminator || !else_has_terminator) {
-    std::cout << end_label << ":\n";
     context.AddExistingBlock(end_bb);
   } else {
     context.cur_block_has_terminator = true;
@@ -409,9 +376,7 @@ std::string CodeGenerator::Generate(const ReturnStmtAST& node) {
   std::string ret_val = "";
   if (node.exp) {
     ret_val = Generate(*node.exp);
-    std::cout << "  ret " << ret_val << "\n";
   } else {
-    std::cout << "  ret\n";
   }
 
   if (context.current_block) {
@@ -449,7 +414,6 @@ std::string CodeGenerator::Generate(const AssignStmtAST& node) {
 
       if (arr_info.is_param) {
         std::string loaded_ptr = context.NewReg();
-        std::cout << "  " << loaded_ptr << " = load " << prev_reg << "\n";
         if (context.current_block) {
           auto load_ptr_inst = std::make_shared<IR::IRLoad>(loaded_ptr, prev_val);
           context.current_block->AddInstruction(load_ptr_inst);
@@ -463,7 +427,6 @@ std::string CodeGenerator::Generate(const AssignStmtAST& node) {
         auto index_reg = Generate(*node.lval->index_exp[i]);
         std::string addr_reg = context.NewReg();
         if (arr_info.is_param && i == 0) {
-          std::cout << "  " << addr_reg << " = getptr " << prev_reg << ", " << index_reg << "\n";
           if (context.current_block) {
             auto index_val = context.GetIRValue(index_reg);
             auto getptr_inst = std::make_shared<IR::IRGetPtr>(addr_reg, prev_val, index_val);
@@ -472,7 +435,6 @@ std::string CodeGenerator::Generate(const AssignStmtAST& node) {
             prev_val = getptr_inst;
           }
         } else {
-          std::cout << "  " << addr_reg << " = getelemptr " << prev_reg << ", " << index_reg << "\n";
           if (context.current_block) {
             auto index_val = context.GetIRValue(index_reg);
             auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val);
@@ -487,7 +449,6 @@ std::string CodeGenerator::Generate(const AssignStmtAST& node) {
       int total_dims = arr_info.dims.size() + (arr_info.is_param ? 1 : 0);
       if (node.lval->index_exp.size() < (size_t)total_dims) {
         std::string addr_reg = context.NewReg();
-        std::cout << "  " << addr_reg << " = getelemptr " << prev_reg << ", 0\n";
         if (context.current_block) {
           auto index_val = context.GetIRValue("0");
           auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val);
@@ -503,7 +464,6 @@ std::string CodeGenerator::Generate(const AssignStmtAST& node) {
       }
     }
 
-    std::cout << "  store " << rhs_reg << ", " << lhs_reg << "\n";
     if (context.current_block) {
       auto val = context.GetIRValue(rhs_reg);
       auto store_inst = std::make_shared<IR::IRStore>(val, ptr_val);
@@ -546,41 +506,35 @@ std::string CodeGenerator::Generate(const IfMatchedStmtAST& node) {
   context.SetIRValue(else_label, else_bb);
   context.SetIRValue(end_label, end_bb);
 
-  std::cout << "  br " << cond_reg << ", " << if_label << ", " << else_label << "\n";
   if (context.current_block) {
     auto cond_val = context.GetIRValue(cond_reg);
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, else_bb);
     context.current_block->AddInstruction(br_inst);
   }
 
-  std::cout << if_label << ":\n";
   context.AddExistingBlock(then_bb);
 
   context.cur_block_has_terminator = false;
   Generate(*node.if_stmt);
   bool then_has_terminator = context.cur_block_has_terminator;
   if (!then_has_terminator) {
-    std::cout << "  jump " << end_label << "\n";
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
     }
   }
-  std::cout << else_label << ":\n";
   context.AddExistingBlock(else_bb);
 
   context.cur_block_has_terminator = false;
   Generate(*node.else_stmt);
   bool else_has_terminator = context.cur_block_has_terminator;
   if (!else_has_terminator) {
-    std::cout << "  jump " << end_label << "\n";
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
     }
   }
   if (!then_has_terminator || !else_has_terminator) {
-    std::cout << end_label << ":\n";
     context.AddExistingBlock(end_bb);
   } else {
     context.cur_block_has_terminator = true;
@@ -590,7 +544,6 @@ std::string CodeGenerator::Generate(const IfMatchedStmtAST& node) {
 
 std::string CodeGenerator::Generate(const WhileStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
-  std::cout << "  // while \n";
   std::string loop_label = LabelBuilder::GetLabel("while_entry");
   std::string continue_loop_label = LabelBuilder::GetLabel("while_body");
   std::string end_label = LabelBuilder::GetLabel("end");
@@ -603,33 +556,27 @@ std::string CodeGenerator::Generate(const WhileStmtAST& node) {
   context.SetIRValue(end_label, end_bb);
 
   context.enterNewWhileScope(loop_label, continue_loop_label, end_label);
-  std::cout << "  jump " << loop_label << "\n";
   if (context.current_block) {
     auto jump_inst = std::make_shared<IR::IRJump>(loop_bb);
     context.current_block->AddInstruction(jump_inst);
   }
-  std::cout << loop_label << ":\n";
   context.AddExistingBlock(loop_bb);
 
   std::string cond_reg = Generate(*node.while_exp);
-  std::cout << "  br " << cond_reg << ", " << continue_loop_label << ", " << end_label << "\n";
   if (context.current_block) {
     auto cond_val = context.GetIRValue(cond_reg);
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, continue_loop_bb, end_bb);
     context.current_block->AddInstruction(br_inst);
   }
-  std::cout << continue_loop_label << ":\n";
   context.AddExistingBlock(continue_loop_bb);
 
   Generate(*node.while_stmt);
   if (!context.cur_block_has_terminator) {
-    std::cout << "  jump " << loop_label << "\n";
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(loop_bb);
       context.current_block->AddInstruction(jump_inst);
     }
   }
-  std::cout << end_label << ":\n";
   context.AddExistingBlock(end_bb);
 
   context.cur_block_has_terminator = false;
@@ -640,7 +587,6 @@ std::string CodeGenerator::Generate(const WhileStmtAST& node) {
 std::string CodeGenerator::Generate(const BreakStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   WhileLabelContext while_label_context = context.GetWhileLabel();
-  std::cout << "  jump " << while_label_context.while_label_end << "\n";
 
   auto end_bb = context.GetIRValue(while_label_context.while_label_end);
   if (context.current_block && end_bb) {
@@ -649,7 +595,6 @@ std::string CodeGenerator::Generate(const BreakStmtAST& node) {
   }
 
   std::string tool_label = while_label_context.while_label_continue + NumBuilder::GetNum();
-  std::cout << tool_label << ":\n";
   context.AddNewBlock(tool_label);
   return "";
 }
@@ -657,7 +602,6 @@ std::string CodeGenerator::Generate(const BreakStmtAST& node) {
 std::string CodeGenerator::Generate(const ContinueStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   WhileLabelContext while_label_context = context.GetWhileLabel();
-  std::cout << "  jump " << while_label_context.while_label_begin << "\n";
 
   auto begin_bb = context.GetIRValue(while_label_context.while_label_begin);
   if (context.current_block && begin_bb) {
@@ -666,7 +610,6 @@ std::string CodeGenerator::Generate(const ContinueStmtAST& node) {
   }
 
   std::string tool_label = while_label_context.while_label_continue + NumBuilder::GetNum();
-  std::cout << tool_label << ":\n";
   context.AddNewBlock(tool_label);
   return "";
 }
@@ -685,7 +628,6 @@ std::string CodeGenerator::Generate(const UnaryOPExpAST& node) {
   }
   else if (node.op->op == "-") {
     std::string dest_reg = context.NewReg();
-    std::cout << "  " << dest_reg << " = sub 0, " << src_reg << "\n";
     if (context.current_block) {
       auto lhs = context.GetIRValue("0");
       auto rhs = context.GetIRValue(src_reg);
@@ -697,7 +639,6 @@ std::string CodeGenerator::Generate(const UnaryOPExpAST& node) {
   }
   else if (node.op->op == "!") {
     std::string dest_reg = context.NewReg();
-    std::cout << "  " << dest_reg << " = eq 0, " << src_reg << "\n";
     if (context.current_block) {
       auto lhs = context.GetIRValue("0");
       auto rhs = context.GetIRValue(src_reg);
@@ -744,7 +685,6 @@ std::string CodeGenerator::Generate(const FuncCallExpAST& node) {
 
   if (func_inf.ret_type != "void") {
     std::string func_reg = context.NewReg();
-    std::cout << "  " << func_reg << " = call @" << func_name << "(" << param << ")\n";
 
     if (context.current_block) {
       auto call_inst = std::make_shared<IR::IRCall>(func_reg, target_func, args, IR::IRType::IR_INT32);
@@ -753,7 +693,6 @@ std::string CodeGenerator::Generate(const FuncCallExpAST& node) {
     }
     return func_reg;
   } else {
-    std::cout << "  call @" << func_name << "(" << param << ")" << "\n";
 
     if (context.current_block) {
       auto call_inst = std::make_shared<IR::IRCall>("", target_func, args, IR::IRType::IR_VOID);
@@ -815,13 +754,10 @@ std::string CodeGenerator::Generate(const BinaryMulExprAST& node) {
   std::string dest_reg = context.NewReg();
   IR::IRBinaryOp op = IR::IRBinaryOp::MUL;
   if (node.op->op == "*") {
-    std::cout << "  " << dest_reg << " = mul " << lhs_reg << ", " << rhs_reg << "\n";
     op = IR::IRBinaryOp::MUL;
   } else if (node.op->op == "/") {
-    std::cout << "  " << dest_reg << " = div " << lhs_reg << ", " << rhs_reg << "\n";
     op = IR::IRBinaryOp::DIV;
   } else if (node.op->op == "%") {
-    std::cout << "  " << dest_reg << " = mod " << lhs_reg << ", " << rhs_reg << "\n";
     op = IR::IRBinaryOp::MOD;
   }
 
@@ -848,10 +784,8 @@ std::string CodeGenerator::Generate(const BinaryAddExprAST& node) {
   std::string dest_reg = context.NewReg();
   IR::IRBinaryOp op = IR::IRBinaryOp::ADD;
   if (node.op->op == "+") {
-    std::cout << "  " << dest_reg << " = add " << lhs_reg << ", " << rhs_reg << "\n";
     op = IR::IRBinaryOp::ADD;
   } else if (node.op->op == "-") {
-    std::cout << "  " << dest_reg << " = sub " << lhs_reg << ", " << rhs_reg << "\n";
     op = IR::IRBinaryOp::SUB;
   }
 
@@ -878,16 +812,12 @@ std::string CodeGenerator::Generate(const BinaryRelExprAST& node) {
   std::string dest_reg = context.NewReg();
   IR::IRBinaryOp op = IR::IRBinaryOp::LT;
   if (node.op->op == "<") {
-    std::cout << "  " << dest_reg << " = lt " << lhs_reg << ", " << rhs_reg << "\n";
     op = IR::IRBinaryOp::LT;
   } else if (node.op->op == ">") {
-    std::cout << "  " << dest_reg << " = gt " << lhs_reg << ", " << rhs_reg << "\n";
     op = IR::IRBinaryOp::GT;
   } else if (node.op->op == "<=") {
-    std::cout << "  " << dest_reg << " = le " << lhs_reg << ", " << rhs_reg << "\n";
     op = IR::IRBinaryOp::LE;
   } else if (node.op->op == ">=") {
-    std::cout << "  " << dest_reg << " = ge " << lhs_reg << ", " << rhs_reg << "\n";
     op = IR::IRBinaryOp::GE;
   }
 
@@ -914,10 +844,8 @@ std::string CodeGenerator::Generate(const BinaryEqExprAST& node) {
   std::string dest_reg = context.NewReg();
   IR::IRBinaryOp op = IR::IRBinaryOp::EQ;
   if (node.op->op == "==") {
-    std::cout << "  " << dest_reg << " = eq " << lhs_reg << ", " << rhs_reg << "\n";
     op = IR::IRBinaryOp::EQ;
   } else if (node.op->op == "!=") {
-    std::cout << "  " << dest_reg << " = ne " << lhs_reg << ", " << rhs_reg << "\n";
     op = IR::IRBinaryOp::NE;
   }
 
@@ -943,7 +871,6 @@ std::string CodeGenerator::Generate(const BinaryLogicalAndExprAST& node) {
     std::string lhs_reg = Generate(*node.land_exp);
     std::string temp_address = context.NewReg();
 
-    std::cout << "  // " << temp_address << " : " << lhs_reg << " && " << "rhs_reg\n";
     std::string then_label = LabelBuilder::GetLabel("and_calc_rhs");
     std::string end_label = LabelBuilder::GetLabel("and_end");
 
@@ -952,8 +879,6 @@ std::string CodeGenerator::Generate(const BinaryLogicalAndExprAST& node) {
     context.SetIRValue(then_label, then_bb);
     context.SetIRValue(end_label, end_bb);
 
-    std::cout << "  " << temp_address << " = alloc i32\n";
-    std::cout << "  " << "store 0, " << temp_address << "\n";
 
     if (context.current_block) {
       auto alloc_inst = std::make_shared<IR::IRAlloc>(temp_address, "i32");
@@ -965,7 +890,6 @@ std::string CodeGenerator::Generate(const BinaryLogicalAndExprAST& node) {
       context.current_block->AddInstruction(store_zero);
     }
 
-    std::cout << "  br " << lhs_reg << " , " << then_label << " , " << end_label << "\n";
     if (context.current_block) {
       auto lhs_val = context.GetIRValue(lhs_reg);
       auto br_inst = std::make_shared<IR::IRBranch>(lhs_val, then_bb, end_bb);
@@ -973,13 +897,11 @@ std::string CodeGenerator::Generate(const BinaryLogicalAndExprAST& node) {
     }
 
     // then块
-    std::cout << then_label << ":\n";
     context.AddExistingBlock(then_bb);
     context.cur_block_has_terminator = false;
 
     std::string rhs_reg = Generate(*node.eq_exp);
     std::string temp_reg = context.NewReg();
-    std::cout << "  " <<  temp_reg << " = ne " << rhs_reg << ", 0\n";
 
     if (context.current_block) {
       auto rhs_val = context.GetIRValue(rhs_reg);
@@ -993,19 +915,16 @@ std::string CodeGenerator::Generate(const BinaryLogicalAndExprAST& node) {
       context.current_block->AddInstruction(store_inst);
     }
 
-    std::cout << "  jump " << end_label << "\n";
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
     }
 
     // end块
-    std::cout << end_label << ":\n";
     context.AddExistingBlock(end_bb);
     context.cur_block_has_terminator = false;
 
     std::string return_reg = context.NewReg();
-    std::cout << "  " << return_reg << " = load " << temp_address << "\n";
 
     if (context.current_block) {
       auto alloc_inst = context.GetIRValue(temp_address);
@@ -1030,7 +949,6 @@ std::string CodeGenerator::Generate(const BinaryLogicalOrExprAST& node) {
   if (node.op->op == "||") {
     std::string lhs_reg = Generate(*node.lor_exp);
     std::string temp_address = context.NewReg();
-    std::cout << "  // " << temp_address << " : " << lhs_reg << " || " << "rhs_reg" << "\n";
     std::string then_label = LabelBuilder::GetLabel("or_calc_rhs", temp_address);
     std::string end_label = LabelBuilder::GetLabel("or_end", temp_address);
 
@@ -1039,8 +957,6 @@ std::string CodeGenerator::Generate(const BinaryLogicalOrExprAST& node) {
     context.SetIRValue(then_label, then_bb);
     context.SetIRValue(end_label, end_bb);
 
-    std::cout << "  " << temp_address << " = alloc i32\n";
-    std::cout << "  " << "store 1, " << temp_address << "\n";
 
     if (context.current_block) {
       auto alloc_inst = std::make_shared<IR::IRAlloc>(temp_address, "i32");
@@ -1052,7 +968,6 @@ std::string CodeGenerator::Generate(const BinaryLogicalOrExprAST& node) {
       context.current_block->AddInstruction(store_one);
     }
 
-    std::cout << "  " << "br " << lhs_reg <<", " << end_label << ", " << then_label << "\n";
     if (context.current_block) {
       auto lhs_val = context.GetIRValue(lhs_reg);
       auto br_inst = std::make_shared<IR::IRBranch>(lhs_val, end_bb, then_bb);
@@ -1060,13 +975,11 @@ std::string CodeGenerator::Generate(const BinaryLogicalOrExprAST& node) {
     }
 
     // then块
-    std::cout << then_label << ":\n";
     context.AddExistingBlock(then_bb);
     context.cur_block_has_terminator = false;
 
     std::string rhs_reg = Generate(*node.land_exp);
     std::string temp_reg = context.NewReg();
-    std::cout << "  " << temp_reg << " = ne 0, " << rhs_reg << "\n";
 
     if (context.current_block) {
       auto rhs_val = context.GetIRValue(rhs_reg);
@@ -1080,19 +993,16 @@ std::string CodeGenerator::Generate(const BinaryLogicalOrExprAST& node) {
       context.current_block->AddInstruction(store_inst);
     }
 
-    std::cout << "  jump " << end_label << "\n";
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
     }
 
     // end块
-    std::cout << end_label << ":\n";
     context.AddExistingBlock(end_bb);
     context.cur_block_has_terminator = false;
 
     std::string return_reg = context.NewReg();
-    std::cout << "  " << return_reg << " = load " << temp_address << "\n";
 
     if (context.current_block) {
       auto alloc_inst = context.GetIRValue(temp_address);
@@ -1109,13 +1019,11 @@ std::string CodeGenerator::Generate(const BinaryLogicalOrExprAST& node) {
 std::string CodeGenerator::Generate(const LValAST& node) {
   auto sym = context.scope->lookup(*node.ident);
   if (sym == nullptr) {
-    std::cout << "Error: LVal " << *node.ident << " not found\n";
     return "";
   }
   if (sym->kind == SymbolKind::VARIABLE) {
     std::string ptr = std::get<std::string>(sym->value);
     std::string new_reg = context.NewReg();
-    std::cout << "  " << new_reg << " = load " << ptr << "\n";
 
     if (context.current_block) {
       auto ptr_val = context.GetIRValue(ptr);
@@ -1136,7 +1044,6 @@ std::string CodeGenerator::Generate(const LValAST& node) {
 
     if (arr_info.is_param) {
       std::string loaded_ptr = context.NewReg();
-      std::cout << "  " << loaded_ptr << " = load " << prev_reg << "\n";
       if (context.current_block) {
         auto load_ptr_inst = std::make_shared<IR::IRLoad>(loaded_ptr, prev_val);
         context.current_block->AddInstruction(load_ptr_inst);
@@ -1150,7 +1057,6 @@ std::string CodeGenerator::Generate(const LValAST& node) {
       auto index_reg = Generate(*node.index_exp[i]);
       std::string addr_reg = context.NewReg();
       if (arr_info.is_param && i == 0) {
-        std::cout << "  " << addr_reg << " = getptr " << prev_reg << ", " << index_reg << "\n";
         if (context.current_block) {
           auto index_val = context.GetIRValue(index_reg);
           auto getptr_inst = std::make_shared<IR::IRGetPtr>(addr_reg, prev_val, index_val);
@@ -1159,7 +1065,6 @@ std::string CodeGenerator::Generate(const LValAST& node) {
           prev_val = getptr_inst;
         }
       } else {
-        std::cout << "  " << addr_reg << " = getelemptr " << prev_reg << ", " << index_reg << "\n";
         if (context.current_block) {
           auto index_val = context.GetIRValue(index_reg);
           auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val);
@@ -1179,7 +1084,6 @@ std::string CodeGenerator::Generate(const LValAST& node) {
     }
     if (need_decay) {
       std::string addr_reg = context.NewReg();
-      std::cout << "  " << addr_reg << " = getelemptr " << prev_reg << ", 0\n";
       if (context.current_block) {
         auto index_val = context.GetIRValue("0");
         auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val);
@@ -1192,7 +1096,6 @@ std::string CodeGenerator::Generate(const LValAST& node) {
       int total_dims = arr_info.dims.size() + (arr_info.is_param ? 1 : 0);
       if (node.index_exp.size() == (size_t)total_dims) {
         std::string final_reg = context.NewReg();
-        std::cout << "  " << final_reg << " = load " << prev_reg << "\n";
         if (context.current_block) {
           auto load_final_inst = std::make_shared<IR::IRLoad>(final_reg, prev_val);
           context.current_block->AddInstruction(load_final_inst);
@@ -1204,7 +1107,6 @@ std::string CodeGenerator::Generate(const LValAST& node) {
       }
     }
   } else {
-    std::cout << "Error: LVal " << *node.ident << " is not a variable, constant, or array\n";
     return "";
   }
 }
@@ -1366,31 +1268,15 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
   auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::CONST_ARRAY);
   sym->value = arr_info;
 
-  auto init_vals = std::vector<std::string>(arr_size);
-  for (int i = 0; i < arr_size; i++) {
-    init_vals[i] = std::to_string(init_vals_int[i]);
-  }
-
   std::string arr_type = "i32";
   for (auto it = dims.rbegin(); it != dims.rend(); ++it) {
     arr_type = "[" + arr_type + ", " + std::to_string(*it) + "]";
   }
 
   if (context.scope->isGlobal()) {
-    std::string str;
-    std::vector<int32_t> init_nums(arr_size, 0);
-    for (int i = 0; i < arr_size; i++) {
-      str += init_vals[i];
-      init_nums[i] = std::stoi(init_vals[i]);
-      if (i != arr_size - 1) {
-        str += ", ";
-      }
-    }
-    std::cout << "global " << address << " = alloc " << arr_type << ", {" << str << "}\n";
-    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, false, init_nums, dims);
+    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, false, init_vals_int, dims);
     context.AddGlobal(global_alloc);
   } else {
-    std::cout << "  " << address  << " = alloc " << arr_type << "\n";
     std::shared_ptr<IR::IRAlloc> alloc_inst = nullptr;
     if (context.current_block) {
       alloc_inst = std::make_shared<IR::IRAlloc>(address, "i32", dims);
@@ -1411,7 +1297,6 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
 
       for (size_t j = 0; j < idxs.size(); j++) {
         std::string next_reg = context.NewReg();
-        std::cout << "  " << next_reg << " = getelemptr " << prev_reg << ", " << idxs[j] << "\n";
         if (context.current_block) {
           auto idx_val = context.GetIRValue(std::to_string(idxs[j]));
           auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(next_reg, prev_val, idx_val);
@@ -1422,9 +1307,8 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
         prev_reg = next_reg;
       }
 
-      std::cout << "  store " << init_vals[i] << ", " << prev_reg << "\n";
       if (context.current_block) {
-        auto val = context.GetIRValue(init_vals[i]);
+        auto val = context.GetIRValue(std::to_string(init_vals_int[i]));
         auto store_inst = std::make_shared<IR::IRStore>(val, prev_val);
         context.current_block->AddInstruction(store_inst);
       }
@@ -1506,11 +1390,9 @@ std::string CodeGenerator::Generate(const SimpleVarDefAST& node) {
   std::string b_type = *context.decl_type_context;
 
   if (context.scope->isGlobal()) {
-    std::cout << "global " << address << " = alloc " << b_type << ", " << "zeroinit\n";
     auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, b_type, true, std::vector<int32_t>{});
     context.AddGlobal(global_alloc);
   } else {
-    std::cout << "  " << address << " = alloc " << b_type << "\n";
     if (context.current_block) {
       auto alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type);
       context.current_block->AddInstruction(alloc_inst);
@@ -1527,17 +1409,14 @@ std::string CodeGenerator::Generate(const InitializedVarDefAST& node) {
   auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE, address);
   if (context.scope->isGlobal()) {
     int init_val = node.init_val->getValue(context);
-    std::cout << "global " << address << " = alloc " << b_type << ", " << init_val << "\n";
     auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, b_type, false, std::vector<int32_t>{init_val});
     context.AddGlobal(global_alloc);
   } else {
-    std::cout << "  " << address << " = alloc " << b_type << "\n";
     auto alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type);
     context.current_block->AddInstruction(alloc_inst);
     context.SetIRValue(address, alloc_inst);
 
     std::string init_val_reg = Generate(*node.init_val);
-    std::cout << "  " << "store " << init_val_reg << ", " << address << "\n";
     auto store_inst = std::make_shared<IR::IRStore>(context.GetIRValue(init_val_reg), context.GetIRValue(address));
     context.current_block->AddInstruction(store_inst);
   }
@@ -1564,11 +1443,9 @@ std::string CodeGenerator::Generate(const ArrayVarDefAST& node) {
   }
 
   if (context.scope->isGlobal()) {
-    std::cout << "global " << address << " = alloc " << arr_type << "\n";
     auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, true, std::vector<int32_t>{});
     context.AddGlobal(global_alloc);
   } else {
-    std::cout << "  " << address << " = alloc " << arr_type << "\n";
     if (context.current_block) {
       auto alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type, dims);
       context.current_block->AddInstruction(alloc_inst);
@@ -1612,14 +1489,6 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
     int fill_index = 0;
     FillConstInitValFromInitVal(*node.init_val_list, dims, sub_sizes, -1, fill_index, init_nums, context);
 
-    std::string str;
-    for (int i = 0; i < arr_size; i++) {
-      str += std::to_string(init_nums[i]);
-      if (i != arr_size - 1) {
-        str += ", ";
-      }
-    }
-    std::cout << "global " << address << " = alloc " << arr_type << ", {" << str << "}\n";
     auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, false, init_nums, dims);
     context.AddGlobal(global_alloc);
   } else {
@@ -1627,7 +1496,6 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
     int fill_index = 0;
     FillInitValRegs(*node.init_val_list, dims, sub_sizes, -1, fill_index, init_vals, *this, context);
 
-    std::cout << "  " << address  << " = alloc " << arr_type << "\n";
     std::shared_ptr<IR::IRAlloc> alloc_inst = nullptr;
     if (context.current_block) {
       alloc_inst = std::make_shared<IR::IRAlloc>(address, "i32", dims);
@@ -1647,7 +1515,6 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
 
       for (size_t j = 0; j < idxs.size(); j++) {
         std::string next_reg = context.NewReg();
-        std::cout << "  " << next_reg << " = getelemptr " << prev_reg << ", " << idxs[j] << "\n";
         if (context.current_block) {
           auto idx_val = context.GetIRValue(std::to_string(idxs[j]));
           auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(next_reg, prev_val, idx_val);
@@ -1658,7 +1525,6 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
         prev_reg = next_reg;
       }
 
-      std::cout << "  store " << init_vals[i] << ", " << prev_reg << "\n";
       if (context.current_block) {
         auto val = context.GetIRValue(init_vals[i]);
         auto store_inst = std::make_shared<IR::IRStore>(val, prev_val);
