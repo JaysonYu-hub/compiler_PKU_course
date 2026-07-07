@@ -429,7 +429,11 @@ std::string CodeGenerator::Generate(const AssignStmtAST& node) {
         if (arr_info.is_param && i == 0) {
           if (context.current_block) {
             auto index_val = context.GetIRValue(index_reg);
-            auto getptr_inst = std::make_shared<IR::IRGetPtr>(addr_reg, prev_val, index_val);
+            int elem_size = 4;
+            for (size_t j = i; j < arr_info.dims.size(); j++) {
+              elem_size *= arr_info.dims[j];
+            }
+            auto getptr_inst = std::make_shared<IR::IRGetPtr>(addr_reg, prev_val, index_val, elem_size);
             context.current_block->AddInstruction(getptr_inst);
             context.SetIRValue(addr_reg, getptr_inst);
             prev_val = getptr_inst;
@@ -437,7 +441,12 @@ std::string CodeGenerator::Generate(const AssignStmtAST& node) {
         } else {
           if (context.current_block) {
             auto index_val = context.GetIRValue(index_reg);
-            auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val);
+            int elem_size = 4;
+            size_t start_idx = arr_info.is_param ? i : i + 1;
+            for (size_t j = start_idx; j < arr_info.dims.size(); j++) {
+              elem_size *= arr_info.dims[j];
+            }
+            auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val, elem_size);
             context.current_block->AddInstruction(getelemptr_inst);
             context.SetIRValue(addr_reg, getelemptr_inst);
             prev_val = getelemptr_inst;
@@ -451,7 +460,13 @@ std::string CodeGenerator::Generate(const AssignStmtAST& node) {
         std::string addr_reg = context.NewReg();
         if (context.current_block) {
           auto index_val = context.GetIRValue("0");
-          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val);
+          size_t i = node.lval->index_exp.size();
+          int elem_size = 4;
+          size_t start_idx = arr_info.is_param ? i : i + 1;
+          for (size_t j = start_idx; j < arr_info.dims.size(); j++) {
+            elem_size *= arr_info.dims[j];
+          }
+          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val, elem_size);
           context.current_block->AddInstruction(getelemptr_inst);
           context.SetIRValue(addr_reg, getelemptr_inst);
           prev_val = getelemptr_inst;
@@ -1059,7 +1074,11 @@ std::string CodeGenerator::Generate(const LValAST& node) {
       if (arr_info.is_param && i == 0) {
         if (context.current_block) {
           auto index_val = context.GetIRValue(index_reg);
-          auto getptr_inst = std::make_shared<IR::IRGetPtr>(addr_reg, prev_val, index_val);
+          int elem_size = 4;
+          for (size_t j = i; j < arr_info.dims.size(); j++) {
+            elem_size *= arr_info.dims[j];
+          }
+          auto getptr_inst = std::make_shared<IR::IRGetPtr>(addr_reg, prev_val, index_val, elem_size);
           context.current_block->AddInstruction(getptr_inst);
           context.SetIRValue(addr_reg, getptr_inst);
           prev_val = getptr_inst;
@@ -1067,7 +1086,12 @@ std::string CodeGenerator::Generate(const LValAST& node) {
       } else {
         if (context.current_block) {
           auto index_val = context.GetIRValue(index_reg);
-          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val);
+          int elem_size = 4;
+          size_t start_idx = arr_info.is_param ? i : i + 1;
+          for (size_t j = start_idx; j < arr_info.dims.size(); j++) {
+            elem_size *= arr_info.dims[j];
+          }
+          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val, elem_size);
           context.current_block->AddInstruction(getelemptr_inst);
           context.SetIRValue(addr_reg, getelemptr_inst);
           prev_val = getelemptr_inst;
@@ -1086,7 +1110,13 @@ std::string CodeGenerator::Generate(const LValAST& node) {
       std::string addr_reg = context.NewReg();
       if (context.current_block) {
         auto index_val = context.GetIRValue("0");
-        auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val);
+        size_t i = node.index_exp.size();
+        int elem_size = 4;
+        size_t start_idx = arr_info.is_param ? i : i + 1;
+        for (size_t j = start_idx; j < arr_info.dims.size(); j++) {
+          elem_size *= arr_info.dims[j];
+        }
+        auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(addr_reg, prev_val, index_val, elem_size);
         context.current_block->AddInstruction(getelemptr_inst);
         context.SetIRValue(addr_reg, getelemptr_inst);
         prev_val = getelemptr_inst;
@@ -1299,7 +1329,11 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
         std::string next_reg = context.NewReg();
         if (context.current_block) {
           auto idx_val = context.GetIRValue(std::to_string(idxs[j]));
-          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(next_reg, prev_val, idx_val);
+          int elem_size = 4;
+          for (size_t k = j + 1; k < dims.size(); k++) {
+            elem_size *= dims[k];
+          }
+          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(next_reg, prev_val, idx_val, elem_size);
           context.current_block->AddInstruction(getelemptr_inst);
           context.SetIRValue(next_reg, getelemptr_inst);
           prev_val = getelemptr_inst;
@@ -1443,7 +1477,7 @@ std::string CodeGenerator::Generate(const ArrayVarDefAST& node) {
   }
 
   if (context.scope->isGlobal()) {
-    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, true, std::vector<int32_t>{});
+    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, true, std::vector<int32_t>{}, dims);
     context.AddGlobal(global_alloc);
   } else {
     if (context.current_block) {
@@ -1517,7 +1551,11 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
         std::string next_reg = context.NewReg();
         if (context.current_block) {
           auto idx_val = context.GetIRValue(std::to_string(idxs[j]));
-          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(next_reg, prev_val, idx_val);
+          int elem_size = 4;
+          for (size_t k = j + 1; k < dims.size(); k++) {
+            elem_size *= dims[k];
+          }
+          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(next_reg, prev_val, idx_val, elem_size);
           context.current_block->AddInstruction(getelemptr_inst);
           context.SetIRValue(next_reg, getelemptr_inst);
           prev_val = getelemptr_inst;

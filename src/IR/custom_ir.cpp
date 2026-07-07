@@ -233,8 +233,8 @@ namespace IR {
   }
 
   // IRGetElemPtr
-  IRGetElemPtr::IRGetElemPtr(std::string name, std::shared_ptr<IRValue> arr, std::shared_ptr<IRValue> index)
-    : IRNameInstruction(std::move(name)), arr(std::move(arr)), index(std::move(index)) {
+  IRGetElemPtr::IRGetElemPtr(std::string name, std::shared_ptr<IRValue> arr, std::shared_ptr<IRValue> index, int elem_size)
+    : IRNameInstruction(std::move(name)), arr(std::move(arr)), index(std::move(index)), elem_size(elem_size) {
     assert(this->arr != nullptr && this->index != nullptr);
   }
 
@@ -247,8 +247,8 @@ namespace IR {
   }
 
   // IRGetPtr
-  IRGetPtr::IRGetPtr(std::string name, std::shared_ptr<IRValue> ptr, std::shared_ptr<IRValue> index)
-    : IRNameInstruction(std::move(name)), ptr(std::move(ptr)), index(std::move(index)) {
+  IRGetPtr::IRGetPtr(std::string name, std::shared_ptr<IRValue> ptr, std::shared_ptr<IRValue> index, int elem_size)
+    : IRNameInstruction(std::move(name)), ptr(std::move(ptr)), index(std::move(index)), elem_size(elem_size) {
     assert(this->ptr != nullptr && this->index != nullptr);
   }
 

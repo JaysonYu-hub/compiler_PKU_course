@@ -78,6 +78,15 @@ namespace IR {
 
     bool IsZeroInit() const { return is_zeroinit; }
     const std::vector<int32_t>& GetInitVals() const { return init_vals; }
+    const std::vector<int>& GetArrayDims() const { return array_dims; }
+    bool IsArray() const { return !array_dims.empty(); }
+    // 返回分配的总字节数
+    int GetAllocSize() const {
+      if (array_dims.empty()) return 4;
+      int size = 4;
+      for (int d : array_dims) size *= d;
+      return size;
+    }
 
     std::string DumpText() const override;
     std::string GetOperandName() const override;
@@ -146,6 +155,13 @@ namespace IR {
 
     const std::vector<int>& GetArrayDims() const { return array_dims; }
     bool IsArray() const { return !array_dims.empty(); }
+    // 返回分配的总字节数
+    int GetAllocSize() const {
+      if (array_dims.empty()) return 4;
+      int size = 4;
+      for (int d : array_dims) size *= d;
+      return size;
+    }
 
     std::string DumpText() const override;
     IRType GetType() const override;
@@ -158,6 +174,8 @@ namespace IR {
     std::shared_ptr<IRValue> ptr;
   public:
     IRStore(std::shared_ptr<IRValue> val, std::shared_ptr<IRValue> ptr);
+    std::shared_ptr<IRValue> GetVal() const { return val; }
+    std::shared_ptr<IRValue> GetPtr() const { return ptr; }
     std::string DumpText() const override;
   };
 
@@ -178,11 +196,13 @@ namespace IR {
   private:
     std::shared_ptr<IRValue> arr;
     std::shared_ptr<IRValue> index;
+    int elem_size;  // 子元素大小（字节）
   public:
-    IRGetElemPtr(std::string name, std::shared_ptr<IRValue> arr, std::shared_ptr<IRValue> index);
+    IRGetElemPtr(std::string name, std::shared_ptr<IRValue> arr, std::shared_ptr<IRValue> index, int elem_size = 4);
 
     std::shared_ptr<IRValue> GetArr() const { return arr; }
     std::shared_ptr<IRValue> GetIndex() const { return index; }
+    int GetElemSize() const { return elem_size; }
 
     std::string DumpText() const override;
     IRType GetType() const override;
@@ -193,11 +213,13 @@ namespace IR {
   private:
     std::shared_ptr<IRValue> ptr;
     std::shared_ptr<IRValue> index;
+    int elem_size;  // 元素大小（字节）
   public:
-    IRGetPtr(std::string name, std::shared_ptr<IRValue> ptr, std::shared_ptr<IRValue> index);
+    IRGetPtr(std::string name, std::shared_ptr<IRValue> ptr, std::shared_ptr<IRValue> index, int elem_size = 4);
 
     std::shared_ptr<IRValue> GetPtr() const { return ptr; }
     std::shared_ptr<IRValue> GetIndex() const { return index; }
+    int GetElemSize() const { return elem_size; }
 
     std::string DumpText() const override;
     IRType GetType() const override;
@@ -312,5 +334,4 @@ namespace IR {
 
     std::string DumpText() const;
   };
-
 }
