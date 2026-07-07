@@ -20,7 +20,6 @@ void Back::RiscvGenerator::Visit(const IR::IRProgram& program) {
   for (const auto& global : program.globals) {
     Visit(*global);
   }
-
   std::cout << "  .text\n";
   for (const auto& func : program.funcs) {
     Visit(*func);
@@ -96,7 +95,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     }
   }
 
-  // 计算调用参数溢出区大小（参数 8+ 需要栈空间）
+  // 计算调用参数溢出区大小
   int param_overflow_size = 0;
   if (max_param_count > 8) {
     param_overflow_size = 4 * (max_param_count - 8);
@@ -105,9 +104,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   // ra 保存空间
   int ra_size = has_call ? 4 : 0;
 
-  // 计算总栈帧大小（对齐到 16 字节）
-  // 栈帧布局（低地址 → 高地址）：
-  // [参数溢出区 param_overflow_size] [局部变量/临时值 offset] [ra]
+  // 计算总栈帧大小
   int total = param_overflow_size + offset + ra_size;
   current_stack_size = (total + 15) / 16 * 16;
 
@@ -142,7 +139,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     assert(it != val_stack_map.end());
     EmitSw("a" + std::to_string(i), it->second, "sp");
   }
-  // 栈上参数（第 8+ 个）：映射到调用者栈帧中的位置
+  // 多于8个的参数映射到调用者栈帧中的位置
   for (size_t i = 8; i < func.params.size(); i++) {
     std::string param_name = func.params[i]->GetOperandName();
     // 这些参数在调用者栈帧中，位于 current_stack_size + 4*(i-8)
@@ -161,7 +158,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
 }
 
 void Back::RiscvGenerator::Visit(const IR::IRBasicBlock& block) {
-  // 输出 label（%entry 块不输出标签）
+  // 输出label
   std::string label = StripPercent(block.name);
   if (label != "entry") {
     std::cout << label << ":\n";
@@ -335,7 +332,7 @@ void Back::RiscvGenerator::Visit(const IR::IRBranch& inst) {
 }
 
 void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
-  // 1. 将参数加载到 a0-a7 或栈上
+  // 将参数加载到 a0-a7 或栈上
   const auto& args = inst.GetArgs();
   for (size_t i = 0; i < args.size(); i++) {
     if (i < 8) {
@@ -348,11 +345,11 @@ void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
     }
   }
 
-  // 2. 调用函数
+  // 调用函数
   std::string func_name = StripAt(inst.GetFunc()->GetOperandName());
   std::cout << "  call " << func_name << "\n";
 
-  // 3. 如果有返回值，保存 a0 到栈
+  // 如果有返回值，保存 a0 到栈
   if (inst.HasReturnValue()) {
     StoreRegToVal(inst.GetOperandName(), "a0");
   }
@@ -392,8 +389,6 @@ void Back::RiscvGenerator::Visit(const IR::IRGetPtr& inst) {
   StoreRegToVal(inst.GetName(), "t0");
 }
 
-// ============== 辅助方法实现 ==============
-
 void Back::RiscvGenerator::EmitLw(const std::string& reg, int offset, const std::string& base_reg) {
   if (offset >= -2048 && offset <= 2047) {
     std::cout << "  lw " << reg << ", " << offset << "(" << base_reg << ")\n";
@@ -428,7 +423,6 @@ void Back::RiscvGenerator::LoadValueToReg(const IR::IRValue* val, const std::str
       std::cout << "  li " << reg << ", " << const_val->GetValue() << "\n";
     }
   } else if (dynamic_cast<const IR::IRGlobalAlloc*>(val)) {
-    // 全局变量：加载地址再加载值
     std::string raw_name = StripAt(val->GetOperandName());
     std::cout << "  la " << reg << ", " << raw_name << "\n";
     std::cout << "  lw " << reg << ", 0(" << reg << ")\n";
