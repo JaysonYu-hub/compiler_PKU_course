@@ -56,7 +56,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   // 为函数参数分配栈空间
   for (size_t i = 0; i < func.params.size(); i++) {
     val_stack_map[func.params[i]->GetOperandName()] = offset;
-    offset += 4;
+    offset += (is_64bit && func.params[i]->GetType() == IR::IRType::IR_POINTER) ? 8 : 4;
   }
 
   // 为所有具有返回值的指令分配栈偏移量
@@ -89,20 +89,20 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
           offset += alloc->GetAllocSize();
         } else {
           val_stack_map[val_name] = offset;
-          offset += 4;
+          offset += (is_64bit && inst->GetType() == IR::IRType::IR_POINTER) ? 8 : 4;
         }
       }
     }
   }
 
-  // 计算调用参数溢出区大小
+  int slot_size = is_64bit ? 8 : 4;
   int param_overflow_size = 0;
   if (max_param_count > 8) {
-    param_overflow_size = 4 * (max_param_count - 8);
+    param_overflow_size = slot_size * (max_param_count - 8);
   }
 
   // ra 保存空间
-  int ra_size = has_call ? 4 : 0;
+  int ra_size = has_call ? (is_64bit ? 8 : 4) : 0;
 
   // 计算总栈帧大小
   int total = param_overflow_size + offset + ra_size;
@@ -128,8 +128,12 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
 
   // 保存 ra
   if (has_call) {
-    int ra_offset = current_stack_size - 4;
-    EmitSw("ra", ra_offset, "sp");
+    int ra_offset = is_64bit ? (current_stack_size - 8) : (current_stack_size - 4);
+    if (is_64bit) {
+      EmitSd("ra", ra_offset, "sp");
+    } else {
+      EmitSw("ra", ra_offset, "sp");
+    }
   }
 
   // 将寄存器参数保存到栈上
@@ -137,18 +141,25 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     std::string param_name = func.params[i]->GetOperandName();
     auto it = val_stack_map.find(param_name);
     assert(it != val_stack_map.end());
-    EmitSw("a" + std::to_string(i), it->second, "sp");
+    if (is_64bit && func.params[i]->GetType() == IR::IRType::IR_POINTER) {
+      EmitSd("a" + std::to_string(i), it->second, "sp");
+    } else {
+      EmitSw("a" + std::to_string(i), it->second, "sp");
+    }
   }
   // 多于8个的参数映射到调用者栈帧中的位置
   for (size_t i = 8; i < func.params.size(); i++) {
     std::string param_name = func.params[i]->GetOperandName();
-    // 这些参数在调用者栈帧中，位于 current_stack_size + 4*(i-8)
-    // 需要加载到本函数的栈帧中
-    int caller_offset = current_stack_size + 4 * ((int)i - 8);
+    int caller_offset = current_stack_size + slot_size * ((int)i - 8);
     auto it = val_stack_map.find(param_name);
     assert(it != val_stack_map.end());
-    EmitLw("t0", caller_offset, "sp");
-    EmitSw("t0", it->second, "sp");
+    if (is_64bit && func.params[i]->GetType() == IR::IRType::IR_POINTER) {
+      EmitLd("t0", caller_offset, "sp");
+      EmitSd("t0", it->second, "sp");
+    } else {
+      EmitLw("t0", caller_offset, "sp");
+      EmitSw("t0", it->second, "sp");
+    }
   }
 
   // 遍历所有基本块
@@ -198,8 +209,12 @@ void Back::RiscvGenerator::Visit(const IR::IRReturn& ret_inst) {
   }
   // Epilogue
   if (has_call) {
-    int ra_offset = current_stack_size - 4;
-    EmitLw("ra", ra_offset, "sp");
+    int ra_offset = is_64bit ? (current_stack_size - 8) : (current_stack_size - 4);
+    if (is_64bit) {
+      EmitLd("ra", ra_offset, "sp");
+    } else {
+      EmitLw("ra", ra_offset, "sp");
+    }
   }
   if (current_stack_size > 0) {
     if (current_stack_size <= 2047) {
@@ -216,21 +231,27 @@ void Back::RiscvGenerator::Visit(const IR::IRBinary& inst) {
   LoadValueToReg(inst.GetLhs().get(), "t0");
   LoadValueToReg(inst.GetRhs().get(), "t1");
 
+  std::string op_add = is_64bit ? "addw" : "add";
+  std::string op_sub = is_64bit ? "subw" : "sub";
+  std::string op_mul = is_64bit ? "mulw" : "mul";
+  std::string op_div = is_64bit ? "divw" : "div";
+  std::string op_rem = is_64bit ? "remw" : "rem";
+
   switch (inst.GetOp()) {
     case IR::IRBinaryOp::ADD:
-      std::cout << "  add t0, t0, t1\n";
+      std::cout << "  " << op_add << " t0, t0, t1\n";
       break;
     case IR::IRBinaryOp::SUB:
-      std::cout << "  sub t0, t0, t1\n";
+      std::cout << "  " << op_sub << " t0, t0, t1\n";
       break;
     case IR::IRBinaryOp::MUL:
-      std::cout << "  mul t0, t0, t1\n";
+      std::cout << "  " << op_mul << " t0, t0, t1\n";
       break;
     case IR::IRBinaryOp::DIV:
-      std::cout << "  div t0, t0, t1\n";
+      std::cout << "  " << op_div << " t0, t0, t1\n";
       break;
     case IR::IRBinaryOp::MOD:
-      std::cout << "  rem t0, t0, t1\n";
+      std::cout << "  " << op_rem << " t0, t0, t1\n";
       break;
     case IR::IRBinaryOp::EQ:
       std::cout << "  sub t0, t0, t1\n";
@@ -267,7 +288,7 @@ void Back::RiscvGenerator::Visit(const IR::IRBinary& inst) {
       assert(false && "Unsupported binary operator in RiscvGenerator");
   }
 
-  StoreRegToVal(inst.GetName(), "t0");
+  StoreRegToVal(&inst, "t0");
 }
 
 void Back::RiscvGenerator::Visit(const IR::IRAlloc& inst) {
@@ -281,18 +302,30 @@ void Back::RiscvGenerator::Visit(const IR::IRStore& inst) {
     // 全局变量
     LoadValueToReg(inst.GetVal().get(), "t0");
     std::cout << "  la t1, " << StripAt(ptr_name) << "\n";
-    std::cout << "  sw t0, 0(t1)\n";
+    if (is_64bit && inst.GetVal()->GetType() == IR::IRType::IR_POINTER) {
+      std::cout << "  sd t0, 0(t1)\n";
+    } else {
+      std::cout << "  sw t0, 0(t1)\n";
+    }
   } else if (local_allocs.count(ptr_name)) {
     // 局部标量变量
     LoadValueToReg(inst.GetVal().get(), "t0");
     auto it = val_stack_map.find(ptr_name);
     assert(it != val_stack_map.end());
-    EmitSw("t0", it->second, "sp");
+    if (is_64bit && inst.GetVal()->GetType() == IR::IRType::IR_POINTER) {
+      EmitSd("t0", it->second, "sp");
+    } else {
+      EmitSw("t0", it->second, "sp");
+    }
   } else {
     // 计算出的指针地址
     LoadValueToReg(inst.GetVal().get(), "t0");
     LoadValueToReg(inst.GetPtr().get(), "t1");
-    std::cout << "  sw t0, 0(t1)\n";
+    if (is_64bit && inst.GetVal()->GetType() == IR::IRType::IR_POINTER) {
+      std::cout << "  sd t0, 0(t1)\n";
+    } else {
+      std::cout << "  sw t0, 0(t1)\n";
+    }
   }
 }
 
@@ -302,19 +335,31 @@ void Back::RiscvGenerator::Visit(const IR::IRLoad& inst) {
   if (dynamic_cast<const IR::IRGlobalAlloc*>(ptr_raw)) {
     // 全局变量
     std::cout << "  la t0, " << StripAt(ptr_name) << "\n";
-    std::cout << "  lw t0, 0(t0)\n";
-    StoreRegToVal(inst.GetName(), "t0");
+    if (is_64bit && inst.GetType() == IR::IRType::IR_POINTER) {
+      std::cout << "  ld t0, 0(t0)\n";
+    } else {
+      std::cout << "  lw t0, 0(t0)\n";
+    }
+    StoreRegToVal(&inst, "t0");
   } else if (local_allocs.count(ptr_name)) {
     // 局部标量变量
     auto it = val_stack_map.find(ptr_name);
     assert(it != val_stack_map.end());
-    EmitLw("t0", it->second, "sp");
-    StoreRegToVal(inst.GetName(), "t0");
+    if (is_64bit && inst.GetType() == IR::IRType::IR_POINTER) {
+      EmitLd("t0", it->second, "sp");
+    } else {
+      EmitLw("t0", it->second, "sp");
+    }
+    StoreRegToVal(&inst, "t0");
   } else {
     // 计算出的指针地址
     LoadValueToReg(inst.GetPtr().get(), "t1");
-    std::cout << "  lw t0, 0(t1)\n";
-    StoreRegToVal(inst.GetName(), "t0");
+    if (is_64bit && inst.GetType() == IR::IRType::IR_POINTER) {
+      std::cout << "  ld t0, 0(t1)\n";
+    } else {
+      std::cout << "  lw t0, 0(t1)\n";
+    }
+    StoreRegToVal(&inst, "t0");
   }
 }
 
@@ -334,14 +379,19 @@ void Back::RiscvGenerator::Visit(const IR::IRBranch& inst) {
 void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
   // 将参数加载到 a0-a7 或栈上
   const auto& args = inst.GetArgs();
+  int slot_size = is_64bit ? 8 : 4;
   for (size_t i = 0; i < args.size(); i++) {
     if (i < 8) {
       LoadValueToReg(args[i].get(), "a" + std::to_string(i));
     } else {
       // 参数溢出到栈上
       LoadValueToReg(args[i].get(), "t0");
-      int param_offset = 4 * ((int)i - 8);
-      EmitSw("t0", param_offset, "sp");
+      int param_offset = slot_size * ((int)i - 8);
+      if (is_64bit && args[i]->GetType() == IR::IRType::IR_POINTER) {
+        EmitSd("t0", param_offset, "sp");
+      } else {
+        EmitSw("t0", param_offset, "sp");
+      }
     }
   }
 
@@ -351,7 +401,7 @@ void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
 
   // 如果有返回值，保存 a0 到栈
   if (inst.HasReturnValue()) {
-    StoreRegToVal(inst.GetOperandName(), "a0");
+    StoreRegToVal(&inst, "a0");
   }
 }
 
@@ -369,7 +419,7 @@ void Back::RiscvGenerator::Visit(const IR::IRGetElemPtr& inst) {
   std::cout << "  add t0, t0, t1\n";
 
   // 结果是一个指针，存入栈
-  StoreRegToVal(inst.GetName(), "t0");
+  StoreRegToVal(&inst, "t0");
 }
 
 void Back::RiscvGenerator::Visit(const IR::IRGetPtr& inst) {
@@ -386,7 +436,7 @@ void Back::RiscvGenerator::Visit(const IR::IRGetPtr& inst) {
   std::cout << "  add t0, t0, t1\n";
 
   // 结果是一个指针，存入栈
-  StoreRegToVal(inst.GetName(), "t0");
+  StoreRegToVal(&inst, "t0");
 }
 
 void Back::RiscvGenerator::EmitLw(const std::string& reg, int offset, const std::string& base_reg) {
@@ -415,6 +465,32 @@ void Back::RiscvGenerator::EmitSw(const std::string& reg, int offset, const std:
   }
 }
 
+void Back::RiscvGenerator::EmitLd(const std::string& reg, int offset, const std::string& base_reg) {
+  if (offset >= -2048 && offset <= 2047) {
+    std::cout << "  ld " << reg << ", " << offset << "(" << base_reg << ")\n";
+  } else {
+    if (reg != "t6") {
+      std::cout << "  li " << reg << ", " << offset << "\n";
+      std::cout << "  add " << reg << ", " << base_reg << ", " << reg << "\n";
+      std::cout << "  ld " << reg << ", 0(" << reg << ")\n";
+    } else {
+      std::cout << "  li t5, " << offset << "\n";
+      std::cout << "  add t5, " << base_reg << ", t5\n";
+      std::cout << "  ld t6, 0(t5)\n";
+    }
+  }
+}
+
+void Back::RiscvGenerator::EmitSd(const std::string& reg, int offset, const std::string& base_reg) {
+  if (offset >= -2048 && offset <= 2047) {
+    std::cout << "  sd " << reg << ", " << offset << "(" << base_reg << ")\n";
+  } else {
+    std::cout << "  li t6, " << offset << "\n";
+    std::cout << "  add t6, " << base_reg << ", t6\n";
+    std::cout << "  sd " << reg << ", 0(t6)\n";
+  }
+}
+
 void Back::RiscvGenerator::LoadValueToReg(const IR::IRValue* val, const std::string& reg) {
   if (const auto* const_val = dynamic_cast<const IR::IRConstant*>(val)) {
     if (const_val->GetValue() == 0) {
@@ -425,20 +501,32 @@ void Back::RiscvGenerator::LoadValueToReg(const IR::IRValue* val, const std::str
   } else if (dynamic_cast<const IR::IRGlobalAlloc*>(val)) {
     std::string raw_name = StripAt(val->GetOperandName());
     std::cout << "  la " << reg << ", " << raw_name << "\n";
-    std::cout << "  lw " << reg << ", 0(" << reg << ")\n";
+    if (is_64bit && val->GetType() == IR::IRType::IR_POINTER) {
+      std::cout << "  ld " << reg << ", 0(" << reg << ")\n";
+    } else {
+      std::cout << "  lw " << reg << ", 0(" << reg << ")\n";
+    }
   } else {
     // 临时变量、局部变量或函数参数：从栈中加载
     std::string name = val->GetOperandName();
     auto it = val_stack_map.find(name);
     assert(it != val_stack_map.end());
-    EmitLw(reg, it->second, "sp");
+    if (is_64bit && val->GetType() == IR::IRType::IR_POINTER) {
+      EmitLd(reg, it->second, "sp");
+    } else {
+      EmitLw(reg, it->second, "sp");
+    }
   }
 }
 
-void Back::RiscvGenerator::StoreRegToVal(const std::string& name, const std::string& reg) {
-  auto it = val_stack_map.find(name);
+void Back::RiscvGenerator::StoreRegToVal(const IR::IRValue* val, const std::string& reg) {
+  auto it = val_stack_map.find(val->GetOperandName());
   assert(it != val_stack_map.end());
-  EmitSw(reg, it->second, "sp");
+  if (is_64bit && val->GetType() == IR::IRType::IR_POINTER) {
+    EmitSd(reg, it->second, "sp");
+  } else {
+    EmitSw(reg, it->second, "sp");
+  }
 }
 
 void Back::RiscvGenerator::LoadAddressToReg(const IR::IRValue* val, const std::string& reg) {
@@ -462,6 +550,10 @@ void Back::RiscvGenerator::LoadAddressToReg(const IR::IRValue* val, const std::s
     std::string name = val->GetOperandName();
     auto it = val_stack_map.find(name);
     assert(it != val_stack_map.end());
-    EmitLw(reg, it->second, "sp");
+    if (is_64bit) {
+      EmitLd(reg, it->second, "sp");
+    } else {
+      EmitLw(reg, it->second, "sp");
+    }
   }
 }
