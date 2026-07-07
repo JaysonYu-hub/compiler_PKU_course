@@ -15,11 +15,11 @@ namespace IR {
   };
 
   enum class IRBinaryOp {
-    ADD, SUB, MUL, DIV, MOD, // 算术运算符
-    AND, OR, XOR,            // 位运算符
-    SHL, SHR, SAR,           // 移位运算符
-    EQ, NE,                  // 等于、不等于
-    LT, LE, GT, GE           // 比较运算符
+    ADD, SUB, MUL, DIV, MOD, 
+    AND, OR, XOR, 
+    SHL, SHR, SAR, 
+    EQ, NE, 
+    LT, LE, GT, GE 
   };
 
   std::string OpToString(IRBinaryOp op);

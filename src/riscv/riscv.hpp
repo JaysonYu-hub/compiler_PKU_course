@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <assert.h>
 #include <iostream>
+#include "../IR/custom_ir.hpp"
 
 namespace Back {
   struct CallStackInfo { 
@@ -245,5 +246,23 @@ namespace Back {
     void SetStackSpace(Back::FuncInformation &func_information);
     int GetTypeSize(koopa_raw_type_t ty);
     RegObj LoadPointerToReg(koopa_raw_value_t value);
+  };
+
+  class RiscvGenerator {
+  public:
+    bool Generate(const IR::IRProgram& program);
+  private:
+    void Visit(const IR::IRProgram& program);
+    void Visit(const IR::IRFunction& func);
+    void Visit(const IR::IRBasicBlock& block);
+    void Visit(const IR::IRInstruction& inst);
+    void Visit(const IR::IRReturn& ret_inst);
+    void Visit(const IR::IRBinary& inst);
+
+    int current_stack_size = 0;
+    std::unordered_map<std::string, int> val_stack_map;
+
+    void LoadValueToReg(const IR::IRValue* val, const std::string& reg);
+    void StoreRegToVal(const std::string& name, const std::string& reg);
   };
 };

@@ -541,3 +541,160 @@ Back::RegObj Back::IRVisitor::LoadPointerToReg(koopa_raw_value_t value) {
   }
   return load_reg;
 }
+
+bool Back::RiscvGenerator::Generate(const IR::IRProgram& program) {
+  // 检查是否仅包含简单的无全局变量、单块、仅有 Return 和 Binary 算术表达式指令的程序
+  if (!program.globals.empty()) return false;
+  for (const auto& func : program.funcs) {
+    if (func->blocks.size() != 1) return false;
+    const auto& block = func->blocks[0];
+    for (const auto& inst : block->insts) {
+      if (dynamic_cast<const IR::IRReturn*>(inst.get())) continue;
+      if (dynamic_cast<const IR::IRBinary*>(inst.get())) continue;
+      return false;
+    }
+  }
+
+  // 运行 Visit 模式遍历生成汇编
+  Visit(program);
+  return true;
+}
+
+void Back::RiscvGenerator::Visit(const IR::IRProgram& program) {
+  std::cout << "  .text\n";
+  for (const auto& func : program.funcs) {
+    Visit(*func);
+  }
+}
+
+void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
+  // 扫描函数指令，给所有具有返回值的指令分配栈偏移量
+  val_stack_map.clear();
+  int offset = 0;
+  for (const auto& block : func.blocks) {
+    for (const auto& inst : block->insts) {
+      if (const auto* name_inst = dynamic_cast<const IR::IRNameInstruction*>(inst.get())) {
+        val_stack_map[name_inst->GetName()] = offset;
+        offset += 4;
+      }
+    }
+  }
+
+  // 对齐到 16 字节
+  current_stack_size = (offset + 15) / 16 * 16;
+
+  std::cout << "  .globl " << func.name << "\n";
+  std::cout << func.name << ":\n";
+
+  // 序言：分配栈帧
+  if (current_stack_size > 0) {
+    std::cout << "  addi sp, sp, -" << current_stack_size << "\n";
+  }
+
+  for (const auto& block : func.blocks) {
+    Visit(*block);
+  }
+}
+
+void Back::RiscvGenerator::Visit(const IR::IRBasicBlock& block) {
+  for (const auto& inst : block.insts) {
+    Visit(*inst);
+  }
+}
+
+void Back::RiscvGenerator::Visit(const IR::IRInstruction& inst) {
+  if (const auto* p = dynamic_cast<const IR::IRReturn*>(&inst)) {
+    Visit(*p);
+  } else if (const auto* p = dynamic_cast<const IR::IRBinary*>(&inst)) {
+    Visit(*p);
+  }
+}
+
+void Back::RiscvGenerator::Visit(const IR::IRReturn& ret_inst) {
+  if (ret_inst.GetValue()) {
+    LoadValueToReg(ret_inst.GetValue().get(), "a0");
+  }
+  // 结语：恢复栈帧并返回
+  if (current_stack_size > 0) {
+    std::cout << "  addi sp, sp, " << current_stack_size << "\n";
+  }
+  std::cout << "  ret\n\n";
+}
+
+void Back::RiscvGenerator::Visit(const IR::IRBinary& inst) {
+  // 加载左右操作数到 t0 和 t1
+  LoadValueToReg(inst.GetLhs().get(), "t0");
+  LoadValueToReg(inst.GetRhs().get(), "t1");
+
+  // 执行计算，结果存入 t0
+  switch (inst.GetOp()) {
+    case IR::IRBinaryOp::ADD:
+      std::cout << "  add t0, t0, t1\n";
+      break;
+    case IR::IRBinaryOp::SUB:
+      std::cout << "  sub t0, t0, t1\n";
+      break;
+    case IR::IRBinaryOp::MUL:
+      std::cout << "  mul t0, t0, t1\n";
+      break;
+    case IR::IRBinaryOp::DIV:
+      std::cout << "  div t0, t0, t1\n";
+      break;
+    case IR::IRBinaryOp::MOD:
+      std::cout << "  rem t0, t0, t1\n";
+      break;
+    case IR::IRBinaryOp::EQ:
+      std::cout << "  sub t0, t0, t1\n";
+      std::cout << "  seqz t0, t0\n";
+      break;
+    case IR::IRBinaryOp::NE:
+      std::cout << "  sub t0, t0, t1\n";
+      std::cout << "  snez t0, t0\n";
+      break;
+    case IR::IRBinaryOp::LT:
+      std::cout << "  slt t0, t0, t1\n";
+      break;
+    case IR::IRBinaryOp::GT:
+      std::cout << "  slt t0, t1, t0\n";
+      break;
+    case IR::IRBinaryOp::LE:
+      std::cout << "  slt t0, t1, t0\n";
+      std::cout << "  xori t0, t0, 1\n";
+      break;
+    case IR::IRBinaryOp::GE:
+      std::cout << "  slt t0, t0, t1\n";
+      std::cout << "  xori t0, t0, 1\n";
+      break;
+    case IR::IRBinaryOp::AND:
+      std::cout << "  and t0, t0, t1\n";
+      break;
+    case IR::IRBinaryOp::OR:
+      std::cout << "  or t0, t0, t1\n";
+      break;
+    case IR::IRBinaryOp::XOR:
+      std::cout << "  xor t0, t0, t1\n";
+      break;
+    default:
+      assert(false && "Unsupported binary operator in RiscvGenerator");
+  }
+
+  // 将结果存入对应的栈偏移位置
+  StoreRegToVal(inst.GetName(), "t0");
+}
+
+void Back::RiscvGenerator::LoadValueToReg(const IR::IRValue* val, const std::string& reg) {
+  if (const auto* const_val = dynamic_cast<const IR::IRConstant*>(val)) {
+    std::cout << "  li " << reg << ", " << const_val->GetValue() << "\n";
+  } else {
+    std::string name = val->GetOperandName();
+    auto it = val_stack_map.find(name);
+    assert(it != val_stack_map.end());
+    std::cout << "  lw " << reg << ", " << it->second << "(sp)\n";
+  }
+}
+
+void Back::RiscvGenerator::StoreRegToVal(const std::string& name, const std::string& reg) {
+  auto it = val_stack_map.find(name);
+  assert(it != val_stack_map.end());
+  std::cout << "  sw " << reg << ", " << it->second << "(sp)\n";
+}

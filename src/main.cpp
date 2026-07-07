@@ -4,7 +4,6 @@
 #include <memory>
 #include <fstream>
 #include <string>
-#include <sstream>
 #include "ast/ast.hpp"
 #include "ast/codegen.hpp"
 #include "koopa.h"
@@ -34,13 +33,8 @@ int main(int argc, const char *argv[]) {
   auto ret = yyparse(ast);
   assert(!ret);
    
-  // 运行代码生成器，临时重定向 std::cout 避免污染输出，并构建内存 IR
-  stringstream ss;
-  streambuf *coutbuf = cout.rdbuf();
-  cout.rdbuf(ss.rdbuf());
   CodeGenerator generator(context);
   generator.Generate(*ast);
-  cout.rdbuf(coutbuf);
 
   // 使用 DumpText 将内存中的 Custom IR 写入到输出文件
   {
@@ -48,7 +42,7 @@ int main(int argc, const char *argv[]) {
     file << context.ir_program->DumpText() << endl;
   }
   
-  clog << "--- Custom C++ IR Dump ---\n" << context.ir_program->DumpText() << "-------------------------\n";
+  // clog << "--- Custom C++ IR Dump ---\n" << context.ir_program->DumpText() << "-------------------------\n";
   
   if (mode == "-riscv") {
     koopa_program_t program;
@@ -57,16 +51,26 @@ int main(int argc, const char *argv[]) {
     koopa_raw_program_builder_t builder = koopa_new_raw_program_builder();
     koopa_raw_program_t raw = koopa_build_raw_program(builder, program);
     koopa_delete_program(program);
-    //打开输出文件
-    ofstream file(output);
-    streambuf *coutbuf = cout.rdbuf(); // 保存原来的缓冲区
-    cout.rdbuf(file.rdbuf()); // 将 cout 的缓冲区切换到文件
-    //处理raw program
+
+    Back::RiscvGenerator riscv_gen;
+    {
+      ofstream file(output);
+      streambuf *coutbuf = cout.rdbuf(); // 保存原来的缓冲区
+      cout.rdbuf(file.rdbuf()); // 将 cout 的缓冲区切换到文件
+      riscv_gen.Generate(*context.ir_program);
+      cout.rdbuf(coutbuf); // 恢复原来的缓冲区
+    }
+
+    clog << "\n--- [原版 RISC-V 生成器输出（对照）] ---\n";
+    streambuf *clog_buf = cout.rdbuf();
+    cout.rdbuf(clog.rdbuf()); // 将 std::cout 临时重定向到 std::clog 打印到控制台
+    
     ir_visitor.HandleRawProgram(raw);
-    cout.rdbuf(coutbuf); // 恢复原来的缓冲区
+    
+    cout.rdbuf(clog_buf); // 恢复原来的 std::cout
+    clog << "-------------------------------------------\n\n";
 
     koopa_delete_raw_program_builder(builder);
   }
   return 0;
 }
-
