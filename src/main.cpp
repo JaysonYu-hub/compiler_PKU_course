@@ -4,10 +4,10 @@
 #include <memory>
 #include <fstream>
 #include <string>
-#include "ast/ast.hpp"
-#include "ast/codegen.hpp"
-#include "riscv/riscv.hpp"
-#include "IR/custom_ir.hpp"
+#include "ast.hpp"
+#include "codegen.hpp"
+#include "riscv.hpp"
+#include "custom_ir.hpp"
 
 using namespace std;
 

@@ -1,5 +1,5 @@
-#include "ast/codegen.hpp"
-#include "ast/ast.hpp"
+#include "codegen.hpp"
+#include "ast.hpp"
 #include <iostream>
 #include <cassert>
 #include <memory>

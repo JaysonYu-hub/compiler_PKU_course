@@ -6,7 +6,7 @@
 #include <iostream>
 #include <variant>
 #include <cassert>
-#include "IR/custom_ir.hpp"
+#include "../IR/custom_ir.hpp"
 
 class CodeGenerator;
 

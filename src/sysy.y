@@ -2,7 +2,7 @@
 %code requires {
   #include <memory>
   #include <string>
-  #include "ast/ast.hpp"
+  #include "ast.hpp"
 }
 
 %{
@@ -10,7 +10,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
-#include "ast/ast.hpp"
+#include "ast.hpp"
 #include <vector>
 #include <assert.h>
 

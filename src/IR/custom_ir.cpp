@@ -1,4 +1,4 @@
-#include "IR/custom_ir.hpp"
+#include "custom_ir.hpp"
 #include <cassert>
 
 namespace IR {

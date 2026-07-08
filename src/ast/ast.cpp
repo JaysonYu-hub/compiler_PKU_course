@@ -1,4 +1,4 @@
-#include "ast/ast.hpp"
+#include "ast.hpp"
 #include <iostream>
 #include <cassert>
 
