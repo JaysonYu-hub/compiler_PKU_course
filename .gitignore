@@ -3,3 +3,5 @@
 /debug
 /other
 /.vscode
+/compiler
+/compiler_test
