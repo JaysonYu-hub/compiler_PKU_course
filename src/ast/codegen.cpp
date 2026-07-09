@@ -684,6 +684,7 @@ std::string CodeGenerator::Generate(const PrimaryUnaryExpAST& node) {
 }
 
 std::string CodeGenerator::Generate(const FuncCallExpAST& node) {
+  if (context.cur_block_has_terminator) return "";
   std::string func_name = *node.ident;
   auto func_symbol = context.scope->lookup(func_name);
   if (func_symbol == nullptr) {
@@ -1281,7 +1282,6 @@ static void FillInitValRegs(const BaseAST& node,
     }
   }
 }
-
 std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
   std::vector<int> dims;
   int arr_size = 1;
@@ -1317,6 +1317,10 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
     auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, false, init_vals_int, dims);
     context.AddGlobal(global_alloc);
   } else {
+    if (context.cur_block_has_terminator) {
+      context.scope->define(sym);
+      return "";
+    }
     std::shared_ptr<IR::IRAlloc> alloc_inst = nullptr;
     if (context.current_block) {
       alloc_inst = std::make_shared<IR::IRAlloc>(address, "i32", dims);
@@ -1361,7 +1365,6 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
   context.scope->define(sym);
   return "";
 }
-
 std::string CodeGenerator::Generate(const ConstExpConstInitValAST& node) {
   if (node.const_exp) {
     return Generate(*node.const_exp);
@@ -1437,6 +1440,10 @@ std::string CodeGenerator::Generate(const SimpleVarDefAST& node) {
     auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, b_type, true, std::vector<int32_t>{});
     context.AddGlobal(global_alloc);
   } else {
+    if (context.cur_block_has_terminator) {
+      context.scope->define(sym);
+      return "";
+    }
     if (context.current_block) {
       auto alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type);
       context.current_block->AddInstruction(alloc_inst);
@@ -1456,6 +1463,10 @@ std::string CodeGenerator::Generate(const InitializedVarDefAST& node) {
     auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, b_type, false, std::vector<int32_t>{init_val});
     context.AddGlobal(global_alloc);
   } else {
+    if (context.cur_block_has_terminator) {
+      context.scope->define(sym);
+      return "";
+    }
     auto alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type);
     context.current_block->AddInstruction(alloc_inst);
     context.SetIRValue(address, alloc_inst);
@@ -1490,6 +1501,10 @@ std::string CodeGenerator::Generate(const ArrayVarDefAST& node) {
     auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, true, std::vector<int32_t>{}, dims);
     context.AddGlobal(global_alloc);
   } else {
+    if (context.cur_block_has_terminator) {
+      context.scope->define(sym);
+      return "";
+    }
     if (context.current_block) {
       auto alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type, dims);
       context.current_block->AddInstruction(alloc_inst);
@@ -1536,6 +1551,10 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
     auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, false, init_nums, dims);
     context.AddGlobal(global_alloc);
   } else {
+    if (context.cur_block_has_terminator) {
+      context.scope->define(sym);
+      return "";
+    }
     std::vector<std::string> init_vals(arr_size, "0");
     int fill_index = 0;
     FillInitValRegs(*node.init_val_list, dims, sub_sizes, -1, fill_index, init_vals, *this, context);

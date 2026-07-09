@@ -65,29 +65,30 @@ extern int yydebug;
     INT = 258,                     /* INT  */
     RETURN = 259,                  /* RETURN  */
     VOID = 260,                    /* VOID  */
-    CONST = 261,                   /* CONST  */
-    WHILE = 262,                   /* WHILE  */
-    BREAK = 263,                   /* BREAK  */
-    CONTINUE = 264,                /* CONTINUE  */
-    IDENT = 265,                   /* IDENT  */
-    INT_CONST = 266,               /* INT_CONST  */
-    ADD = 267,                     /* ADD  */
-    SUB = 268,                     /* SUB  */
-    NOT = 269,                     /* NOT  */
-    MUL = 270,                     /* MUL  */
-    MOD = 271,                     /* MOD  */
-    DIV = 272,                     /* DIV  */
-    ASSIGN = 273,                  /* ASSIGN  */
-    LT = 274,                      /* LT  */
-    LE = 275,                      /* LE  */
-    GT = 276,                      /* GT  */
-    GE = 277,                      /* GE  */
-    EQ = 278,                      /* EQ  */
-    NE = 279,                      /* NE  */
-    L_AND = 280,                   /* L_AND  */
-    L_OR = 281,                    /* L_OR  */
-    IF = 282,                      /* IF  */
-    ELSE = 283                     /* ELSE  */
+    FLOAT = 261,                   /* FLOAT  */
+    CONST = 262,                   /* CONST  */
+    WHILE = 263,                   /* WHILE  */
+    BREAK = 264,                   /* BREAK  */
+    CONTINUE = 265,                /* CONTINUE  */
+    IDENT = 266,                   /* IDENT  */
+    INT_CONST = 267,               /* INT_CONST  */
+    ADD = 268,                     /* ADD  */
+    SUB = 269,                     /* SUB  */
+    NOT = 270,                     /* NOT  */
+    MUL = 271,                     /* MUL  */
+    MOD = 272,                     /* MOD  */
+    DIV = 273,                     /* DIV  */
+    ASSIGN = 274,                  /* ASSIGN  */
+    LT = 275,                      /* LT  */
+    LE = 276,                      /* LE  */
+    GT = 277,                      /* GT  */
+    GE = 278,                      /* GE  */
+    EQ = 279,                      /* EQ  */
+    NE = 280,                      /* NE  */
+    L_AND = 281,                   /* L_AND  */
+    L_OR = 282,                    /* L_OR  */
+    IF = 283,                      /* IF  */
+    ELSE = 284                     /* ELSE  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -104,7 +105,7 @@ union YYSTYPE
   ValueAST *value_ast;
   OpAST *op_ast;
 
-#line 108 "/root/compiler/src/sysy.tab.hpp"
+#line 109 "/root/compiler/src/sysy.tab.hpp"
 
 };
 typedef union YYSTYPE YYSTYPE;

@@ -32,9 +32,9 @@ using namespace std;
   OpAST *op_ast;
 }
 
-%token INT RETURN VOID
+%token INT RETURN VOID FLOAT
 %token CONST WHILE BREAK CONTINUE
-%token <str_val> IDENT
+%token <str_val> IDENT  
 %token <int_val> INT_CONST
 
 %token ADD SUB NOT MUL MOD DIV
