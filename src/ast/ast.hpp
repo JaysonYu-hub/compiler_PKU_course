@@ -220,6 +220,7 @@ public:
   Counter scope_ident_builder;
   std::shared_ptr<Scope> scope;
   bool cur_block_has_terminator = false;
+  // 用于continue和break语句的generate
   std::vector<WhileLabelContext> while_label_contexts;
   std::shared_ptr<std::string> decl_type_context;
   // 用于内存IR

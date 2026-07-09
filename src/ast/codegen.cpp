@@ -174,6 +174,15 @@ std::string CodeGenerator::Generate(const FuncDefAST& node) {
     }
   }
 
+  // 处理不可到达的情况
+  if (!context.cur_block_has_terminator && *node.type == "i32") {
+    if (context.current_block) {
+      auto val = std::make_shared<IR::IRConstant>(0);
+      auto inst = std::make_shared<IR::IRReturn>(val);
+      context.current_block->AddInstruction(inst);
+    }
+  }
+
   context.exitScope();
   
   // 函数生成结束，重置活动指针
@@ -560,6 +569,7 @@ std::string CodeGenerator::Generate(const IfMatchedStmtAST& node) {
 std::string CodeGenerator::Generate(const WhileStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   std::string loop_label = LabelBuilder::GetLabel("while_entry");
+  // 这里的while_body是给while开头的br或者break使用的
   std::string continue_loop_label = LabelBuilder::GetLabel("while_body");
   std::string end_label = LabelBuilder::GetLabel("end");
 
@@ -569,7 +579,7 @@ std::string CodeGenerator::Generate(const WhileStmtAST& node) {
   context.SetIRValue(loop_label, loop_bb);
   context.SetIRValue(continue_loop_label, continue_loop_bb);
   context.SetIRValue(end_label, end_bb);
-
+  // j或br语句配block
   context.enterNewWhileScope(loop_label, continue_loop_label, end_label);
   if (context.current_block) {
     auto jump_inst = std::make_shared<IR::IRJump>(loop_bb);
