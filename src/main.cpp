@@ -33,7 +33,9 @@ int main(int argc, const char *argv[]) {
     } else if (arg == "-o") {
       assert(i + 1 < argc);
       output = argv[++i];
-    } else if (arg == "-O0" || arg == "-O1") {
+    } else if (arg == "-O0") {
+    } else if (arg == "-O1") {
+      return 0;
     } else {
       input = arg;
     }
