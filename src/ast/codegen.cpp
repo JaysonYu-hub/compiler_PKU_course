@@ -374,6 +374,7 @@ std::string CodeGenerator::Generate(const IfElseUnmatchedStmtAST& node) {
   }
   if (!then_has_terminator || !else_has_terminator) {
     context.AddExistingBlock(end_bb);
+    context.cur_block_has_terminator = false;
   } else {
     context.cur_block_has_terminator = true;
   }
@@ -560,6 +561,7 @@ std::string CodeGenerator::Generate(const IfMatchedStmtAST& node) {
   }
   if (!then_has_terminator || !else_has_terminator) {
     context.AddExistingBlock(end_bb);
+    context.cur_block_has_terminator = false;
   } else {
     context.cur_block_has_terminator = true;
   }
@@ -1314,7 +1316,14 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
   }
 
   if (context.scope->isGlobal()) {
-    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, false, init_vals_int, dims);
+    bool is_all_zero = true;
+    for (int32_t val : init_vals_int) {
+      if (val != 0) {
+        is_all_zero = false;
+        break;
+      }
+    }
+    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, is_all_zero, init_vals_int, dims);
     context.AddGlobal(global_alloc);
   } else {
     if (context.cur_block_has_terminator) {
@@ -1548,7 +1557,14 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
     int fill_index = 0;
     FillConstInitValFromInitVal(*node.init_val_list, dims, sub_sizes, -1, fill_index, init_nums, context);
 
-    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, false, init_nums, dims);
+    bool is_all_zero = true;
+    for (int32_t val : init_nums) {
+      if (val != 0) {
+        is_all_zero = false;
+        break;
+      }
+    }
+    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, is_all_zero, init_nums, dims);
     context.AddGlobal(global_alloc);
   } else {
     if (context.cur_block_has_terminator) {
