@@ -5,3 +5,6 @@
 /.vscode
 /compiler
 /compiler_test
+/lib
+/libsysy
+/my_autotest.py

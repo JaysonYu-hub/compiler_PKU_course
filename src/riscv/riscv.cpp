@@ -56,7 +56,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   // 为函数参数分配栈空间
   for (size_t i = 0; i < func.params.size(); i++) {
     val_stack_map[func.params[i]->GetOperandName()] = offset;
-    offset += (is_64bit && func.params[i]->GetType() == IR::IRType::IR_POINTER) ? 8 : 4;
+    offset += GetTypeSize(func.params[i]->GetType());
   }
 
   // 为所有具有返回值的指令分配栈偏移量
@@ -83,26 +83,35 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
 
       if (has_retval) {
         if (const auto* alloc = dynamic_cast<const IR::IRAlloc*>(inst.get())) {
-          // 数组分配：按实际大小分配栈空间
+          // 数组或变量分配：按实际大小分配栈空间
           local_allocs.insert(val_name);
           val_stack_map[val_name] = offset;
-          offset += alloc->GetAllocSize();
+          int alloc_size = 4;
+          if (alloc->IsArray()) {
+            alloc_size = 4;
+            for (int d : alloc->GetArrayDims()) {
+              alloc_size *= d;
+            }
+          } else {
+            alloc_size = GetTypeSize(alloc->GetAllocatedType());
+          }
+          offset += alloc_size;
         } else {
           val_stack_map[val_name] = offset;
-          offset += (is_64bit && inst->GetType() == IR::IRType::IR_POINTER) ? 8 : 4;
+          offset += GetTypeSize(inst->GetType());
         }
       }
     }
   }
 
-  int slot_size = is_64bit ? 8 : 4;
+  int slot_size = GetRegisterSize();
   int param_overflow_size = 0;
   if (max_param_count > 8) {
     param_overflow_size = slot_size * (max_param_count - 8);
   }
 
   // ra 保存空间
-  int ra_size = has_call ? (is_64bit ? 8 : 4) : 0;
+  int ra_size = has_call ? GetRegisterSize() : 0;
 
   // 计算总栈帧大小
   int total = param_overflow_size + offset + ra_size;
@@ -128,8 +137,8 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
 
   // 保存 ra
   if (has_call) {
-    int ra_offset = is_64bit ? (current_stack_size - 8) : (current_stack_size - 4);
-    if (is_64bit) {
+    int ra_offset = current_stack_size - GetRegisterSize();
+    if (GetRegisterSize() == 8) {
       EmitSd("ra", ra_offset, "sp");
     } else {
       EmitSw("ra", ra_offset, "sp");
@@ -141,7 +150,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     std::string param_name = func.params[i]->GetOperandName();
     auto it = val_stack_map.find(param_name);
     assert(it != val_stack_map.end());
-    if (is_64bit && func.params[i]->GetType() == IR::IRType::IR_POINTER) {
+    if (GetTypeSize(func.params[i]->GetType()) == 8) {
       EmitSd("a" + std::to_string(i), it->second, "sp");
     } else {
       EmitSw("a" + std::to_string(i), it->second, "sp");
@@ -153,7 +162,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     int caller_offset = current_stack_size + slot_size * ((int)i - 8);
     auto it = val_stack_map.find(param_name);
     assert(it != val_stack_map.end());
-    if (is_64bit && func.params[i]->GetType() == IR::IRType::IR_POINTER) {
+    if (GetTypeSize(func.params[i]->GetType()) == 8) {
       EmitLd("t0", caller_offset, "sp");
       EmitSd("t0", it->second, "sp");
     } else {
@@ -209,8 +218,8 @@ void Back::RiscvGenerator::Visit(const IR::IRReturn& ret_inst) {
   }
   // Epilogue
   if (has_call) {
-    int ra_offset = is_64bit ? (current_stack_size - 8) : (current_stack_size - 4);
-    if (is_64bit) {
+    int ra_offset = current_stack_size - GetRegisterSize();
+    if (GetRegisterSize() == 8) {
       EmitLd("ra", ra_offset, "sp");
     } else {
       EmitLw("ra", ra_offset, "sp");
@@ -302,7 +311,7 @@ void Back::RiscvGenerator::Visit(const IR::IRStore& inst) {
     // 全局变量
     LoadValueToReg(inst.GetVal().get(), "t0");
     std::cout << "  la t1, " << StripAt(ptr_name) << "\n";
-    if (is_64bit && inst.GetVal()->GetType() == IR::IRType::IR_POINTER) {
+    if (GetTypeSize(inst.GetVal()->GetType()) == 8) {
       std::cout << "  sd t0, 0(t1)\n";
     } else {
       std::cout << "  sw t0, 0(t1)\n";
@@ -312,7 +321,7 @@ void Back::RiscvGenerator::Visit(const IR::IRStore& inst) {
     LoadValueToReg(inst.GetVal().get(), "t0");
     auto it = val_stack_map.find(ptr_name);
     assert(it != val_stack_map.end());
-    if (is_64bit && inst.GetVal()->GetType() == IR::IRType::IR_POINTER) {
+    if (GetTypeSize(inst.GetVal()->GetType()) == 8) {
       EmitSd("t0", it->second, "sp");
     } else {
       EmitSw("t0", it->second, "sp");
@@ -321,7 +330,7 @@ void Back::RiscvGenerator::Visit(const IR::IRStore& inst) {
     // 计算出的指针地址
     LoadValueToReg(inst.GetVal().get(), "t0");
     LoadValueToReg(inst.GetPtr().get(), "t1");
-    if (is_64bit && inst.GetVal()->GetType() == IR::IRType::IR_POINTER) {
+    if (GetTypeSize(inst.GetVal()->GetType()) == 8) {
       std::cout << "  sd t0, 0(t1)\n";
     } else {
       std::cout << "  sw t0, 0(t1)\n";
@@ -335,7 +344,7 @@ void Back::RiscvGenerator::Visit(const IR::IRLoad& inst) {
   if (dynamic_cast<const IR::IRGlobalAlloc*>(ptr_raw)) {
     // 全局变量
     std::cout << "  la t0, " << StripAt(ptr_name) << "\n";
-    if (is_64bit && inst.GetType() == IR::IRType::IR_POINTER) {
+    if (GetTypeSize(inst.GetType()) == 8) {
       std::cout << "  ld t0, 0(t0)\n";
     } else {
       std::cout << "  lw t0, 0(t0)\n";
@@ -345,7 +354,7 @@ void Back::RiscvGenerator::Visit(const IR::IRLoad& inst) {
     // 局部标量变量
     auto it = val_stack_map.find(ptr_name);
     assert(it != val_stack_map.end());
-    if (is_64bit && inst.GetType() == IR::IRType::IR_POINTER) {
+    if (GetTypeSize(inst.GetType()) == 8) {
       EmitLd("t0", it->second, "sp");
     } else {
       EmitLw("t0", it->second, "sp");
@@ -354,7 +363,7 @@ void Back::RiscvGenerator::Visit(const IR::IRLoad& inst) {
   } else {
     // 计算出的指针地址
     LoadValueToReg(inst.GetPtr().get(), "t1");
-    if (is_64bit && inst.GetType() == IR::IRType::IR_POINTER) {
+    if (GetTypeSize(inst.GetType()) == 8) {
       std::cout << "  ld t0, 0(t1)\n";
     } else {
       std::cout << "  lw t0, 0(t1)\n";
@@ -379,7 +388,7 @@ void Back::RiscvGenerator::Visit(const IR::IRBranch& inst) {
 void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
   // 将参数加载到 a0-a7 或栈上
   const auto& args = inst.GetArgs();
-  int slot_size = is_64bit ? 8 : 4;
+  int slot_size = GetRegisterSize();
   for (size_t i = 0; i < args.size(); i++) {
     if (i < 8) {
       LoadValueToReg(args[i].get(), "a" + std::to_string(i));
@@ -387,7 +396,7 @@ void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
       // 参数溢出到栈上
       LoadValueToReg(args[i].get(), "t0");
       int param_offset = slot_size * ((int)i - 8);
-      if (is_64bit && args[i]->GetType() == IR::IRType::IR_POINTER) {
+      if (GetTypeSize(args[i]->GetType()) == 8) {
         EmitSd("t0", param_offset, "sp");
       } else {
         EmitSw("t0", param_offset, "sp");
@@ -501,7 +510,7 @@ void Back::RiscvGenerator::LoadValueToReg(const IR::IRValue* val, const std::str
   } else if (dynamic_cast<const IR::IRGlobalAlloc*>(val)) {
     std::string raw_name = StripAt(val->GetOperandName());
     std::cout << "  la " << reg << ", " << raw_name << "\n";
-    if (is_64bit && val->GetType() == IR::IRType::IR_POINTER) {
+    if (GetTypeSize(val->GetType()) == 8) {
       std::cout << "  ld " << reg << ", 0(" << reg << ")\n";
     } else {
       std::cout << "  lw " << reg << ", 0(" << reg << ")\n";
@@ -511,7 +520,7 @@ void Back::RiscvGenerator::LoadValueToReg(const IR::IRValue* val, const std::str
     std::string name = val->GetOperandName();
     auto it = val_stack_map.find(name);
     assert(it != val_stack_map.end());
-    if (is_64bit && val->GetType() == IR::IRType::IR_POINTER) {
+    if (GetTypeSize(val->GetType()) == 8) {
       EmitLd(reg, it->second, "sp");
     } else {
       EmitLw(reg, it->second, "sp");
@@ -522,7 +531,7 @@ void Back::RiscvGenerator::LoadValueToReg(const IR::IRValue* val, const std::str
 void Back::RiscvGenerator::StoreRegToVal(const IR::IRValue* val, const std::string& reg) {
   auto it = val_stack_map.find(val->GetOperandName());
   assert(it != val_stack_map.end());
-  if (is_64bit && val->GetType() == IR::IRType::IR_POINTER) {
+  if (GetTypeSize(val->GetType()) == 8) {
     EmitSd(reg, it->second, "sp");
   } else {
     EmitSw(reg, it->second, "sp");
@@ -550,7 +559,7 @@ void Back::RiscvGenerator::LoadAddressToReg(const IR::IRValue* val, const std::s
     std::string name = val->GetOperandName();
     auto it = val_stack_map.find(name);
     assert(it != val_stack_map.end());
-    if (is_64bit) {
+    if (GetRegisterSize() == 8) {
       EmitLd(reg, it->second, "sp");
     } else {
       EmitLw(reg, it->second, "sp");

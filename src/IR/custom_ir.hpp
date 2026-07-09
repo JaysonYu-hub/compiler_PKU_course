@@ -155,6 +155,7 @@ namespace IR {
 
     const std::vector<int>& GetArrayDims() const { return array_dims; }
     bool IsArray() const { return !array_dims.empty(); }
+    IRType GetAllocatedType() const { return type; }
     // 返回分配的总字节数
     int GetAllocSize() const {
       if (array_dims.empty()) return 4;
@@ -183,8 +184,9 @@ namespace IR {
   class IRLoad : public IRNameInstruction {
   private:
     std::shared_ptr<IRValue> ptr;
+    IRType loaded_type;
   public:
-    IRLoad(std::string name, std::shared_ptr<IRValue> ptr);
+    IRLoad(std::string name , std::shared_ptr<IRValue> ptr, IRType type = IRType::IR_INT32);
 
     std::shared_ptr<IRValue> GetPtr() const { return ptr; }
     std::string DumpText() const override;

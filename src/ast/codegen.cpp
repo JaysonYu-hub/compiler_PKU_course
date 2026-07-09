@@ -424,7 +424,7 @@ std::string CodeGenerator::Generate(const AssignStmtAST& node) {
       if (arr_info.is_param) {
         std::string loaded_ptr = context.NewReg();
         if (context.current_block) {
-          auto load_ptr_inst = std::make_shared<IR::IRLoad>(loaded_ptr, prev_val);
+          auto load_ptr_inst = std::make_shared<IR::IRLoad>(loaded_ptr, prev_val, IR::IRType::IR_POINTER);
           context.current_block->AddInstruction(load_ptr_inst);
           context.SetIRValue(loaded_ptr, load_ptr_inst);
           prev_val = load_ptr_inst;
@@ -1071,7 +1071,7 @@ std::string CodeGenerator::Generate(const LValAST& node) {
     if (arr_info.is_param) {
       std::string loaded_ptr = context.NewReg();
       if (context.current_block) {
-        auto load_ptr_inst = std::make_shared<IR::IRLoad>(loaded_ptr, prev_val);
+        auto load_ptr_inst = std::make_shared<IR::IRLoad>(loaded_ptr, prev_val, IR::IRType::IR_POINTER);
         context.current_block->AddInstruction(load_ptr_inst);
         context.SetIRValue(loaded_ptr, load_ptr_inst);
         prev_val = load_ptr_inst;

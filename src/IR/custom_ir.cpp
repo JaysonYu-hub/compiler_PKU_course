@@ -219,8 +219,8 @@ namespace IR {
   }
 
   // IRLoad
-  IRLoad::IRLoad(std::string name, std::shared_ptr<IRValue> ptr)
-    : IRNameInstruction(std::move(name)), ptr(std::move(ptr)) {
+  IRLoad::IRLoad(std::string name, std::shared_ptr<IRValue> ptr, IRType type)
+    : IRNameInstruction(std::move(name)), ptr(std::move(ptr)), loaded_type(type) {
     assert(this->ptr != nullptr);
   }
 
@@ -229,7 +229,7 @@ namespace IR {
   }
 
   IRType IRLoad::GetType() const {
-    return IRType::IR_INT32;
+    return loaded_type;
   }
 
   // IRGetElemPtr

@@ -47,5 +47,11 @@ namespace Back {
     void EmitSd(const std::string& reg, int offset, const std::string& base_reg = "sp");
     std::string StripAt(const std::string& name);
     std::string StripPercent(const std::string& name);
+    int GetTypeSize(IR::IRType type) const {
+      return (is_64bit && type == IR::IRType::IR_POINTER) ? 8 : 4;
+    }
+    int GetRegisterSize() const {
+      return is_64bit ? 8 : 4;
+    }
   };
 };
