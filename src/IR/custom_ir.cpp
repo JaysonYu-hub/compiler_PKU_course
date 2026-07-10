@@ -31,6 +31,7 @@ namespace IR {
   std::string TypeToString(IRType type) {
     switch (type) {
       case IRType::IR_INT32: return "i32";
+      case IRType::IR_FLOAT: return "float";
       case IRType::IR_VOID:  return "void";
       case IRType::IR_POINTER: return "*i32";
       case IRType::IR_ARRAY: return "array";
@@ -44,6 +45,7 @@ namespace IR {
     if (type[0] == '*') return IRType::IR_POINTER;
     if (type[0] == '[') return IRType::IR_ARRAY;
     if (type == "i32") return IRType::IR_INT32;
+    if (type == "float" || type == "f32") return IRType::IR_FLOAT;
     if (type == "void") return IRType::IR_VOID;
     if (type == "ptr") return IRType::IR_POINTER;
     if (type == "array") return IRType::IR_ARRAY;
@@ -62,6 +64,17 @@ namespace IR {
     return IRType::IR_INT32;
   }
 
+  // IRFloatConstant
+  std::string IRFloatConstant::DumpText() const {
+    return std::to_string(val);
+  }
+  std::string IRFloatConstant::GetOperandName() const {
+    return std::to_string(val);
+  }
+  IRType IRFloatConstant::GetType() const {
+    return IRType::IR_FLOAT;
+  }
+
   // IRSymbol
   std::string IRSymbol::DumpText() const {
     return name;
@@ -76,6 +89,9 @@ namespace IR {
   // IRGlobalAlloc
   IRGlobalAlloc::IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<int32_t> init_vals, std::vector<int> array_dims)
     : name(std::move(name)), type(std::move(type)), is_zeroinit(is_zeroinit), init_vals(std::move(init_vals)), array_dims(std::move(array_dims)) {}
+
+  IRGlobalAlloc::IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<float> init_float_vals, std::vector<int> array_dims)
+    : name(std::move(name)), type(std::move(type)), is_zeroinit(is_zeroinit), init_float_vals(std::move(init_float_vals)), array_dims(std::move(array_dims)) {}
 
   std::string IRGlobalAlloc::FormatNestedInitializer(const std::vector<int32_t>& vals, 
                                              const std::vector<int>& dims, 
@@ -108,29 +124,80 @@ namespace IR {
     }
   }
 
+  std::string IRGlobalAlloc::FormatNestedFloatInitializer(const std::vector<float>& vals, 
+                                                  const std::vector<int>& dims, 
+                                                  size_t dim_idx, 
+                                                  size_t& val_idx) {
+    if (dim_idx == dims.size() - 1) {
+      std::string res = "{";
+      for (int i = 0; i < dims[dim_idx]; i++) {
+        if (val_idx < vals.size()) {
+          res += std::to_string(vals[val_idx++]);
+        } else {
+          res += "0.0";
+        }
+        if (i != dims[dim_idx] - 1) {
+          res += ", ";
+        }
+      }
+      res += "}";
+      return res;
+    } else {
+      std::string res = "{";
+      for (int i = 0; i < dims[dim_idx]; i++) {
+        res += FormatNestedFloatInitializer(vals, dims, dim_idx + 1, val_idx);
+        if (i != dims[dim_idx] - 1) {
+          res += ", ";
+        }
+      }
+      res += "}";
+      return res;
+    }
+  }
+
   std::string IRGlobalAlloc::DumpText() const {
     if (is_zeroinit) {
       return "global " + name + " = alloc " + type + ", zeroinit";
     }
-    if (init_vals.size() == 1 && array_dims.empty()) {
-      return "global " + name + " = alloc " + type + ", " + std::to_string(init_vals[0]);
-    }
-    
-    std::string str;
-    if (!array_dims.empty()) {
-      size_t val_idx = 0;
-      str = FormatNestedInitializer(init_vals, array_dims, 0, val_idx);
-    } else {
-      str = "{";
-      for (size_t i = 0; i < init_vals.size(); i++) {
-        str += std::to_string(init_vals[i]);
-        if (i != init_vals.size() - 1) {
-          str += ", ";
-        }
+    if (!init_float_vals.empty()) {
+      if (init_float_vals.size() == 1 && array_dims.empty()) {
+        return "global " + name + " = alloc " + type + ", " + std::to_string(init_float_vals[0]);
       }
-      str += "}";
+      std::string str;
+      if (!array_dims.empty()) {
+        size_t val_idx = 0;
+        str = FormatNestedFloatInitializer(init_float_vals, array_dims, 0, val_idx);
+      } else {
+        str = "{";
+        for (size_t i = 0; i < init_float_vals.size(); i++) {
+          str += std::to_string(init_float_vals[i]);
+          if (i != init_float_vals.size() - 1) {
+            str += ", ";
+          }
+        }
+        str += "}";
+      }
+      return "global " + name + " = alloc " + type + ", " + str;
+    } else {
+      if (init_vals.size() == 1 && array_dims.empty()) {
+        return "global " + name + " = alloc " + type + ", " + std::to_string(init_vals[0]);
+      }
+      std::string str;
+      if (!array_dims.empty()) {
+        size_t val_idx = 0;
+        str = FormatNestedInitializer(init_vals, array_dims, 0, val_idx);
+      } else {
+        str = "{";
+        for (size_t i = 0; i < init_vals.size(); i++) {
+          str += std::to_string(init_vals[i]);
+          if (i != init_vals.size() - 1) {
+            str += ", ";
+          }
+        }
+        str += "}";
+      }
+      return "global " + name + " = alloc " + type + ", " + str;
     }
-    return "global " + name + " = alloc " + type + ", " + str;
   }
 
   std::string IRGlobalAlloc::GetOperandName() const {

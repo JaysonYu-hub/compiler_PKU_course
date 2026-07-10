@@ -9,6 +9,7 @@ namespace IR {
 
   enum class IRType {
     IR_INT32,
+    IR_FLOAT,
     IR_VOID,
     IR_POINTER,
     IR_ARRAY
@@ -48,6 +49,18 @@ namespace IR {
     IRType GetType() const override;
   };
 
+  class IRFloatConstant : public IRValue {
+  private:
+    float val;
+  public:
+    explicit IRFloatConstant(float val) : val(val) {}
+    float GetValue() const { return val; }
+
+    std::string DumpText() const override;
+    std::string GetOperandName() const override;
+    IRType GetType() const override;
+  };
+
   // 符号/变量引用类
   class IRSymbol : public IRValue {
   private:
@@ -67,17 +80,24 @@ namespace IR {
     std::string type;
     bool is_zeroinit;
     std::vector<int32_t> init_vals;
+    std::vector<float> init_float_vals;
     std::vector<int> array_dims;
 
     static std::string FormatNestedInitializer(const std::vector<int32_t>& vals, 
                                                const std::vector<int>& dims, 
                                                size_t dim_idx, 
                                                size_t& val_idx);
+    static std::string FormatNestedFloatInitializer(const std::vector<float>& vals, 
+                                                    const std::vector<int>& dims, 
+                                                    size_t dim_idx, 
+                                                    size_t& val_idx);
   public:
     IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<int32_t> init_vals, std::vector<int> array_dims = {});
+    IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<float> init_float_vals, std::vector<int> array_dims = {});
 
     bool IsZeroInit() const { return is_zeroinit; }
     const std::vector<int32_t>& GetInitVals() const { return init_vals; }
+    const std::vector<float>& GetInitFloatVals() const { return init_float_vals; }
     const std::vector<int>& GetArrayDims() const { return array_dims; }
     bool IsArray() const { return !array_dims.empty(); }
     // 返回分配的总字节数

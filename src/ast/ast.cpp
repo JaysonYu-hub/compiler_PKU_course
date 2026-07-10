@@ -18,7 +18,7 @@ std::string LValAST::DumpOnlyAddress(Context& context) const {
     
     std::cout << "  " << ret_reg << " = getelemptr " << 
     std::get<ArrayInformation>(sym->value).address << ", " 
-    << std::to_string(index_exp[0]->getValue(context)) << "\n";
+    << std::to_string(index_exp[0]->getValue(context).getInt()) << "\n";
     return ret_reg;
   } else {
     std::cerr << "Error: LVal " << *ident << " is not a variable or array\n";
@@ -26,151 +26,197 @@ std::string LValAST::DumpOnlyAddress(Context& context) const {
   return "";
 }
 
-int ExpAST::getValue(Context& context) const {
+ConstantVal ExpAST::getValue(Context& context) const {
   return lor_exp->getValue(context);
 }
 
-int UnaryOPExpAST::getValue(Context& context) const {
+ConstantVal UnaryOPExpAST::getValue(Context& context) const {
+  auto const_val = unary_exp->getValue(context);
   if (op->op == "+") {
-    return unary_exp->getValue(context);
+    return const_val;
   } else if (op->op == "-") {
-    return -unary_exp->getValue(context);
+    if (const_val.isFloat()) {
+      return -const_val.getFloat();
+    } else {
+      return -const_val.getInt();
+    }
   } else if (op->op == "!") {
-    return unary_exp->getValue(context) == 0 ? 1 : 0;
+    if (const_val.isFloat()) {
+      return const_val.getFloat() == 0.0f ? 1 : 0;
+    } else {
+      return const_val.getInt() == 0 ? 1 : 0;
+    }
   } else {
-    return 0;
+    assert(false);
+    return ConstantVal(0);
   }
 }
 
-int PrimaryUnaryExpAST::getValue(Context& context) const {
+ConstantVal PrimaryUnaryExpAST::getValue(Context& context) const {
   if (primary_exp) {
     return primary_exp->getValue(context);
   }
-  return 0;
+  return ConstantVal(0);
 }
 
-int FuncCallExpAST::getValue(Context& context) const {
+ConstantVal FuncCallExpAST::getValue(Context& context) const {
   std::cerr << "func can't getvalue before start" << "\n";
-  return 0;
+  return ConstantVal(0);
 }
 
-int ParenthesizedExprAST::getValue(Context& context) const {
+ConstantVal ParenthesizedExprAST::getValue(Context& context) const {
   return exp->getValue(context);
 }
 
-int NumberPrimaryExprAST::getValue(Context& context) const {
+ConstantVal NumberPrimaryExprAST::getValue(Context& context) const {
   return value;
 }
 
-int LValuePrimaryExprAST::getValue(Context& context) const {
+ConstantVal LValuePrimaryExprAST::getValue(Context& context) const {
   return lval->getValue(context);
 }
 
-int MulAddExpAST::getValue(Context& context) const {
+ConstantVal MulAddExpAST::getValue(Context& context) const {
   if (mul_exp) {
     return mul_exp->getValue(context);
   }
-  return 0;
+  return ConstantVal(0);
 }
 
-int BinaryAddExprAST::getValue(Context& context) const {
-  if (op->op == "+") {
-    return add_exp->getValue(context) + mul_exp->getValue(context);
-  } else if (op->op == "-") {
-    return add_exp->getValue(context) - mul_exp->getValue(context);
+ConstantVal BinaryAddExprAST::getValue(Context& context) const {
+  auto add_val = add_exp->getValue(context);
+  auto mul_val = mul_exp->getValue(context);
+  if (add_val.isFloat() || mul_val.isFloat()) {
+    float lhs = add_val.getFloat();
+    float rhs = mul_val.getFloat();
+    if (op->op == "+") return lhs + rhs;
+    else if (op->op == "-") return lhs - rhs;
   } else {
-    return 0;
+    int lhs = add_val.getInt();
+    int rhs = mul_val.getInt();
+    if (op->op == "+") return lhs + rhs;
+    else if (op->op == "-") return lhs - rhs;
   }
+  assert(false);
+  return ConstantVal(0);
 }
 
-int UnaryMulExpAST::getValue(Context& context) const {
+ConstantVal UnaryMulExpAST::getValue(Context& context) const {
   if (unary_exp) {
     return unary_exp->getValue(context);
   }
-  return 0;
+  return ConstantVal(0);
 }
 
-int BinaryMulExprAST::getValue(Context& context) const {
-  if (op->op == "*") {
-    return mul_exp->getValue(context) * unary_exp->getValue(context);
-  } else if (op->op == "/") {
-    return mul_exp->getValue(context) / unary_exp->getValue(context);
-  } else if (op->op == "%") {
-    return mul_exp->getValue(context) % unary_exp->getValue(context);
+ConstantVal BinaryMulExprAST::getValue(Context& context) const {
+  auto mul_val = mul_exp->getValue(context);
+  auto unary_val = unary_exp->getValue(context);
+  if (mul_val.isFloat() || unary_val.isFloat()) {
+    float lhs = mul_val.getFloat();
+    float rhs = unary_val.getFloat();
+    if (op->op == "*") return lhs * rhs;
+    else if (op->op == "/") return lhs / rhs;
+    else if (op->op == "%") return (int)lhs % (int)rhs;
   } else {
-    return 0;
+    int lhs = mul_val.getInt();
+    int rhs = unary_val.getInt();
+    if (op->op == "*") return lhs * rhs;
+    else if (op->op == "/") return lhs / rhs;
+    else if (op->op == "%") return lhs % rhs;
   }
+  assert(false);
+  return ConstantVal(0);
 }
 
-int AddRelExpAST::getValue(Context& context) const {
+ConstantVal AddRelExpAST::getValue(Context& context) const {
   return add_exp->getValue(context);
 }
 
-int BinaryRelExprAST::getValue(Context& context) const {
-  if (op->op == "<") {
-    return rel_exp->getValue(context) < add_exp->getValue(context);
-  } else if (op->op == ">") {
-    return rel_exp->getValue(context) > add_exp->getValue(context);
-  } else if (op->op == "<=") {
-    return rel_exp->getValue(context) <= add_exp->getValue(context);
-  } else if (op->op == ">=") {
-    return rel_exp->getValue(context) >= add_exp->getValue(context);
+ConstantVal BinaryRelExprAST::getValue(Context& context) const {
+  auto rel_val = rel_exp->getValue(context);
+  auto add_val = add_exp->getValue(context);
+  if (rel_val.isFloat() || add_val.isFloat()) {
+    float lhs = rel_val.getFloat();
+    float rhs = add_val.getFloat();
+    if (op->op == "<") return lhs < rhs ? 1 : 0;
+    else if (op->op == ">") return lhs > rhs ? 1 : 0;
+    else if (op->op == "<=") return lhs <= rhs ? 1 : 0;
+    else if (op->op == ">=") return lhs >= rhs ? 1 : 0;
   } else {
-    return 0;
+    int lhs = rel_val.getInt();
+    int rhs = add_val.getInt();
+    if (op->op == "<") return lhs < rhs ? 1 : 0;
+    else if (op->op == ">") return lhs > rhs ? 1 : 0;
+    else if (op->op == "<=") return lhs <= rhs ? 1 : 0;
+    else if (op->op == ">=") return lhs >= rhs ? 1 : 0;
   }
+  assert(false);
+  return ConstantVal(0);
 }
 
-int RelEqExpAST::getValue(Context& context) const {
+ConstantVal RelEqExpAST::getValue(Context& context) const {
   return rel_exp->getValue(context);
 }
 
-int BinaryEqExprAST::getValue(Context& context) const {
-  if (op->op == "==") {
-    return eq_exp->getValue(context) == rel_exp->getValue(context);
-  } else if (op->op == "!=") {
-    return eq_exp->getValue(context) != rel_exp->getValue(context);
+ConstantVal BinaryEqExprAST::getValue(Context& context) const {
+  auto eq_val = eq_exp->getValue(context);
+  auto rel_val = rel_exp->getValue(context);
+  if (eq_val.isFloat() || rel_val.isFloat()) {
+    float lhs = eq_val.getFloat();
+    float rhs = rel_val.getFloat();
+    if (op->op == "==") return lhs == rhs ? 1 : 0;
+    else if (op->op == "!=") return lhs != rhs ? 1 : 0;
   } else {
-    return 0;
+    int lhs = eq_val.getInt();
+    int rhs = rel_val.getInt();
+    if (op->op == "==") return lhs == rhs ? 1 : 0;
+    else if (op->op == "!=") return lhs != rhs ? 1 : 0;
   }
+  assert(false);
+  return ConstantVal(0);
 }
 
-int EqLAndExpAST::getValue(Context& context) const {
+ConstantVal EqLAndExpAST::getValue(Context& context) const {
   return eq_exp->getValue(context);
 }
 
-int BinaryLogicalAndExprAST::getValue(Context& context) const {
-  if (op->op == "&&") {
-    return land_exp->getValue(context) && eq_exp->getValue(context);
-  } else {
-    return 0;
-  }
+ConstantVal BinaryLogicalAndExprAST::getValue(Context& context) const {
+  auto land_val = land_exp->getValue(context);
+  auto eq_val = eq_exp->getValue(context);
+  bool lhs = land_val.isFloat() ? (land_val.getFloat() != 0.0f) : (land_val.getInt() != 0);
+  bool rhs = eq_val.isFloat() ? (eq_val.getFloat() != 0.0f) : (eq_val.getInt() != 0);
+  return (lhs && rhs) ? 1 : 0;
 }
 
-int LAndLOrExpAST::getValue(Context& context) const {
+ConstantVal LAndLOrExpAST::getValue(Context& context) const {
   return land_exp->getValue(context);
 }
 
-int BinaryLogicalOrExprAST::getValue(Context& context) const {
-  if (op->op == "||") {
-    return lor_exp->getValue(context) || land_exp->getValue(context);
-  } else {
-    return 0;
-  }
+ConstantVal BinaryLogicalOrExprAST::getValue(Context& context) const {
+  auto lor_val = lor_exp->getValue(context);
+  auto land_val = land_exp->getValue(context);
+  bool lhs = lor_val.isFloat() ? (lor_val.getFloat() != 0.0f) : (lor_val.getInt() != 0);
+  bool rhs = land_val.isFloat() ? (land_val.getFloat() != 0.0f) : (land_val.getInt() != 0);
+  return (lhs || rhs) ? 1 : 0;
 }
 
-int LValAST::getValue(Context& context) const { 
+ConstantVal LValAST::getValue(Context& context) const { 
   auto sym = context.scope->lookup(*ident);
   if (sym == nullptr) {
     std::cerr << "Error: LVal " << *ident << " not found\n";
-    return 0;
+    return ConstantVal(0);
   }
   if (sym->kind == SymbolKind::CONSTANT) {
-    return std::get<int>(sym->value);
+    if (std::holds_alternative<float>(sym->value)) {
+      return std::get<float>(sym->value);
+    } else {
+      return std::get<int>(sym->value);
+    }
   } else if (sym->kind == SymbolKind::CONST_ARRAY) {
     auto arr_info = std::get<ArrayInformation>(sym->value);
     std::vector<int> idxs;
     for (auto& expr : index_exp) {
-      idxs.push_back(expr->getValue(context));
+      idxs.push_back(expr->getValue(context).getInt());
     }
     int flat_idx = 0;
     for (size_t i = 0; i < idxs.size(); i++) {
@@ -180,28 +226,32 @@ int LValAST::getValue(Context& context) const {
       }
       flat_idx += idxs[i] * suffix_size;
     }
-    if (flat_idx >= 0 && flat_idx < (int)arr_info.const_values.size()) {
-      return arr_info.const_values[flat_idx];
+    if (flat_idx >= 0 && flat_idx < (int)arr_info.GetTotalSize()) {
+      if (!arr_info.const_float_values.empty()) {
+        return arr_info.const_float_values[flat_idx];
+      } else {
+        return arr_info.const_values[flat_idx];
+      }
     }
-    return 0;
+    return ConstantVal(0);
   } else if (sym->kind == SymbolKind::VARIABLE) {
     std::cerr << "Error: LVal is a variable " << *ident << "\n";
-    return 0;
+    return ConstantVal(0);
   } else {
     std::cerr << "Error: LVal " << *ident << " is not a variable, constant, or const array\n";
-    return 0;
+    return ConstantVal(0);
   }
 }
 
-int ConstExpAST::getValue(Context& context) const { 
+ConstantVal ConstExpAST::getValue(Context& context) const { 
   return exp->getValue(context);
 }
 
-int ConstExpConstInitValAST::getValue(Context& context) const { 
+ConstantVal ConstExpConstInitValAST::getValue(Context& context) const { 
   return const_exp->getValue(context);
 }
 
-static void FlattenConstInitVal(const BaseAST& node, Context& context, std::vector<int>& result) {
+static void FlattenConstInitVal(const BaseAST& node, Context& context, std::vector<ConstantVal>& result) {
   if (const auto* p = dynamic_cast<const ConstExpConstInitValAST*>(&node)) {
     result.push_back(p->const_exp->getValue(context));
   } else if (const auto* p = dynamic_cast<const CompoundConstInitValueAST*>(&node)) {
@@ -213,22 +263,22 @@ static void FlattenConstInitVal(const BaseAST& node, Context& context, std::vect
   }
 }
 
-int CompoundConstInitValueAST::getValue(Context& context) const { 
+ConstantVal CompoundConstInitValueAST::getValue(Context& context) const { 
   assert(false);
-  return 0;
+  return ConstantVal(0);
 }
 
-std::vector<int> CompoundConstInitValueAST::getValues(Context& context) const { 
-  std::vector<int> init_vals;
+std::vector<ConstantVal> CompoundConstInitValueAST::getConstantVals(Context& context) const { 
+  std::vector<ConstantVal> init_vals;
   FlattenConstInitVal(*this, context, init_vals);
   return init_vals;
 }
 
-int InitValAST::getValue(Context& context) const { 
+ConstantVal InitValAST::getValue(Context& context) const { 
   return exp->getValue(context);
 }
 
-static void FlattenInitValValues(const BaseAST& node, Context& context, std::vector<int>& result) {
+static void FlattenInitValValues(const BaseAST& node, Context& context, std::vector<ConstantVal>& result) {
   if (const auto* p = dynamic_cast<const InitValAST*>(&node)) {
     result.push_back(p->exp->getValue(context));
   } else if (const auto* p = dynamic_cast<const InitValListAST*>(&node)) {
@@ -238,8 +288,8 @@ static void FlattenInitValValues(const BaseAST& node, Context& context, std::vec
   }
 }
 
-std::vector<int> InitValListAST::getValues(Context& context) const { 
-  std::vector<int> ret;
+std::vector<ConstantVal> InitValListAST::getConstantVals(Context& context) const { 
+  std::vector<ConstantVal> ret;
   FlattenInitValValues(*this, context, ret);
   return ret;
 }

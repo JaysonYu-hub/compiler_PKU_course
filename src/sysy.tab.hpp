@@ -72,23 +72,24 @@ extern int yydebug;
     CONTINUE = 265,                /* CONTINUE  */
     IDENT = 266,                   /* IDENT  */
     INT_CONST = 267,               /* INT_CONST  */
-    ADD = 268,                     /* ADD  */
-    SUB = 269,                     /* SUB  */
-    NOT = 270,                     /* NOT  */
-    MUL = 271,                     /* MUL  */
-    MOD = 272,                     /* MOD  */
-    DIV = 273,                     /* DIV  */
-    ASSIGN = 274,                  /* ASSIGN  */
-    LT = 275,                      /* LT  */
-    LE = 276,                      /* LE  */
-    GT = 277,                      /* GT  */
-    GE = 278,                      /* GE  */
-    EQ = 279,                      /* EQ  */
-    NE = 280,                      /* NE  */
-    L_AND = 281,                   /* L_AND  */
-    L_OR = 282,                    /* L_OR  */
-    IF = 283,                      /* IF  */
-    ELSE = 284                     /* ELSE  */
+    FLOAT_CONST = 268,             /* FLOAT_CONST  */
+    ADD = 269,                     /* ADD  */
+    SUB = 270,                     /* SUB  */
+    NOT = 271,                     /* NOT  */
+    MUL = 272,                     /* MUL  */
+    MOD = 273,                     /* MOD  */
+    DIV = 274,                     /* DIV  */
+    ASSIGN = 275,                  /* ASSIGN  */
+    LT = 276,                      /* LT  */
+    LE = 277,                      /* LE  */
+    GT = 278,                      /* GT  */
+    GE = 279,                      /* GE  */
+    EQ = 280,                      /* EQ  */
+    NE = 281,                      /* NE  */
+    L_AND = 282,                   /* L_AND  */
+    L_OR = 283,                    /* L_OR  */
+    IF = 284,                      /* IF  */
+    ELSE = 285                     /* ELSE  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -101,11 +102,12 @@ union YYSTYPE
 
   std::string *str_val;
   int int_val;
+  float float_val;
   BaseAST *ast_val;
   ValueAST *value_ast;
   OpAST *op_ast;
 
-#line 109 "/root/compiler/src/sysy.tab.hpp"
+#line 111 "/root/compiler/src/sysy.tab.hpp"
 
 };
 typedef union YYSTYPE YYSTYPE;

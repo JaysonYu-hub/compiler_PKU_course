@@ -29,6 +29,10 @@ Decimal       [1-9][0-9]*
 Octal         0[0-7]*
 Hexadecimal   0[xX][0-9a-fA-F]+
 
+/* 浮点数字面量 */
+DecimalF      ([0-9]*\.[0-9]+|[0-9]+\.)([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+
+HexadecimalF  0[xX]([0-9a-fA-F]*\.[0-9a-fA-F]+|[0-9a-fA-F]+\.)([pP][+-]?[0-9]+)?|0[xX][0-9a-fA-F]+[pP][+-]?[0-9]+
+
 /* 多行注释状态 */
 %x NOTECOMMENT
 
@@ -44,6 +48,7 @@ Hexadecimal   0[xX][0-9a-fA-F]+
 
 "int"           { return INT; }
 "void"          { return VOID; }
+"float"         { return FLOAT; }
 "return"        { return RETURN; }
 "const"         { return CONST; }
 "if"            { return IF; }              
@@ -58,6 +63,8 @@ Hexadecimal   0[xX][0-9a-fA-F]+
 {Decimal}       { yylval.int_val = strtol(yytext, nullptr, 0); return INT_CONST; }
 {Octal}         { yylval.int_val = strtol(yytext, nullptr, 0); return INT_CONST; }
 {Hexadecimal}   { yylval.int_val = strtol(yytext, nullptr, 0); return INT_CONST; }
+{DecimalF}      { yylval.float_val = strtof(yytext, nullptr); return FLOAT_CONST; }
+{HexadecimalF}  { yylval.float_val = strtof(yytext, nullptr); return FLOAT_CONST; }
 
 "+" { return ADD; }
 "-" { return SUB; }

@@ -76,10 +76,11 @@ class ArrayInformation {
   std::string address;
   std::vector<int> dims;
   std::vector<int> const_values;
+  std::vector<float> const_float_values;
   bool is_param = false;
   ArrayInformation() = default;
-  ArrayInformation(std::string address, std::vector<int> dims, std::vector<int> const_values = {}, bool is_param = false) 
-    : address(std::move(address)), dims(std::move(dims)), const_values(std::move(const_values)), is_param(is_param) {}
+  ArrayInformation(std::string address, std::vector<int> dims, std::vector<int> const_values = {}, std::vector<float> const_float_values = {}, bool is_param = false) 
+    : address(std::move(address)), dims(std::move(dims)), const_values(std::move(const_values)), const_float_values(std::move(const_float_values)), is_param(is_param) {}
 
   int GetTotalSize() const {
     int total = 1;
@@ -105,8 +106,9 @@ struct Symbol {
 public:
   std::string name;
   SymbolKind kind;
-  std::variant<int, std::string, FuncInformation, ArrayInformation> value;
+  std::variant<int, float, std::string, FuncInformation, ArrayInformation> value;
   Symbol(const std::string &name, SymbolKind kind, int const_value) : name(name), kind(kind), value(const_value) {}
+  Symbol(const std::string &name, SymbolKind kind, float const_value) : name(name), kind(kind), value(const_value) {}
   Symbol(const std::string &name, SymbolKind kind, const std::string &address) : name(name), kind(kind), value(address) {}
 
   Symbol(const std::string &name, SymbolKind kind, FuncInformation func_information) : name(name), kind(kind), value(func_information) {}
@@ -199,6 +201,24 @@ public:
   }
 };
 
+class ConstantVal {
+public:
+  std::variant<int, float> val;
+  ConstantVal() : val(0) {}
+  ConstantVal(int val) : val(val) {}
+  ConstantVal(float val) : val(val) {}
+
+  bool isFloat() const {
+    return std::holds_alternative<float>(val);
+  }
+  float getFloat() const {
+    return isFloat() ? std::get<float>(val) : static_cast<float>(std::get<int>(val));
+  }
+  int32_t getInt() const {
+    return isFloat() ? static_cast<int32_t>(std::get<float>(val)) : std::get<int>(val);
+  }
+};
+
 class WhileLabelContext {
 public:
   std::string while_label_begin;
@@ -270,14 +290,23 @@ public:
     if (ir_values.find(name) != ir_values.end()) {
       return ir_values[name];
     }
-    // 不再利用前缀推导变量，仅自动解析纯整数字符串常量
     if (!name.empty() && name[0] != '%' && name[0] != '@') {
-      try {
-        int val = std::stoi(name);
-        auto const_val = std::make_shared<IR::IRConstant>(val);
-        ir_values[name] = const_val;
-        return const_val;
-      } catch (...) {
+      if (name.find('.') != std::string::npos) {
+        try {
+          float val = std::stof(name);
+          auto const_val = std::make_shared<IR::IRFloatConstant>(val);
+          ir_values[name] = const_val;
+          return const_val;
+        } catch (...) {
+        }
+      } else {
+        try {
+          int val = std::stoi(name);
+          auto const_val = std::make_shared<IR::IRConstant>(val);
+          ir_values[name] = const_val;
+          return const_val;
+        } catch (...) {
+        }
       }
     }
     return nullptr;
@@ -343,7 +372,7 @@ public:
 class ValueAST : public BaseAST {
 public:
   virtual ~ValueAST() = default;
-  virtual int getValue(Context& context) const = 0;
+  virtual ConstantVal getValue(Context& context) const = 0;
 };
 
 class ArrayDimensionsAST : public BaseAST {
@@ -365,7 +394,6 @@ public:
   std::unique_ptr<BaseAST> comp_unit;
   CompUnitSequenceAST() = default;
 };
-using CompEndCompUnitAST = CompUnitSequenceAST;
 
 class CompUnitListAST : public BaseAST {
 public:
@@ -373,7 +401,6 @@ public:
   std::unique_ptr<BaseAST> comp_unit;
   CompUnitListAST() = default;
 };
-using TwoEndCompUnitAST = CompUnitListAST;
 
 // comp_unit ::= Decl | FuncDef
 class FunctionDefinitionUnitAST : public BaseAST {
@@ -381,14 +408,12 @@ public:
   std::unique_ptr<BaseAST> func_def;
   FunctionDefinitionUnitAST() = default; 
 };
-using FuncDefCompUnitAST = FunctionDefinitionUnitAST;
 
 class DeclarationUnitAST : public BaseAST {
 public:
     std::unique_ptr<BaseAST> decl;
     DeclarationUnitAST() = default;
 };
-using DeclCompUnitAST = DeclarationUnitAST;
 
 class FuncFParamsAST;
 // FuncDef ::= Type IDENT '(' [FuncFParams] ')' Block
@@ -424,14 +449,12 @@ public:
   std::unique_ptr<BaseAST> decl;
   DeclBlockAST() = default; 
 };
-using DeclBloAST = DeclBlockAST;
 
 class StmtBlockAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> stmt;
   StmtBlockAST() = default; 
 };
-using StmtBloAST = StmtBlockAST;
 
 // Block ::= '{' {BlockItem} '}'
 class BlockAST : public BaseAST {
@@ -446,14 +469,12 @@ public:
   std::unique_ptr<BaseAST> unmatched_stmt;
   UnmatchedStmtWrapperAST() = default; 
 };
-using UnmatchedStmtStmtAST = UnmatchedStmtWrapperAST;
 
 class MatchedStmtWrapperAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> matched_stmt;
   MatchedStmtWrapperAST() = default; 
 };
-using MatchedStmtStmtAST = MatchedStmtWrapperAST;
 
 // UnmatchedStmt ::= IF '(' Exp ')' Stmt | IF '(' Exp ')' MatchedStmt ELSE UnMatchedStmt | WHILE '(' Exp ')' UnmatchedStmt
 class IfUnmatchedStmtAST : public BaseAST {
@@ -542,7 +563,7 @@ class ExpAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> lor_exp;
   ExpAST() = default;
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 // UnaryExp ::= UnaryOP UnaryExp | PrimaryExp | IDENT '(' [FuncRParams] ')'
@@ -551,14 +572,14 @@ public:
   std::unique_ptr<OpAST> op;
   std::unique_ptr<ValueAST> unary_exp;
   UnaryOPExpAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 class PrimaryUnaryExpAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> primary_exp;
   PrimaryUnaryExpAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 class FuncCallExpAST : public ValueAST {
@@ -566,7 +587,7 @@ public:
   std::unique_ptr<std::string> ident;
   std::unique_ptr<BaseAST> func_r_params;
   FuncCallExpAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 // FuncRParams ::= Exp { ',' Exp }
@@ -581,25 +602,22 @@ class ParenthesizedExprAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> exp;
   ParenthesizedExprAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
-using ThreePriAST = ParenthesizedExprAST;
 
 class LValuePrimaryExprAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> lval;
   LValuePrimaryExprAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
-using LValPriAST = LValuePrimaryExprAST;
 
 class NumberPrimaryExprAST : public ValueAST {
 public:
-  int value;
+  ConstantVal value;
   NumberPrimaryExprAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
-using NumberPriAST = NumberPrimaryExprAST;
 
 //'+' | '-' | '!' | '*' | '/' | '%'
 class OpAST : public BaseAST {
@@ -613,7 +631,7 @@ class UnaryMulExpAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> unary_exp;
   UnaryMulExpAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 class BinaryMulExprAST : public ValueAST {
@@ -622,16 +640,15 @@ public:
   std::unique_ptr<OpAST> op; // '*' | '/' | '%'
   std::unique_ptr<ValueAST> unary_exp;
   BinaryMulExprAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
-using ThreeMulExpAST = BinaryMulExprAST;
 
 // AddExp ::= MulExp | AddExp ('+' | '-') MulExp
 class MulAddExpAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> mul_exp;
   MulAddExpAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 class BinaryAddExprAST : public ValueAST {
@@ -640,16 +657,15 @@ public:
   std::unique_ptr<OpAST> op; // '+' or '-'
   std::unique_ptr<ValueAST> mul_exp;
   BinaryAddExprAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
-using ThreeAddExpAST = BinaryAddExprAST;
 
 // RelExp ::= AddExp | RelExp ('<' | '>' | '<=' | '>=') AddExp
 class AddRelExpAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> add_exp;
   AddRelExpAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 class BinaryRelExprAST : public ValueAST {
@@ -658,16 +674,15 @@ public:
   std::unique_ptr<OpAST> op; // '<' | '>' | '<=' | '>='
   std::unique_ptr<ValueAST> add_exp;
   BinaryRelExprAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
-using ThreeRelExpAST = BinaryRelExprAST;
 
 // EqExp ::= RelExp | EqExp ('==' | '!=') RelExp
 class RelEqExpAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> rel_exp;
   RelEqExpAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 class BinaryEqExprAST : public ValueAST {
@@ -676,16 +691,15 @@ public:
   std::unique_ptr<OpAST> op; // '==' | '!='
   std::unique_ptr<ValueAST> rel_exp;
   BinaryEqExprAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
-using ThreeEqExpAST = BinaryEqExprAST;
 
 // LAndExp ::= EqExp | LAndExp '&&' EqExp
 class EqLAndExpAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> eq_exp;
   EqLAndExpAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 class BinaryLogicalAndExprAST : public ValueAST {
@@ -694,16 +708,15 @@ public:
   std::unique_ptr<OpAST> op; // '&&'
   std::unique_ptr<ValueAST> eq_exp;
   BinaryLogicalAndExprAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
-using ThreeLAndExpAST = BinaryLogicalAndExprAST;
 
 // LOrExp ::= LAndExp | LOrExp '||' LAndExp
 class LAndLOrExpAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> land_exp;
   LAndLOrExpAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 class BinaryLogicalOrExprAST : public ValueAST {
@@ -712,9 +725,8 @@ public:
   std::unique_ptr<OpAST> op; // '||'
   std::unique_ptr<ValueAST> land_exp;
   BinaryLogicalOrExprAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
-using ThreeLOrExpAST = BinaryLogicalOrExprAST;
 
 // LVal = IDENT | IDENT '[' Exp ']'
 class LValAST : public ValueAST {
@@ -723,7 +735,7 @@ public:
   std::vector<std::unique_ptr<ValueAST>> index_exp; 
   LValAST() = default; 
   std::string DumpOnlyAddress(Context& context) const;
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 // ConstExp ::= Exp
@@ -731,7 +743,7 @@ class ConstExpAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> exp;
   ConstExpAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 // ConstDef ::= IDENT '=' ConstInitVal | IDENT '[' ConstExp ']' '=' ConstInitVal
@@ -754,7 +766,7 @@ class ConstExpConstInitValAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> const_exp;
   ConstExpConstInitValAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 class ConstInitValListAST : public BaseAST {
@@ -767,10 +779,9 @@ class CompoundConstInitValueAST : public ValueAST {
 public:
   std::unique_ptr<ConstInitValListAST> const_init_val_list;
   CompoundConstInitValueAST() = default; 
-  int getValue(Context& context) const override;
-  std::vector<int> getValues(Context& context) const;
+  ConstantVal getValue(Context& context) const override;
+  std::vector<ConstantVal> getConstantVals(Context& context) const;
 };
-using ThreeConstInitValAST = CompoundConstInitValueAST;
 
 // Decl ::= ConstDecl | VarDecl
 class ConstDeclWrapperAST : public BaseAST {
@@ -778,14 +789,12 @@ public:
   std::unique_ptr<BaseAST> const_decl;
   ConstDeclWrapperAST() = default; 
 };
-using ConstDeclDecAST = ConstDeclWrapperAST;
 
 class VarDeclWrapperAST : public BaseAST {
 public:
   std::unique_ptr<BaseAST> var_decl;
   VarDeclWrapperAST() = default; 
 };
-using VarDeclDecAST = VarDeclWrapperAST;
 
 // ConstDecl ::= 'const' Type ConstDef { ',' ConstDef } ';'
 class ConstDeclAST : public BaseAST {
@@ -821,7 +830,6 @@ public:
   std::unique_ptr<std::string> ident;
   SimpleVarDefAST() = default; 
 };
-using IDENTVarAST = SimpleVarDefAST;
 
 class InitializedVarDefAST : public BaseAST {
 public:
@@ -829,7 +837,6 @@ public:
   std::unique_ptr<ValueAST> init_val;
   InitializedVarDefAST() = default; 
 };
-using ThreeVarAST = InitializedVarDefAST;
 
 class ArrayVarDefAST : public BaseAST { 
   public:
@@ -837,7 +844,6 @@ class ArrayVarDefAST : public BaseAST {
   std::vector<std::unique_ptr<ValueAST>> const_exps;
   ArrayVarDefAST() = default; 
 };
-using FourVarDefAST = ArrayVarDefAST;
 
 class InitValListAST;
 class ArrayInitializedVarDefAST : public BaseAST { 
@@ -847,21 +853,20 @@ class ArrayInitializedVarDefAST : public BaseAST {
   std::unique_ptr<InitValListAST> init_val_list;
   ArrayInitializedVarDefAST() = default; 
 };
-using SixVarDefAST = ArrayInitializedVarDefAST;
 
 // InitVal ::= Exp | '{' Exp { ',' Exp } '}'
 class InitValAST : public ValueAST {
 public:
   std::unique_ptr<ValueAST> exp;
   InitValAST() = default; 
-  int getValue(Context& context) const override;
+  ConstantVal getValue(Context& context) const override;
 };
 
 class InitValListAST : public ValueAST {
 public:
   std::vector<std::unique_ptr<ValueAST>> init_vals;
   InitValListAST() = default; 
-  int getValue(Context& context) const override { return 0; }
-  std::vector<int> getValues(Context& context) const;
+  ConstantVal getValue(Context& context) const override { return ConstantVal(0); }
+  std::vector<ConstantVal> getConstantVals(Context& context) const;
 };
 

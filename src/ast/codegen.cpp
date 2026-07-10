@@ -206,7 +206,7 @@ static std::string GetParamType(const FuncFParamAST& node, Context& context) {
   std::string base_type = "i32";
   std::vector<int> dims;
   for (auto& expr : node.array_dims) {
-    dims.push_back(expr->getValue(context));
+    dims.push_back(expr->getValue(context).getInt());
   }
   std::string arr_type = base_type;
   for (auto it = dims.rbegin(); it != dims.rend(); ++it) {
@@ -232,10 +232,10 @@ void CodeGenerator::ParamLocalization(const FuncFParamAST& node) {
   if (node.is_array) {
     std::vector<int> dims;
     for (auto& expr : node.array_dims) {
-      dims.push_back(expr->getValue(context));
+      dims.push_back(expr->getValue(context).getInt());
     }
     auto symbol = std::make_shared<Symbol>(*node.ident, SymbolKind::ARRAY);
-    symbol->value = ArrayInformation(address, dims, {}, true); // is_param = true
+    symbol->value = ArrayInformation(address, dims, {}, {}, true); // is_param = true
     context.scope->define(symbol);
   } else {
     auto symbol = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE, address);
@@ -762,7 +762,11 @@ std::string CodeGenerator::Generate(const LValuePrimaryExprAST& node) {
 }
 
 std::string CodeGenerator::Generate(const NumberPrimaryExprAST& node) {
-  return std::to_string(node.value);
+  if (node.value.isFloat()) {
+    return std::to_string(node.value.getFloat());
+  } else {
+    return std::to_string(node.value.getInt());
+  }
 }
 
 std::string CodeGenerator::Generate(const OpAST& node) {
@@ -1061,9 +1065,15 @@ std::string CodeGenerator::Generate(const LValAST& node) {
     }
     return new_reg;
   } else if (sym->kind == SymbolKind::CONSTANT) {
-    std::string int_value = std::to_string(std::get<int>(sym->value));
-    context.GetIRValue(int_value);
-    return int_value;
+    if (std::holds_alternative<float>(sym->value)) {
+      std::string float_value = std::to_string(std::get<float>(sym->value));
+      context.GetIRValue(float_value);
+      return float_value;
+    } else {
+      std::string int_value = std::to_string(std::get<int>(sym->value));
+      context.GetIRValue(int_value);
+      return int_value;
+    }
   } else if (sym->kind == SymbolKind::ARRAY || sym->kind == SymbolKind::CONST_ARRAY) {
     auto arr_info = std::get<ArrayInformation>(sym->value);
     
@@ -1162,21 +1172,28 @@ std::string CodeGenerator::Generate(const ConstExpAST& node) {
 }
 
 std::string CodeGenerator::Generate(const ConstDefAST& node) {
-  int constinit_val = node.const_init_val->getValue(context);
-  auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::CONSTANT, constinit_val);
+  ConstantVal constinit_val = node.const_init_val->getValue(context);
+  std::string decl_type = *context.decl_type_context;
+  std::shared_ptr<Symbol> sym;
+  if (decl_type == "f32") {
+    sym = std::make_shared<Symbol>(*node.ident, SymbolKind::CONSTANT, constinit_val.getFloat());
+  } else {
+    sym = std::make_shared<Symbol>(*node.ident, SymbolKind::CONSTANT, constinit_val.getInt());
+  }
   context.scope->define(sym);
   return "";
 }
 
-static void FillConstInitVal(const BaseAST& node, 
-                             const std::vector<int>& dims, 
-                             const std::vector<int>& sub_sizes, 
-                             int parent_level, 
-                             int& index, 
-                             std::vector<int32_t>& flat_vals, 
-                             Context& context) {
+
+static void FillConstInitConstantVal(const BaseAST& node, 
+                                     const std::vector<int>& dims, 
+                                     const std::vector<int>& sub_sizes, 
+                                     int parent_level, 
+                                     int& index, 
+                                     std::vector<ConstantVal>& flat_vals, 
+                                     Context& context) {
   if (const auto* p = dynamic_cast<const ConstExpConstInitValAST*>(&node)) {
-    int val = p->const_exp->getValue(context);
+    ConstantVal val = p->const_exp->getValue(context);
     if (index < (int)flat_vals.size()) {
       flat_vals[index] = val;
     }
@@ -1199,7 +1216,7 @@ static void FillConstInitVal(const BaseAST& node,
 
     if (p->const_init_val_list) {
       for (const auto& child : p->const_init_val_list->const_init_vals) {
-        FillConstInitVal(*child, dims, sub_sizes, target_level, index, flat_vals, context);
+        FillConstInitConstantVal(*child, dims, sub_sizes, target_level, index, flat_vals, context);
       }
     }
     if (index < start_index + sub_size) {
@@ -1208,15 +1225,15 @@ static void FillConstInitVal(const BaseAST& node,
   }
 }
 
-static void FillConstInitValFromInitVal(const BaseAST& node, 
-                                        const std::vector<int>& dims, 
-                                        const std::vector<int>& sub_sizes, 
-                                        int parent_level, 
-                                        int& index, 
-                                        std::vector<int32_t>& flat_vals, 
-                                        Context& context) {
+static void FillConstantValInitValFromInitVal(const BaseAST& node, 
+                                              const std::vector<int>& dims, 
+                                              const std::vector<int>& sub_sizes, 
+                                              int parent_level, 
+                                              int& index, 
+                                              std::vector<ConstantVal>& flat_vals, 
+                                              Context& context) {
   if (const auto* p = dynamic_cast<const InitValAST*>(&node)) {
-    int val = p->exp->getValue(context);
+    ConstantVal val = p->exp->getValue(context);
     if (index < (int)flat_vals.size()) {
       flat_vals[index] = val;
     }
@@ -1238,7 +1255,7 @@ static void FillConstInitValFromInitVal(const BaseAST& node,
     int sub_size = sub_sizes[target_level];
 
     for (const auto& child : p->init_vals) {
-      FillConstInitValFromInitVal(*child, dims, sub_sizes, target_level, index, flat_vals, context);
+      FillConstantValInitValFromInitVal(*child, dims, sub_sizes, target_level, index, flat_vals, context);
     }
     if (index < start_index + sub_size) {
       index = start_index + sub_size;
@@ -1288,7 +1305,7 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
   std::vector<int> dims;
   int arr_size = 1;
   for (auto& expr : node.const_exps) {
-    int val = expr->getValue(context);
+    int val = expr->getValue(context).getInt();
     dims.push_back(val);
     arr_size *= val;
   }
@@ -1301,29 +1318,54 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
     }
   }
 
-  std::vector<int32_t> init_vals_int(arr_size, 0);
+  std::vector<ConstantVal> init_vals(arr_size, ConstantVal(0));
   int fill_index = 0;
-  FillConstInitVal(*node.const_init_val, dims, sub_sizes, -1, fill_index, init_vals_int, context);
+  FillConstInitConstantVal(*node.const_init_val, dims, sub_sizes, -1, fill_index, init_vals, context);
 
   auto address = context.GetAddress(*node.ident);
-  ArrayInformation arr_info(address, dims, init_vals_int);
-  auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::CONST_ARRAY);
-  sym->value = arr_info;
+  std::string decl_type = *context.decl_type_context;
+  ArrayInformation arr_info;
+  std::shared_ptr<IR::IRGlobalAlloc> global_alloc;
+  std::string arr_type = (decl_type == "f32") ? "float" : "i32";
 
-  std::string arr_type = "i32";
   for (auto it = dims.rbegin(); it != dims.rend(); ++it) {
     arr_type = "[" + arr_type + ", " + std::to_string(*it) + "]";
   }
 
-  if (context.scope->isGlobal()) {
+  if (decl_type == "f32") {
+    std::vector<float> const_float_values;
     bool is_all_zero = true;
-    for (int32_t val : init_vals_int) {
-      if (val != 0) {
+    for (auto& val : init_vals) {
+      float f = val.getFloat();
+      const_float_values.push_back(f);
+      if (f != 0.0f) {
         is_all_zero = false;
-        break;
       }
     }
-    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, is_all_zero, init_vals_int, dims);
+    arr_info = ArrayInformation(address, dims, {}, const_float_values);
+    if (context.scope->isGlobal()) {
+      global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, is_all_zero, const_float_values, dims);
+    }
+  } else {
+    std::vector<int> const_values;
+    bool is_all_zero = true;
+    for (auto& val : init_vals) {
+      int i = val.getInt();
+      const_values.push_back(i);
+      if (i != 0) {
+        is_all_zero = false;
+      }
+    }
+    arr_info = ArrayInformation(address, dims, const_values, {});
+    if (context.scope->isGlobal()) {
+      global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, is_all_zero, const_values, dims);
+    }
+  }
+
+  auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::CONST_ARRAY);
+  sym->value = arr_info;
+
+  if (context.scope->isGlobal()) {
     context.AddGlobal(global_alloc);
   } else {
     if (context.cur_block_has_terminator) {
@@ -1332,12 +1374,11 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
     }
     std::shared_ptr<IR::IRAlloc> alloc_inst = nullptr;
     if (context.current_block) {
-      alloc_inst = std::make_shared<IR::IRAlloc>(address, "i32", dims);
+      alloc_inst = std::make_shared<IR::IRAlloc>(address, (decl_type == "f32") ? "float" : "i32", dims);
       context.current_block->AddInstruction(alloc_inst);
       context.SetIRValue(address, alloc_inst);
     }
     for (int i = 0; i < arr_size; i++) {
-      // 展开扁平索引 i 到多维索引
       std::vector<int> idxs(dims.size());
       int temp_idx = i;
       for (int j = (int)dims.size() - 1; j >= 0; --j) {
@@ -1365,7 +1406,8 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
       }
 
       if (context.current_block) {
-        auto val = context.GetIRValue(std::to_string(init_vals_int[i]));
+        std::string val_str = (decl_type == "f32") ? std::to_string(init_vals[i].getFloat()) : std::to_string(init_vals[i].getInt());
+        auto val = context.GetIRValue(val_str);
         auto store_inst = std::make_shared<IR::IRStore>(val, prev_val);
         context.current_block->AddInstruction(store_inst);
       }
@@ -1407,7 +1449,8 @@ std::string CodeGenerator::Generate(const VarDeclWrapperAST& node) {
 }
 
 std::string CodeGenerator::Generate(const ConstDeclAST& node) {
-  assert(*node.type == "i32");
+  assert(*node.type == "i32" || *node.type == "f32");
+  context.decl_type_context = std::make_shared<std::string>(*node.type);
   if (node.const_def_list) {
     Generate(*node.const_def_list);
   }
@@ -1468,8 +1511,13 @@ std::string CodeGenerator::Generate(const InitializedVarDefAST& node) {
   std::string b_type = *context.decl_type_context;
   auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE, address);
   if (context.scope->isGlobal()) {
-    int init_val = node.init_val->getValue(context);
-    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, b_type, false, std::vector<int32_t>{init_val});
+    ConstantVal init_val = node.init_val->getValue(context);
+    std::shared_ptr<IR::IRGlobalAlloc> global_alloc;
+    if (b_type == "float") {
+      global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, b_type, false, std::vector<float>{init_val.getFloat()});
+    } else {
+      global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, b_type, false, std::vector<int32_t>{init_val.getInt()});
+    }
     context.AddGlobal(global_alloc);
   } else {
     if (context.cur_block_has_terminator) {
@@ -1494,7 +1542,7 @@ std::string CodeGenerator::Generate(const ArrayVarDefAST& node) {
   
   std::vector<int> dims;
   for (auto& expr : node.const_exps) {
-    int val = expr->getValue(context);
+    int val = expr->getValue(context).getInt();
     dims.push_back(val);
   }
 
@@ -1531,7 +1579,7 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
   std::vector<int> dims;
   int arr_size = 1;
   for (auto& expr : node.const_exps) {
-    int val = expr->getValue(context);
+    int val = expr->getValue(context).getInt();
     dims.push_back(val);
     arr_size *= val;
   }
@@ -1539,7 +1587,7 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
   auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::ARRAY);
   sym->value = ArrayInformation(address, dims);
 
-  std::string arr_type = "i32";
+  std::string arr_type = (b_type == "float") ? "float" : "i32";
   for (auto it = dims.rbegin(); it != dims.rend(); ++it) {
     arr_type = "[" + arr_type + ", " + std::to_string(*it) + "]";
   }
@@ -1553,31 +1601,47 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
   }
 
   if (context.scope->isGlobal()) {
-    std::vector<int32_t> init_nums(arr_size, 0);
+    std::vector<ConstantVal> init_vals(arr_size, ConstantVal(0));
     int fill_index = 0;
-    FillConstInitValFromInitVal(*node.init_val_list, dims, sub_sizes, -1, fill_index, init_nums, context);
+    FillConstantValInitValFromInitVal(*node.init_val_list, dims, sub_sizes, -1, fill_index, init_vals, context);
 
-    bool is_all_zero = true;
-    for (int32_t val : init_nums) {
-      if (val != 0) {
-        is_all_zero = false;
-        break;
+    std::shared_ptr<IR::IRGlobalAlloc> global_alloc;
+    if (b_type == "float") {
+      std::vector<float> init_nums;
+      bool is_all_zero = true;
+      for (auto& val : init_vals) {
+        float f = val.getFloat();
+        init_nums.push_back(f);
+        if (f != 0.0f) {
+          is_all_zero = false;
+        }
       }
+      global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, is_all_zero, init_nums, dims);
+    } else {
+      std::vector<int32_t> init_nums;
+      bool is_all_zero = true;
+      for (auto& val : init_vals) {
+        int i = val.getInt();
+        init_nums.push_back(i);
+        if (i != 0) {
+          is_all_zero = false;
+        }
+      }
+      global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, is_all_zero, init_nums, dims);
     }
-    auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, is_all_zero, init_nums, dims);
     context.AddGlobal(global_alloc);
   } else {
     if (context.cur_block_has_terminator) {
       context.scope->define(sym);
       return "";
     }
-    std::vector<std::string> init_vals(arr_size, "0");
+    std::vector<std::string> init_vals(arr_size, (b_type == "float") ? "0.0" : "0");
     int fill_index = 0;
     FillInitValRegs(*node.init_val_list, dims, sub_sizes, -1, fill_index, init_vals, *this, context);
 
     std::shared_ptr<IR::IRAlloc> alloc_inst = nullptr;
     if (context.current_block) {
-      alloc_inst = std::make_shared<IR::IRAlloc>(address, "i32", dims);
+      alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type, dims);
       context.current_block->AddInstruction(alloc_inst);
       context.SetIRValue(address, alloc_inst);
     }

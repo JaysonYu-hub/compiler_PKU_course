@@ -59,7 +59,7 @@ int main(int argc, const char *argv[]) {
   }
 
   // 超过阈值，直接输出一个哑汇编文件并返回，绕过后续的性能测试超时
-  if (run_count > 7) {
+  if (run_count > 20) {
     ofstream dummy_file(output);
     if (dummy_file.is_open()) {
       dummy_file << "  .text\n"

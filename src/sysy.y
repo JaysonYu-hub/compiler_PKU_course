@@ -27,6 +27,7 @@ using namespace std;
 %union {
   std::string *str_val;
   int int_val;
+  float float_val;
   BaseAST *ast_val;
   ValueAST *value_ast;
   OpAST *op_ast;
@@ -36,7 +37,7 @@ using namespace std;
 %token CONST WHILE BREAK CONTINUE
 %token <str_val> IDENT  
 %token <int_val> INT_CONST
-
+%token <float_val> FLOAT_CONST
 %token ADD SUB NOT MUL MOD DIV
 %token <str_val> ASSIGN
 %token LT LE GT GE EQ NE L_AND L_OR IF ELSE
@@ -326,8 +327,13 @@ PrimaryExp
   }
   | Number {
     auto number_exp = new NumberPrimaryExprAST();
-    number_exp->value = $1;
+    number_exp->value = ConstantVal($1);
     $$ = number_exp;  
+  }
+  | FLOAT_CONST {
+    auto number_exp = new NumberPrimaryExprAST();
+    number_exp->value = ConstantVal($1);
+    $$ = number_exp;
   }
   | LVal {
     auto lval_exp = new LValuePrimaryExprAST();
@@ -343,7 +349,7 @@ MulExp
     $$ = unary_mul;
   }
   | MulExp MulOp UnaryExp {
-    auto three_mul_exp = new ThreeMulExpAST();
+    auto three_mul_exp = new BinaryMulExprAST();
     three_mul_exp->mul_exp = unique_ptr<ValueAST>($1);
     three_mul_exp->op = unique_ptr<OpAST>($2);
     three_mul_exp->unary_exp = unique_ptr<ValueAST>($3);
@@ -465,6 +471,9 @@ FuncType
   }
   | VOID { 
     $$ = new string("void");
+  }
+  | FLOAT { 
+    $$ = new string("f32");
   }
   ;
 
