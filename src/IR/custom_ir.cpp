@@ -418,10 +418,25 @@ namespace IR {
     : name(std::move(name)), ret_type(ret_type), param_types(std::move(param_types)) {}
 
   std::string IRFuncDecl::DumpText() const {
+    if (name == "getint") return "decl @getint() : i32";
+    if (name == "getch") return "decl @getch() : i32";
+    if (name == "getarray") return "decl @getarray(*i32) : i32";
+    if (name == "putint") return "decl @putint(i32)";
+    if (name == "putch") return "decl @putch(i32)";
+    if (name == "putarray") return "decl @putarray(i32, *i32)";
+    if (name == "starttime") return "decl @starttime()";
+    if (name == "stoptime") return "decl @stoptime()";
+    if (name == "getfloat") return "decl @getfloat() : float";
+    if (name == "getfarray") return "decl @getfarray(*float) : i32";
+    if (name == "putfloat") return "decl @putfloat(float)";
+    if (name == "putfarray") return "decl @putfarray(i32, *float)";
+
     std::string text = "decl @" + name + "(";
     for (size_t i = 0; i < param_types.size(); i++) {
       if (param_types[i] == IRType::IR_INT32) {
         text += "i32";
+      } else if (param_types[i] == IRType::IR_FLOAT) {
+        text += "float";
       } else if (param_types[i] == IRType::IR_POINTER) {
         text += "*i32";
       }
@@ -431,7 +446,8 @@ namespace IR {
     }
     text += ")";
     if (ret_type != IRType::IR_VOID) {
-      text += " : i32";
+      text += " : ";
+      text += (ret_type == IRType::IR_FLOAT ? "float" : "i32");
     }
     return text;
   }
@@ -457,7 +473,8 @@ namespace IR {
     }
     text += ")";
     if (ret_type != IRType::IR_VOID) {
-      text += " : i32";
+      text += " : ";
+      text += (ret_type == IRType::IR_FLOAT ? "float" : "i32");
     }
     text += " {\n";
     for (const auto& block : blocks) {

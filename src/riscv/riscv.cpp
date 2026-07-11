@@ -507,6 +507,16 @@ void Back::RiscvGenerator::LoadValueToReg(const IR::IRValue* val, const std::str
     } else {
       std::cout << "  li " << reg << ", " << const_val->GetValue() << "\n";
     }
+  } else if (const auto* float_const = dynamic_cast<const IR::IRFloatConstant*>(val)) {
+    union { float f; uint32_t u; } conv;
+    conv.f = float_const->GetValue();
+    uint32_t u = conv.u;
+    if (!reg.empty() && reg[0] == 'f') {
+      std::cout << "  li t5, " << u << "\n";
+      std::cout << "  fmv.w.x " << reg << ", t5\n";
+    } else {
+      std::cout << "  li " << reg << ", " << u << "\n";
+    }
   } else if (dynamic_cast<const IR::IRGlobalAlloc*>(val)) {
     std::string raw_name = StripAt(val->GetOperandName());
     std::cout << "  la " << reg << ", " << raw_name << "\n";

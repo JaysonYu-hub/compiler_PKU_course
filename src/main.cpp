@@ -23,9 +23,9 @@ int main(int argc, const char *argv[]) {
 
   for (int i = 1; i < argc; i++) {
     string arg = argv[i];
-    if (arg == "-S" || arg == "-riscv") {
+    if (arg == "-S" || arg == "-riscv" || arg == "-perf") {
       mode = "-riscv";
-      if (arg == "-riscv") {
+      if (arg == "-riscv" || arg == "-perf") {
         is_64bit = false;
       }
     } else if (arg == "-koopa") {

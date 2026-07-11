@@ -85,6 +85,10 @@ std::string CodeGenerator::Generate(const CompUnitAST& node) {
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("putarray", IR::IRType::IR_VOID, std::vector<IR::IRType>{IR::IRType::IR_INT32, IR::IRType::IR_POINTER}));
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("starttime", IR::IRType::IR_VOID, std::vector<IR::IRType>{}));
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("stoptime", IR::IRType::IR_VOID, std::vector<IR::IRType>{}));
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("getfloat", IR::IRType::IR_FLOAT, std::vector<IR::IRType>{}));
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("getfarray", IR::IRType::IR_INT32, std::vector<IR::IRType>{IR::IRType::IR_POINTER}));
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("putfloat", IR::IRType::IR_VOID, std::vector<IR::IRType>{IR::IRType::IR_FLOAT}));
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("putfarray", IR::IRType::IR_VOID, std::vector<IR::IRType>{IR::IRType::IR_INT32, IR::IRType::IR_POINTER}));
 
     auto symbol = std::make_shared<Symbol>("getint", SymbolKind::FUNCTION, FuncInformation("i32"));
     context.scope->define(symbol);
@@ -101,6 +105,14 @@ std::string CodeGenerator::Generate(const CompUnitAST& node) {
     symbol = std::make_shared<Symbol>("starttime", SymbolKind::FUNCTION, FuncInformation("void"));
     context.scope->define(symbol);
     symbol = std::make_shared<Symbol>("stoptime", SymbolKind::FUNCTION, FuncInformation("void"));
+    context.scope->define(symbol);
+    symbol = std::make_shared<Symbol>("getfloat", SymbolKind::FUNCTION, FuncInformation("float"));
+    context.scope->define(symbol);
+    symbol = std::make_shared<Symbol>("getfarray", SymbolKind::FUNCTION, FuncInformation("i32"));
+    context.scope->define(symbol);
+    symbol = std::make_shared<Symbol>("putfloat", SymbolKind::FUNCTION, FuncInformation("void"));
+    context.scope->define(symbol);
+    symbol = std::make_shared<Symbol>("putfarray", SymbolKind::FUNCTION, FuncInformation("void"));
     context.scope->define(symbol);
     Generate(*node.end_comp_unit);
   }
@@ -144,7 +156,7 @@ std::string CodeGenerator::Generate(const FuncDefAST& node) {
   context.scope->define(symbol);
 
   // 初始化内存表示的 IRFunction
-  IR::IRType ret_type = (*node.type == "void") ? IR::IRType::IR_VOID : IR::IRType::IR_INT32;
+  IR::IRType ret_type = (*node.type == "void") ? IR::IRType::IR_VOID : ((*node.type == "f32") ? IR::IRType::IR_FLOAT : IR::IRType::IR_INT32);
   auto func = std::make_shared<IR::IRFunction>(*node.ident, ret_type);
   context.ir_program->funcs.push_back(func);
   context.current_func = func.get();
@@ -245,7 +257,7 @@ void CodeGenerator::ParamLocalization(const FuncFParamAST& node) {
 
   if (context.current_block) {
     std::string param_name = "@" + *node.ident;
-    IR::IRType param_type = (!node.is_array && *node.type == "i32") ? IR::IRType::IR_INT32 : IR::IRType::IR_POINTER;
+    IR::IRType param_type = node.is_array ? IR::IRType::IR_POINTER : ((*node.type == "f32") ? IR::IRType::IR_FLOAT : IR::IRType::IR_INT32);
     auto param_sym = std::make_shared<IR::IRFuncParam>(param_name, param_type, param_type_str);
     context.SetIRValue(param_name, param_sym);
 
@@ -715,7 +727,8 @@ std::string CodeGenerator::Generate(const FuncCallExpAST& node) {
     std::string func_reg = context.NewReg();
 
     if (context.current_block) {
-      auto call_inst = std::make_shared<IR::IRCall>(func_reg, target_func, args, IR::IRType::IR_INT32);
+      IR::IRType call_type = (func_inf.ret_type == "float" || func_inf.ret_type == "f32") ? IR::IRType::IR_FLOAT : IR::IRType::IR_INT32;
+      auto call_inst = std::make_shared<IR::IRCall>(func_reg, target_func, args, call_type);
       context.current_block->AddInstruction(call_inst);
       context.SetIRValue(func_reg, call_inst);
     }
