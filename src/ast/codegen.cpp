@@ -7,75 +7,15 @@
 CodeGenerator::CodeGenerator(Context& context) : context(context) {}
 
 std::string CodeGenerator::Generate(const BaseAST& node) {
-  if (const auto* p = dynamic_cast<const CompUnitAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const CompUnitSequenceAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const CompUnitListAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const FunctionDefinitionUnitAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const DeclarationUnitAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const FuncDefAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const FuncFParamsAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const FuncFParamAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const BlockAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const DeclBlockAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const StmtBlockAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const UnmatchedStmtWrapperAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const MatchedStmtWrapperAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const IfUnmatchedStmtAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const IfElseUnmatchedStmtAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ReturnStmtAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const AssignStmtAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ExpStmtAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const EmptyStmtAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const BlockStmtAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const IfMatchedStmtAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const WhileStmtAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ContinueStmtAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const BreakStmtAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ExpAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const UnaryOPExpAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const PrimaryUnaryExpAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const FuncCallExpAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const FuncRParamsAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ParenthesizedExprAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const LValuePrimaryExprAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const NumberPrimaryExprAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const OpAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const UnaryMulExpAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const BinaryMulExprAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const MulAddExpAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const BinaryAddExprAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const AddRelExpAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const BinaryRelExprAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const RelEqExpAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const BinaryEqExprAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const EqLAndExpAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const BinaryLogicalAndExprAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const LAndLOrExpAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const BinaryLogicalOrExprAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const LValAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ConstExpAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ConstDefAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ArrayConstDefAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ConstExpConstInitValAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ConstInitValListAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const CompoundConstInitValueAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ConstDeclWrapperAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const VarDeclWrapperAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ConstDeclAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ConstDefListAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const VarDeclAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const VarDefListAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const SimpleVarDefAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const InitializedVarDefAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ArrayVarDefAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const ArrayInitializedVarDefAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const InitValAST*>(&node)) return Generate(*p);
-  if (const auto* p = dynamic_cast<const InitValListAST*>(&node)) return Generate(*p);
+  return node.Accept(*this);
+}
 
+std::string CodeGenerator::Visit(const ArrayDimensionsAST&) {
+  // This grammar helper previously fell through Generate(BaseAST) and emitted no IR.
   return "";
 }
 
-std::string CodeGenerator::Generate(const CompUnitAST& node) {
+std::string CodeGenerator::Visit(const CompUnitAST& node) {
   if (node.end_comp_unit) {
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("getint", IR::IRType::IR_INT32, std::vector<IR::IRType>{}));
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("getch", IR::IRType::IR_INT32, std::vector<IR::IRType>{}));
@@ -107,14 +47,14 @@ std::string CodeGenerator::Generate(const CompUnitAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const CompUnitSequenceAST& node) {
+std::string CodeGenerator::Visit(const CompUnitSequenceAST& node) {
   if (node.comp_unit) {
     Generate(*node.comp_unit);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const CompUnitListAST& node) {
+std::string CodeGenerator::Visit(const CompUnitListAST& node) {
   if (node.end_comp_unit) {
     Generate(*node.end_comp_unit);
   }
@@ -124,21 +64,21 @@ std::string CodeGenerator::Generate(const CompUnitListAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const FunctionDefinitionUnitAST& node) {
+std::string CodeGenerator::Visit(const FunctionDefinitionUnitAST& node) {
   if (node.func_def) {
     Generate(*node.func_def);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const DeclarationUnitAST& node) {
+std::string CodeGenerator::Visit(const DeclarationUnitAST& node) {
   if (node.decl) {
     Generate(*node.decl);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const FuncDefAST& node) {
+std::string CodeGenerator::Visit(const FuncDefAST& node) {
   context.ResetRegBuilder();
   auto symbol = std::make_shared<Symbol>(*node.ident, SymbolKind::FUNCTION, FuncInformation(*node.type));
   context.scope->define(symbol);
@@ -191,7 +131,7 @@ std::string CodeGenerator::Generate(const FuncDefAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const FuncFParamsAST& node) {
+std::string CodeGenerator::Visit(const FuncFParamsAST& node) {
   if (node.func_f_params.size() > 0) {
     for (size_t i = 1; i < node.func_f_params.size(); i++) {
     }
@@ -215,7 +155,7 @@ static std::string GetParamType(const FuncFParamAST& node, Context& context) {
   return "*" + arr_type;
 }
 
-std::string CodeGenerator::Generate(const FuncFParamAST& node) {
+std::string CodeGenerator::Visit(const FuncFParamAST& node) {
   return "@" + *node.ident + ": " + GetParamType(node, context);
 }
 
@@ -262,7 +202,7 @@ void CodeGenerator::ParamLocalization(const FuncFParamAST& node) {
   }
 }
 
-std::string CodeGenerator::Generate(const BlockAST& node) {
+std::string CodeGenerator::Visit(const BlockAST& node) {
   context.enterNewScope();
   for (auto& item : node.block_items) {
     Generate(*item);
@@ -271,35 +211,35 @@ std::string CodeGenerator::Generate(const BlockAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const DeclBlockAST& node) {
+std::string CodeGenerator::Visit(const DeclBlockAST& node) {
   if (node.decl) {
     Generate(*node.decl);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const StmtBlockAST& node) {
+std::string CodeGenerator::Visit(const StmtBlockAST& node) {
   if (node.stmt) {
     Generate(*node.stmt);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const MatchedStmtWrapperAST& node) {
+std::string CodeGenerator::Visit(const MatchedStmtWrapperAST& node) {
   if (node.matched_stmt) {
     return Generate(*node.matched_stmt);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const UnmatchedStmtWrapperAST& node) {
+std::string CodeGenerator::Visit(const UnmatchedStmtWrapperAST& node) {
   if (node.unmatched_stmt) {
     Generate(*node.unmatched_stmt);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const IfUnmatchedStmtAST& node) {
+std::string CodeGenerator::Visit(const IfUnmatchedStmtAST& node) {
   std::string cond_reg = Generate(*node.if_exp);
   std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
   std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
@@ -331,7 +271,7 @@ std::string CodeGenerator::Generate(const IfUnmatchedStmtAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const IfElseUnmatchedStmtAST& node) {
+std::string CodeGenerator::Visit(const IfElseUnmatchedStmtAST& node) {
   std::string cond_reg = Generate(*node.if_exp);
   std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
   std::string else_label = LabelBuilder::GetLabel("else", cond_reg);
@@ -381,7 +321,7 @@ std::string CodeGenerator::Generate(const IfElseUnmatchedStmtAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const ReturnStmtAST& node) {
+std::string CodeGenerator::Visit(const ReturnStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   std::string ret_val = "";
   if (node.exp) {
@@ -399,7 +339,7 @@ std::string CodeGenerator::Generate(const ReturnStmtAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const AssignStmtAST& node) {
+std::string CodeGenerator::Visit(const AssignStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   if (node.lval) {
     std::string rhs_reg = Generate(*node.exp);
@@ -498,7 +438,7 @@ std::string CodeGenerator::Generate(const AssignStmtAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const ExpStmtAST& node) {
+std::string CodeGenerator::Visit(const ExpStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   if (node.exp) {
     Generate(*node.exp);
@@ -506,18 +446,18 @@ std::string CodeGenerator::Generate(const ExpStmtAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const EmptyStmtAST& node) {
+std::string CodeGenerator::Visit(const EmptyStmtAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const BlockStmtAST& node) {
+std::string CodeGenerator::Visit(const BlockStmtAST& node) {
   if (node.block) {
     Generate(*node.block);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const IfMatchedStmtAST& node) {
+std::string CodeGenerator::Visit(const IfMatchedStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   std::string cond_reg = Generate(*node.if_exp);
   std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
@@ -568,7 +508,7 @@ std::string CodeGenerator::Generate(const IfMatchedStmtAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const WhileStmtAST& node) {
+std::string CodeGenerator::Visit(const WhileStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   std::string loop_label = LabelBuilder::GetLabel("while_entry");
   // 这里的while_body是给while开头的br或者break使用的
@@ -611,7 +551,7 @@ std::string CodeGenerator::Generate(const WhileStmtAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const BreakStmtAST& node) {
+std::string CodeGenerator::Visit(const BreakStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   WhileLabelContext while_label_context = context.GetWhileLabel();
 
@@ -626,7 +566,7 @@ std::string CodeGenerator::Generate(const BreakStmtAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const ContinueStmtAST& node) {
+std::string CodeGenerator::Visit(const ContinueStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   WhileLabelContext while_label_context = context.GetWhileLabel();
 
@@ -641,14 +581,14 @@ std::string CodeGenerator::Generate(const ContinueStmtAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const ExpAST& node) {
+std::string CodeGenerator::Visit(const ExpAST& node) {
   if (node.lor_exp) {
     return Generate(*node.lor_exp);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const UnaryOPExpAST& node) {
+std::string CodeGenerator::Visit(const UnaryOPExpAST& node) {
   std::string src_reg = Generate(*node.unary_exp);
   if (node.op->op == "+") {
     return src_reg;
@@ -678,14 +618,14 @@ std::string CodeGenerator::Generate(const UnaryOPExpAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const PrimaryUnaryExpAST& node) {
+std::string CodeGenerator::Visit(const PrimaryUnaryExpAST& node) {
   if (node.primary_exp) {
     return Generate(*node.primary_exp);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const FuncCallExpAST& node) {
+std::string CodeGenerator::Visit(const FuncCallExpAST& node) {
   if (context.cur_block_has_terminator) return "";
   std::string func_name = *node.ident;
   auto func_symbol = context.scope->lookup(func_name);
@@ -730,7 +670,7 @@ std::string CodeGenerator::Generate(const FuncCallExpAST& node) {
   }
 }
 
-std::string CodeGenerator::Generate(const FuncRParamsAST& node) {
+std::string CodeGenerator::Visit(const FuncRParamsAST& node) {
   std::string params;
   if (node.func_r_params.size() > 0) {
     std::string arg0 = Generate(*node.func_r_params[0]);
@@ -750,18 +690,18 @@ std::string CodeGenerator::Generate(const FuncRParamsAST& node) {
   return params;
 }
 
-std::string CodeGenerator::Generate(const ParenthesizedExprAST& node) {
+std::string CodeGenerator::Visit(const ParenthesizedExprAST& node) {
   if (node.exp) {
     return Generate(*node.exp);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const LValuePrimaryExprAST& node) {
+std::string CodeGenerator::Visit(const LValuePrimaryExprAST& node) {
   return Generate(*node.lval);
 }
 
-std::string CodeGenerator::Generate(const NumberPrimaryExprAST& node) {
+std::string CodeGenerator::Visit(const NumberPrimaryExprAST& node) {
   if (node.value.isFloat()) {
     return std::to_string(node.value.getFloat());
   } else {
@@ -769,18 +709,18 @@ std::string CodeGenerator::Generate(const NumberPrimaryExprAST& node) {
   }
 }
 
-std::string CodeGenerator::Generate(const OpAST& node) {
+std::string CodeGenerator::Visit(const OpAST& node) {
   return node.op;
 }
 
-std::string CodeGenerator::Generate(const UnaryMulExpAST& node) {
+std::string CodeGenerator::Visit(const UnaryMulExpAST& node) {
   if (node.unary_exp) {
     return Generate(*node.unary_exp);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const BinaryMulExprAST& node) {
+std::string CodeGenerator::Visit(const BinaryMulExprAST& node) {
   std::string lhs_reg = Generate(*node.mul_exp);
   std::string rhs_reg = Generate(*node.unary_exp);
   std::string dest_reg = context.NewReg();
@@ -803,14 +743,14 @@ std::string CodeGenerator::Generate(const BinaryMulExprAST& node) {
   return dest_reg;
 }
 
-std::string CodeGenerator::Generate(const MulAddExpAST& node) {
+std::string CodeGenerator::Visit(const MulAddExpAST& node) {
   if (node.mul_exp) {
     return Generate(*node.mul_exp);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const BinaryAddExprAST& node) {
+std::string CodeGenerator::Visit(const BinaryAddExprAST& node) {
   std::string lhs_reg = Generate(*node.add_exp);
   std::string rhs_reg = Generate(*node.mul_exp);
   std::string dest_reg = context.NewReg();
@@ -831,14 +771,14 @@ std::string CodeGenerator::Generate(const BinaryAddExprAST& node) {
   return dest_reg;
 }
 
-std::string CodeGenerator::Generate(const AddRelExpAST& node) {
+std::string CodeGenerator::Visit(const AddRelExpAST& node) {
   if (node.add_exp) {
     return Generate(*node.add_exp);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const BinaryRelExprAST& node) {
+std::string CodeGenerator::Visit(const BinaryRelExprAST& node) {
   std::string lhs_reg = Generate(*node.rel_exp);
   std::string rhs_reg = Generate(*node.add_exp);
   std::string dest_reg = context.NewReg();
@@ -863,14 +803,14 @@ std::string CodeGenerator::Generate(const BinaryRelExprAST& node) {
   return dest_reg;
 }
 
-std::string CodeGenerator::Generate(const RelEqExpAST& node) {
+std::string CodeGenerator::Visit(const RelEqExpAST& node) {
   if (node.rel_exp) {
     return Generate(*node.rel_exp);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const BinaryEqExprAST& node) {
+std::string CodeGenerator::Visit(const BinaryEqExprAST& node) {
   std::string lhs_reg = Generate(*node.eq_exp);
   std::string rhs_reg = Generate(*node.rel_exp);
   std::string dest_reg = context.NewReg();
@@ -891,14 +831,14 @@ std::string CodeGenerator::Generate(const BinaryEqExprAST& node) {
   return dest_reg;
 }
 
-std::string CodeGenerator::Generate(const EqLAndExpAST& node) {
+std::string CodeGenerator::Visit(const EqLAndExpAST& node) {
   if (node.eq_exp) {
     return Generate(*node.eq_exp);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const BinaryLogicalAndExprAST& node) {
+std::string CodeGenerator::Visit(const BinaryLogicalAndExprAST& node) {
   if (node.op->op == "&&") {
     std::string lhs_reg = Generate(*node.land_exp);
     std::string temp_address = context.NewReg();
@@ -970,14 +910,14 @@ std::string CodeGenerator::Generate(const BinaryLogicalAndExprAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const LAndLOrExpAST& node) {
+std::string CodeGenerator::Visit(const LAndLOrExpAST& node) {
   if (node.land_exp) {
     return Generate(*node.land_exp);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const BinaryLogicalOrExprAST& node) {
+std::string CodeGenerator::Visit(const BinaryLogicalOrExprAST& node) {
   if (node.op->op == "||") {
     std::string lhs_reg = Generate(*node.lor_exp);
     std::string temp_address = context.NewReg();
@@ -1048,7 +988,7 @@ std::string CodeGenerator::Generate(const BinaryLogicalOrExprAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const LValAST& node) {
+std::string CodeGenerator::Visit(const LValAST& node) {
   auto sym = context.scope->lookup(*node.ident);
   if (sym == nullptr) {
     return "";
@@ -1164,14 +1104,14 @@ std::string CodeGenerator::Generate(const LValAST& node) {
   }
 }
 
-std::string CodeGenerator::Generate(const ConstExpAST& node) {
+std::string CodeGenerator::Visit(const ConstExpAST& node) {
   if (node.exp) {
     return Generate(*node.exp);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const ConstDefAST& node) {
+std::string CodeGenerator::Visit(const ConstDefAST& node) {
   ConstantVal constinit_val = node.const_init_val->getValue(context);
   std::string decl_type = *context.decl_type_context;
   std::shared_ptr<Symbol> sym;
@@ -1185,85 +1125,85 @@ std::string CodeGenerator::Generate(const ConstDefAST& node) {
 }
 
 
-static void FillConstInitConstantVal(const BaseAST& node, 
+static void FillConstInitConstantVal(const ValueAST& node,
                                      const std::vector<int>& dims, 
                                      const std::vector<int>& sub_sizes, 
                                      int parent_level, 
                                      int& index, 
                                      std::vector<ConstantVal>& flat_vals, 
                                      Context& context) {
-  if (const auto* p = dynamic_cast<const ConstExpConstInitValAST*>(&node)) {
-    ConstantVal val = p->const_exp->getValue(context);
+  if (!node.isAggregateInitializer()) {
+    ConstantVal val = node.getValue(context);
     if (index < (int)flat_vals.size()) {
       flat_vals[index] = val;
     }
     index++;
-  } else if (const auto* p = dynamic_cast<const CompoundConstInitValueAST*>(&node)) {
-    if (index % dims.back() != 0) {
-      return;
-    }
-    int target_level = -1;
-    for (int k = parent_level + 1; k < (int)dims.size(); k++) {
-      if (index % sub_sizes[k] == 0) {
-        target_level = k;
-        break;
-      }
-    }
-    if (target_level == -1) return;
+    return;
+  }
 
-    int start_index = index;
-    int sub_size = sub_sizes[target_level];
+  if (index % dims.back() != 0) {
+    return;
+  }
+  int target_level = -1;
+  for (int k = parent_level + 1; k < (int)dims.size(); k++) {
+    if (index % sub_sizes[k] == 0) {
+      target_level = k;
+      break;
+    }
+  }
+  if (target_level == -1) return;
 
-    if (p->const_init_val_list) {
-      for (const auto& child : p->const_init_val_list->const_init_vals) {
-        FillConstInitConstantVal(*child, dims, sub_sizes, target_level, index, flat_vals, context);
-      }
-    }
-    if (index < start_index + sub_size) {
-      index = start_index + sub_size;
-    }
+  int start_index = index;
+  int sub_size = sub_sizes[target_level];
+
+  for (const auto& child : node.getInitializerElements()) {
+    FillConstInitConstantVal(*child, dims, sub_sizes, target_level, index, flat_vals, context);
+  }
+  if (index < start_index + sub_size) {
+    index = start_index + sub_size;
   }
 }
 
-static void FillConstantValInitValFromInitVal(const BaseAST& node, 
+static void FillConstantValInitValFromInitVal(const ValueAST& node,
                                               const std::vector<int>& dims, 
                                               const std::vector<int>& sub_sizes, 
                                               int parent_level, 
                                               int& index, 
                                               std::vector<ConstantVal>& flat_vals, 
                                               Context& context) {
-  if (const auto* p = dynamic_cast<const InitValAST*>(&node)) {
-    ConstantVal val = p->exp->getValue(context);
+  if (!node.isAggregateInitializer()) {
+    ConstantVal val = node.getValue(context);
     if (index < (int)flat_vals.size()) {
       flat_vals[index] = val;
     }
     index++;
-  } else if (const auto* p = dynamic_cast<const InitValListAST*>(&node)) {
-    if (index % dims.back() != 0) {
-      return;
-    }
-    int target_level = -1;
-    for (int k = parent_level + 1; k < (int)dims.size(); k++) {
-      if (index % sub_sizes[k] == 0) {
-        target_level = k;
-        break;
-      }
-    }
-    if (target_level == -1) return;
+    return;
+  }
 
-    int start_index = index;
-    int sub_size = sub_sizes[target_level];
+  if (index % dims.back() != 0) {
+    return;
+  }
+  int target_level = -1;
+  for (int k = parent_level + 1; k < (int)dims.size(); k++) {
+    if (index % sub_sizes[k] == 0) {
+      target_level = k;
+      break;
+    }
+  }
+  if (target_level == -1) return;
 
-    for (const auto& child : p->init_vals) {
-      FillConstantValInitValFromInitVal(*child, dims, sub_sizes, target_level, index, flat_vals, context);
-    }
-    if (index < start_index + sub_size) {
-      index = start_index + sub_size;
-    }
+  int start_index = index;
+  int sub_size = sub_sizes[target_level];
+
+  for (const auto& child : node.getInitializerElements()) {
+    FillConstantValInitValFromInitVal(*child, dims, sub_sizes, target_level, index, flat_vals, context);
+  }
+  if (index < start_index + sub_size) {
+    index = start_index + sub_size;
   }
 }
 
-static void FillInitValRegs(const BaseAST& node, 
+static void FillInitValRegs(const ValueAST& node,
                             const std::vector<int>& dims, 
                             const std::vector<int>& sub_sizes, 
                             int parent_level, 
@@ -1271,37 +1211,38 @@ static void FillInitValRegs(const BaseAST& node,
                             std::vector<std::string>& flat_vals, 
                             CodeGenerator& gen, 
                             Context& context) {
-  if (const auto* p = dynamic_cast<const InitValAST*>(&node)) {
-    std::string val = gen.Generate(*p->exp);
+  if (!node.isAggregateInitializer()) {
+    std::string val = gen.Generate(node);
     if (index < (int)flat_vals.size()) {
       flat_vals[index] = val;
     }
     index++;
-  } else if (const auto* p = dynamic_cast<const InitValListAST*>(&node)) {
-    if (index % dims.back() != 0) {
-      return;
-    }
-    int target_level = -1;
-    for (int k = parent_level + 1; k < (int)dims.size(); k++) {
-      if (index % sub_sizes[k] == 0) {
-        target_level = k;
-        break;
-      }
-    }
-    if (target_level == -1) return;
+    return;
+  }
 
-    int start_index = index;
-    int sub_size = sub_sizes[target_level];
-
-    for (const auto& child : p->init_vals) {
-      FillInitValRegs(*child, dims, sub_sizes, target_level, index, flat_vals, gen, context);
-    }
-    if (index < start_index + sub_size) {
-      index = start_index + sub_size;
+  if (index % dims.back() != 0) {
+    return;
+  }
+  int target_level = -1;
+  for (int k = parent_level + 1; k < (int)dims.size(); k++) {
+    if (index % sub_sizes[k] == 0) {
+      target_level = k;
+      break;
     }
   }
+  if (target_level == -1) return;
+
+  int start_index = index;
+  int sub_size = sub_sizes[target_level];
+
+  for (const auto& child : node.getInitializerElements()) {
+    FillInitValRegs(*child, dims, sub_sizes, target_level, index, flat_vals, gen, context);
+  }
+  if (index < start_index + sub_size) {
+    index = start_index + sub_size;
+  }
 }
-std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
+std::string CodeGenerator::Visit(const ArrayConstDefAST& node) {
   std::vector<int> dims;
   int arr_size = 1;
   for (auto& expr : node.const_exps) {
@@ -1416,39 +1357,39 @@ std::string CodeGenerator::Generate(const ArrayConstDefAST& node) {
   context.scope->define(sym);
   return "";
 }
-std::string CodeGenerator::Generate(const ConstExpConstInitValAST& node) {
+std::string CodeGenerator::Visit(const ConstExpConstInitValAST& node) {
   if (node.const_exp) {
     return Generate(*node.const_exp);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const ConstInitValListAST& node) {
+std::string CodeGenerator::Visit(const ConstInitValListAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const CompoundConstInitValueAST& node) {
+std::string CodeGenerator::Visit(const CompoundConstInitValueAST& node) {
   if (node.const_init_val_list) {
     return Generate(*node.const_init_val_list);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const ConstDeclWrapperAST& node) {
+std::string CodeGenerator::Visit(const ConstDeclWrapperAST& node) {
   if (node.const_decl) {
     return Generate(*node.const_decl);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const VarDeclWrapperAST& node) {
+std::string CodeGenerator::Visit(const VarDeclWrapperAST& node) {
   if (node.var_decl) {
     return Generate(*node.var_decl);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const ConstDeclAST& node) {
+std::string CodeGenerator::Visit(const ConstDeclAST& node) {
   assert(*node.type == "i32" || *node.type == "f32");
   context.decl_type_context = std::make_shared<std::string>(*node.type);
   if (node.const_def_list) {
@@ -1457,14 +1398,14 @@ std::string CodeGenerator::Generate(const ConstDeclAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const ConstDefListAST& node) {
+std::string CodeGenerator::Visit(const ConstDefListAST& node) {
   for (auto& const_def : node.const_defs) {
     Generate(*const_def);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const VarDeclAST& node) {
+std::string CodeGenerator::Visit(const VarDeclAST& node) {
   context.decl_type_context = std::make_shared<std::string>(*node.type);
   if (node.var_def_list) {
     Generate(*node.var_def_list);
@@ -1472,7 +1413,7 @@ std::string CodeGenerator::Generate(const VarDeclAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const VarDefListAST& node) {
+std::string CodeGenerator::Visit(const VarDefListAST& node) {
   for (auto& var_def : node.var_defs) {
     if (!var_def) {
       std::cerr << "Error: VarDef is nullptr\n";
@@ -1483,7 +1424,7 @@ std::string CodeGenerator::Generate(const VarDefListAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const SimpleVarDefAST& node) {
+std::string CodeGenerator::Visit(const SimpleVarDefAST& node) {
   std::string address = context.GetAddress(*node.ident);
   auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE, address);
   std::string b_type = *context.decl_type_context;
@@ -1506,7 +1447,7 @@ std::string CodeGenerator::Generate(const SimpleVarDefAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const InitializedVarDefAST& node) {
+std::string CodeGenerator::Visit(const InitializedVarDefAST& node) {
   std::string address = context.GetAddress(*node.ident);
   std::string b_type = *context.decl_type_context;
   auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE, address);
@@ -1536,7 +1477,7 @@ std::string CodeGenerator::Generate(const InitializedVarDefAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const ArrayVarDefAST& node) {
+std::string CodeGenerator::Visit(const ArrayVarDefAST& node) {
   std::string address = context.GetAddress(*node.ident);
   std::string b_type = *context.decl_type_context;
   
@@ -1572,7 +1513,7 @@ std::string CodeGenerator::Generate(const ArrayVarDefAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
+std::string CodeGenerator::Visit(const ArrayInitializedVarDefAST& node) {
   std::string address = context.GetAddress(*node.ident);
   std::string b_type = *context.decl_type_context;
   
@@ -1683,15 +1624,13 @@ std::string CodeGenerator::Generate(const ArrayInitializedVarDefAST& node) {
   return "";
 }
 
-std::string CodeGenerator::Generate(const InitValAST& node) {
+std::string CodeGenerator::Visit(const InitValAST& node) {
   if (node.exp) {
     return Generate(*node.exp);
   }
   return "";
 }
 
-std::string CodeGenerator::Generate(const InitValListAST& node) {
+std::string CodeGenerator::Visit(const InitValListAST& node) {
   return "";
 }
-
-

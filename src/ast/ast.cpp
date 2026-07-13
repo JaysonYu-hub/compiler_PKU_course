@@ -2,6 +2,15 @@
 #include <iostream>
 #include <cassert>
 
+bool ValueAST::isAggregateInitializer() const {
+  return false;
+}
+
+const std::vector<std::unique_ptr<ValueAST>>& ValueAST::getInitializerElements() const {
+  static const std::vector<std::unique_ptr<ValueAST>> empty;
+  return empty;
+}
+
 // 用于store命令的右值
 std::string LValAST::DumpOnlyAddress(Context& context) const { 
   auto sym = context.scope->lookup(*ident);
@@ -251,21 +260,30 @@ ConstantVal ConstExpConstInitValAST::getValue(Context& context) const {
   return const_exp->getValue(context);
 }
 
-static void FlattenConstInitVal(const BaseAST& node, Context& context, std::vector<ConstantVal>& result) {
-  if (const auto* p = dynamic_cast<const ConstExpConstInitValAST*>(&node)) {
-    result.push_back(p->const_exp->getValue(context));
-  } else if (const auto* p = dynamic_cast<const CompoundConstInitValueAST*>(&node)) {
-    if (p->const_init_val_list) {
-      for (const auto& child : p->const_init_val_list->const_init_vals) {
-        FlattenConstInitVal(*child, context, result);
-      }
-    }
+static void FlattenConstInitVal(const ValueAST& node, Context& context, std::vector<ConstantVal>& result) {
+  if (!node.isAggregateInitializer()) {
+    result.push_back(node.getValue(context));
+    return;
+  }
+  for (const auto& child : node.getInitializerElements()) {
+    FlattenConstInitVal(*child, context, result);
   }
 }
 
 ConstantVal CompoundConstInitValueAST::getValue(Context& context) const { 
   assert(false);
   return ConstantVal(0);
+}
+
+bool CompoundConstInitValueAST::isAggregateInitializer() const {
+  return true;
+}
+
+const std::vector<std::unique_ptr<ValueAST>>& CompoundConstInitValueAST::getInitializerElements() const {
+  if (const_init_val_list) {
+    return const_init_val_list->const_init_vals;
+  }
+  return ValueAST::getInitializerElements();
 }
 
 std::vector<ConstantVal> CompoundConstInitValueAST::getConstantVals(Context& context) const { 
@@ -278,14 +296,22 @@ ConstantVal InitValAST::getValue(Context& context) const {
   return exp->getValue(context);
 }
 
-static void FlattenInitValValues(const BaseAST& node, Context& context, std::vector<ConstantVal>& result) {
-  if (const auto* p = dynamic_cast<const InitValAST*>(&node)) {
-    result.push_back(p->exp->getValue(context));
-  } else if (const auto* p = dynamic_cast<const InitValListAST*>(&node)) {
-    for (const auto& child : p->init_vals) {
-      FlattenInitValValues(*child, context, result);
-    }
+static void FlattenInitValValues(const ValueAST& node, Context& context, std::vector<ConstantVal>& result) {
+  if (!node.isAggregateInitializer()) {
+    result.push_back(node.getValue(context));
+    return;
   }
+  for (const auto& child : node.getInitializerElements()) {
+    FlattenInitValValues(*child, context, result);
+  }
+}
+
+bool InitValListAST::isAggregateInitializer() const {
+  return true;
+}
+
+const std::vector<std::unique_ptr<ValueAST>>& InitValListAST::getInitializerElements() const {
+  return init_vals;
 }
 
 std::vector<ConstantVal> InitValListAST::getConstantVals(Context& context) const { 
