@@ -7,6 +7,7 @@
 #include <variant>
 #include <cassert>
 #include "../IR/custom_ir.hpp"
+#include "ast_visitor.hpp"
 
 class CodeGenerator;
 
@@ -366,35 +367,48 @@ class LValAST;
 class BaseAST {
 public:
   virtual ~BaseAST() = default;
+  virtual std::string Accept(ASTVisitor& visitor) const = 0;
 };
 
 class ValueAST : public BaseAST {
 public:
   virtual ~ValueAST() = default;
   virtual ConstantVal getValue(Context& context) const = 0;
+  virtual bool isAggregateInitializer() const;
+  virtual const std::vector<std::unique_ptr<ValueAST>>& getInitializerElements() const;
 };
 
-class ArrayDimensionsAST : public BaseAST {
+// Concrete nodes inherit this helper to implement the first dispatch step.
+// The visitor supplies the second dispatch step through its Visit overloads.
+template <typename Derived, typename Base = BaseAST>
+class VisitableAST : public Base {
+public:
+  std::string Accept(ASTVisitor& visitor) const final {
+    return visitor.Visit(static_cast<const Derived&>(*this));
+  }
+};
+
+class ArrayDimensionsAST : public VisitableAST<ArrayDimensionsAST> {
 public:
   std::vector<std::unique_ptr<ValueAST>> dims;
   ArrayDimensionsAST() = default;
 };
 
 // CompUnit ::= end_comp_unit
-class CompUnitAST : public BaseAST {
+class CompUnitAST : public VisitableAST<CompUnitAST> {
 public:
   std::unique_ptr<BaseAST> end_comp_unit;
   CompUnitAST() = default;
 };
 
 // end_comp_unit ::= comp_unit | end_comp_unit comp_unit
-class CompUnitSequenceAST : public BaseAST {
+class CompUnitSequenceAST : public VisitableAST<CompUnitSequenceAST> {
 public:
   std::unique_ptr<BaseAST> comp_unit;
   CompUnitSequenceAST() = default;
 };
 
-class CompUnitListAST : public BaseAST {
+class CompUnitListAST : public VisitableAST<CompUnitListAST> {
 public:
   std::unique_ptr<BaseAST> end_comp_unit;
   std::unique_ptr<BaseAST> comp_unit;
@@ -402,13 +416,13 @@ public:
 };
 
 // comp_unit ::= Decl | FuncDef
-class FunctionDefinitionUnitAST : public BaseAST {
+class FunctionDefinitionUnitAST : public VisitableAST<FunctionDefinitionUnitAST> {
 public:
   std::unique_ptr<BaseAST> func_def;
   FunctionDefinitionUnitAST() = default; 
 };
 
-class DeclarationUnitAST : public BaseAST {
+class DeclarationUnitAST : public VisitableAST<DeclarationUnitAST> {
 public:
     std::unique_ptr<BaseAST> decl;
     DeclarationUnitAST() = default;
@@ -416,7 +430,7 @@ public:
 
 class FuncFParamsAST;
 // FuncDef ::= Type IDENT '(' [FuncFParams] ')' Block
-class FuncDefAST : public BaseAST {
+class FuncDefAST : public VisitableAST<FuncDefAST> {
 public:
   std::unique_ptr<std::string> type;
   std::unique_ptr<std::string> ident;
@@ -426,7 +440,7 @@ public:
 };
 
 // FuncFParam ::= Type IDENT ';'
-class FuncFParamAST : public BaseAST {
+class FuncFParamAST : public VisitableAST<FuncFParamAST> {
 public:
   std::unique_ptr<std::string> type;
   std::unique_ptr<std::string> ident;
@@ -436,47 +450,47 @@ public:
 };
 
 // FuncFParams ::= FuncFParam { ',' FuncFParam }
-class FuncFParamsAST : public BaseAST {
+class FuncFParamsAST : public VisitableAST<FuncFParamsAST> {
 public:
   std::vector<std::unique_ptr<FuncFParamAST>> func_f_params; 
   FuncFParamsAST() = default; 
 };
 
 // BlockItem ::= Decl | Stmt
-class DeclBlockAST : public BaseAST {
+class DeclBlockAST : public VisitableAST<DeclBlockAST> {
 public:
   std::unique_ptr<BaseAST> decl;
   DeclBlockAST() = default; 
 };
 
-class StmtBlockAST : public BaseAST {
+class StmtBlockAST : public VisitableAST<StmtBlockAST> {
 public:
   std::unique_ptr<BaseAST> stmt;
   StmtBlockAST() = default; 
 };
 
 // Block ::= '{' {BlockItem} '}'
-class BlockAST : public BaseAST {
+class BlockAST : public VisitableAST<BlockAST> {
 public:
   std::vector<std::unique_ptr<BaseAST>> block_items; 
   BlockAST() = default; 
 };
 
 // Stmt ::= UnmatchedStmt | MatchedStmt
-class UnmatchedStmtWrapperAST : public BaseAST {
+class UnmatchedStmtWrapperAST : public VisitableAST<UnmatchedStmtWrapperAST> {
 public:
   std::unique_ptr<BaseAST> unmatched_stmt;
   UnmatchedStmtWrapperAST() = default; 
 };
 
-class MatchedStmtWrapperAST : public BaseAST {
+class MatchedStmtWrapperAST : public VisitableAST<MatchedStmtWrapperAST> {
 public:
   std::unique_ptr<BaseAST> matched_stmt;
   MatchedStmtWrapperAST() = default; 
 };
 
 // UnmatchedStmt ::= IF '(' Exp ')' Stmt | IF '(' Exp ')' MatchedStmt ELSE UnMatchedStmt | WHILE '(' Exp ')' UnmatchedStmt
-class IfUnmatchedStmtAST : public BaseAST {
+class IfUnmatchedStmtAST : public VisitableAST<IfUnmatchedStmtAST> {
 public:
   std::unique_ptr<BaseAST> if_exp;
   std::unique_ptr<BaseAST> if_stmt;
@@ -484,7 +498,7 @@ public:
   IfUnmatchedStmtAST() = default; 
 };
 
-class IfElseUnmatchedStmtAST : public BaseAST {
+class IfElseUnmatchedStmtAST : public VisitableAST<IfElseUnmatchedStmtAST> {
 public:
   std::unique_ptr<BaseAST> if_exp;
   std::unique_ptr<BaseAST> if_stmt;
@@ -502,37 +516,37 @@ public:
  * | CONTINUE ';'
  * | BREAK ';'
  *  */
-class ReturnStmtAST : public BaseAST {
+class ReturnStmtAST : public VisitableAST<ReturnStmtAST> {
 public:
   std::unique_ptr<BaseAST> exp;
   ReturnStmtAST() = default; 
 };
 
-class AssignStmtAST : public BaseAST {
+class AssignStmtAST : public VisitableAST<AssignStmtAST> {
 public:
   std::unique_ptr<LValAST> lval;
   std::unique_ptr<ValueAST> exp;
   AssignStmtAST() = default; 
 };
 
-class ExpStmtAST : public BaseAST {
+class ExpStmtAST : public VisitableAST<ExpStmtAST> {
 public:
   std::unique_ptr<ValueAST> exp;
   ExpStmtAST() = default; 
 };
 
-class EmptyStmtAST : public BaseAST {
+class EmptyStmtAST : public VisitableAST<EmptyStmtAST> {
 public:
   EmptyStmtAST() = default; 
 };
 
-class BlockStmtAST : public BaseAST {
+class BlockStmtAST : public VisitableAST<BlockStmtAST> {
 public:
   std::unique_ptr<BaseAST> block;
   BlockStmtAST() = default; 
 };
 
-class IfMatchedStmtAST : public BaseAST {
+class IfMatchedStmtAST : public VisitableAST<IfMatchedStmtAST> {
 public:
   std::unique_ptr<ValueAST> if_exp;
   std::unique_ptr<BaseAST> if_stmt;
@@ -540,25 +554,25 @@ public:
   IfMatchedStmtAST() = default; 
 };
 
-class WhileStmtAST : public BaseAST {
+class WhileStmtAST : public VisitableAST<WhileStmtAST> {
 public:
   std::unique_ptr<ValueAST> while_exp;
   std::unique_ptr<BaseAST> while_stmt;
   WhileStmtAST() = default; 
 };
 
-class ContinueStmtAST : public BaseAST {
+class ContinueStmtAST : public VisitableAST<ContinueStmtAST> {
 public:
   ContinueStmtAST() = default;
 };
 
-class BreakStmtAST : public BaseAST {
+class BreakStmtAST : public VisitableAST<BreakStmtAST> {
 public:
   BreakStmtAST() = default;
 };
 
 // Exp ::= LOrExp
-class ExpAST : public ValueAST {
+class ExpAST : public VisitableAST<ExpAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> lor_exp;
   ExpAST() = default;
@@ -566,7 +580,7 @@ public:
 };
 
 // UnaryExp ::= UnaryOP UnaryExp | PrimaryExp | IDENT '(' [FuncRParams] ')'
-class UnaryOPExpAST : public ValueAST {
+class UnaryOPExpAST : public VisitableAST<UnaryOPExpAST, ValueAST> {
 public:
   std::unique_ptr<OpAST> op;
   std::unique_ptr<ValueAST> unary_exp;
@@ -574,14 +588,14 @@ public:
   ConstantVal getValue(Context& context) const override;
 };
 
-class PrimaryUnaryExpAST : public ValueAST {
+class PrimaryUnaryExpAST : public VisitableAST<PrimaryUnaryExpAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> primary_exp;
   PrimaryUnaryExpAST() = default; 
   ConstantVal getValue(Context& context) const override;
 };
 
-class FuncCallExpAST : public ValueAST {
+class FuncCallExpAST : public VisitableAST<FuncCallExpAST, ValueAST> {
 public:
   std::unique_ptr<std::string> ident;
   std::unique_ptr<BaseAST> func_r_params;
@@ -590,28 +604,28 @@ public:
 };
 
 // FuncRParams ::= Exp { ',' Exp }
-class FuncRParamsAST : public BaseAST {
+class FuncRParamsAST : public VisitableAST<FuncRParamsAST> {
 public:
   std::vector<std::unique_ptr<ValueAST>> func_r_params; 
   FuncRParamsAST() = default; 
 };
 
 // PrimaryExp ::= '(' Exp ')' | LVal | Number
-class ParenthesizedExprAST : public ValueAST {
+class ParenthesizedExprAST : public VisitableAST<ParenthesizedExprAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> exp;
   ParenthesizedExprAST() = default; 
   ConstantVal getValue(Context& context) const override;
 };
 
-class LValuePrimaryExprAST : public ValueAST {
+class LValuePrimaryExprAST : public VisitableAST<LValuePrimaryExprAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> lval;
   LValuePrimaryExprAST() = default; 
   ConstantVal getValue(Context& context) const override;
 };
 
-class NumberPrimaryExprAST : public ValueAST {
+class NumberPrimaryExprAST : public VisitableAST<NumberPrimaryExprAST, ValueAST> {
 public:
   ConstantVal value;
   NumberPrimaryExprAST() = default; 
@@ -619,21 +633,21 @@ public:
 };
 
 //'+' | '-' | '!' | '*' | '/' | '%'
-class OpAST : public BaseAST {
+class OpAST : public VisitableAST<OpAST> {
 public:
   std::string op;
   OpAST() = default; 
 };
 
 // MulExp ::= UnaryExp | MulExp ('*' | '/' | '%') UnaryExp
-class UnaryMulExpAST : public ValueAST {
+class UnaryMulExpAST : public VisitableAST<UnaryMulExpAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> unary_exp;
   UnaryMulExpAST() = default; 
   ConstantVal getValue(Context& context) const override;
 };
 
-class BinaryMulExprAST : public ValueAST {
+class BinaryMulExprAST : public VisitableAST<BinaryMulExprAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> mul_exp;
   std::unique_ptr<OpAST> op; // '*' | '/' | '%'
@@ -643,14 +657,14 @@ public:
 };
 
 // AddExp ::= MulExp | AddExp ('+' | '-') MulExp
-class MulAddExpAST : public ValueAST {
+class MulAddExpAST : public VisitableAST<MulAddExpAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> mul_exp;
   MulAddExpAST() = default; 
   ConstantVal getValue(Context& context) const override;
 };
 
-class BinaryAddExprAST : public ValueAST {
+class BinaryAddExprAST : public VisitableAST<BinaryAddExprAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> add_exp;
   std::unique_ptr<OpAST> op; // '+' or '-'
@@ -660,14 +674,14 @@ public:
 };
 
 // RelExp ::= AddExp | RelExp ('<' | '>' | '<=' | '>=') AddExp
-class AddRelExpAST : public ValueAST {
+class AddRelExpAST : public VisitableAST<AddRelExpAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> add_exp;
   AddRelExpAST() = default; 
   ConstantVal getValue(Context& context) const override;
 };
 
-class BinaryRelExprAST : public ValueAST {
+class BinaryRelExprAST : public VisitableAST<BinaryRelExprAST, ValueAST> {
 public: 
   std::unique_ptr<ValueAST> rel_exp;
   std::unique_ptr<OpAST> op; // '<' | '>' | '<=' | '>='
@@ -677,14 +691,14 @@ public:
 };
 
 // EqExp ::= RelExp | EqExp ('==' | '!=') RelExp
-class RelEqExpAST : public ValueAST {
+class RelEqExpAST : public VisitableAST<RelEqExpAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> rel_exp;
   RelEqExpAST() = default; 
   ConstantVal getValue(Context& context) const override;
 };
 
-class BinaryEqExprAST : public ValueAST {
+class BinaryEqExprAST : public VisitableAST<BinaryEqExprAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> eq_exp;
   std::unique_ptr<OpAST> op; // '==' | '!='
@@ -694,14 +708,14 @@ public:
 };
 
 // LAndExp ::= EqExp | LAndExp '&&' EqExp
-class EqLAndExpAST : public ValueAST {
+class EqLAndExpAST : public VisitableAST<EqLAndExpAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> eq_exp;
   EqLAndExpAST() = default; 
   ConstantVal getValue(Context& context) const override;
 };
 
-class BinaryLogicalAndExprAST : public ValueAST {
+class BinaryLogicalAndExprAST : public VisitableAST<BinaryLogicalAndExprAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> land_exp;
   std::unique_ptr<OpAST> op; // '&&'
@@ -711,14 +725,14 @@ public:
 };
 
 // LOrExp ::= LAndExp | LOrExp '||' LAndExp
-class LAndLOrExpAST : public ValueAST {
+class LAndLOrExpAST : public VisitableAST<LAndLOrExpAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> land_exp;
   LAndLOrExpAST() = default; 
   ConstantVal getValue(Context& context) const override;
 };
 
-class BinaryLogicalOrExprAST : public ValueAST {
+class BinaryLogicalOrExprAST : public VisitableAST<BinaryLogicalOrExprAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> lor_exp;
   std::unique_ptr<OpAST> op; // '||'
@@ -728,7 +742,7 @@ public:
 };
 
 // LVal = IDENT | IDENT '[' Exp ']'
-class LValAST : public ValueAST {
+class LValAST : public VisitableAST<LValAST, ValueAST> {
 public:
   std::unique_ptr<std::string> ident;
   std::vector<std::unique_ptr<ValueAST>> index_exp; 
@@ -738,7 +752,7 @@ public:
 };
 
 // ConstExp ::= Exp
-class ConstExpAST : public ValueAST {
+class ConstExpAST : public VisitableAST<ConstExpAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> exp;
   ConstExpAST() = default; 
@@ -746,14 +760,14 @@ public:
 };
 
 // ConstDef ::= IDENT '=' ConstInitVal | IDENT '[' ConstExp ']' '=' ConstInitVal
-class ConstDefAST : public BaseAST {
+class ConstDefAST : public VisitableAST<ConstDefAST> {
 public:
   std::unique_ptr<std::string> ident;
   std::unique_ptr<ValueAST> const_init_val;
   ConstDefAST() = default;
 };
 class CompoundConstInitValueAST;
-class ArrayConstDefAST : public BaseAST { 
+class ArrayConstDefAST : public VisitableAST<ArrayConstDefAST> {
   public:
   std::unique_ptr<std::string> ident;
   std::vector<std::unique_ptr<ValueAST>> const_exps;
@@ -761,83 +775,85 @@ class ArrayConstDefAST : public BaseAST {
   ArrayConstDefAST() = default;
 };
 // ConstInitVal ::= ConstExp | '{' ConstInitVal { ',' ConstInitVal } '}'
-class ConstExpConstInitValAST : public ValueAST {
+class ConstExpConstInitValAST : public VisitableAST<ConstExpConstInitValAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> const_exp;
   ConstExpConstInitValAST() = default; 
   ConstantVal getValue(Context& context) const override;
 };
 
-class ConstInitValListAST : public BaseAST {
+class ConstInitValListAST : public VisitableAST<ConstInitValListAST> {
 public:
   std::vector<std::unique_ptr<ValueAST>> const_init_vals;
   ConstInitValListAST() = default; 
 };
 
-class CompoundConstInitValueAST : public ValueAST {
+class CompoundConstInitValueAST : public VisitableAST<CompoundConstInitValueAST, ValueAST> {
 public:
   std::unique_ptr<ConstInitValListAST> const_init_val_list;
   CompoundConstInitValueAST() = default; 
   ConstantVal getValue(Context& context) const override;
+  bool isAggregateInitializer() const override;
+  const std::vector<std::unique_ptr<ValueAST>>& getInitializerElements() const override;
   std::vector<ConstantVal> getConstantVals(Context& context) const;
 };
 
 // Decl ::= ConstDecl | VarDecl
-class ConstDeclWrapperAST : public BaseAST {
+class ConstDeclWrapperAST : public VisitableAST<ConstDeclWrapperAST> {
 public:
   std::unique_ptr<BaseAST> const_decl;
   ConstDeclWrapperAST() = default; 
 };
 
-class VarDeclWrapperAST : public BaseAST {
+class VarDeclWrapperAST : public VisitableAST<VarDeclWrapperAST> {
 public:
   std::unique_ptr<BaseAST> var_decl;
   VarDeclWrapperAST() = default; 
 };
 
 // ConstDecl ::= 'const' Type ConstDef { ',' ConstDef } ';'
-class ConstDeclAST : public BaseAST {
+class ConstDeclAST : public VisitableAST<ConstDeclAST> {
 public:
   std::unique_ptr<std::string> type;
   std::unique_ptr<BaseAST> const_def_list;
   ConstDeclAST() = default; 
 };
 
-class ConstDefListAST : public BaseAST {
+class ConstDefListAST : public VisitableAST<ConstDefListAST> {
 public:
   std::vector<std::unique_ptr<BaseAST>> const_defs;
   ConstDefListAST() = default; 
 };
 
 // VarDecl ::= Type VarDef { ',' VarDef } ';'
-class VarDeclAST : public BaseAST {
+class VarDeclAST : public VisitableAST<VarDeclAST> {
 public:
   std::unique_ptr<std::string> type;
   std::unique_ptr<BaseAST> var_def_list;
   VarDeclAST() = default; 
 };
 
-class VarDefListAST : public BaseAST {
+class VarDefListAST : public VisitableAST<VarDefListAST> {
 public:
   std::vector<std::unique_ptr<BaseAST>> var_defs;
   VarDefListAST() = default; 
 };
 
 // VarDef ::= IDENT | IDENT '=' InitVal | IDENT '[' ConstExp ']' | IDENT '[' ConstExp ']' '=' InitVal
-class SimpleVarDefAST : public BaseAST {
+class SimpleVarDefAST : public VisitableAST<SimpleVarDefAST> {
 public:
   std::unique_ptr<std::string> ident;
   SimpleVarDefAST() = default; 
 };
 
-class InitializedVarDefAST : public BaseAST {
+class InitializedVarDefAST : public VisitableAST<InitializedVarDefAST> {
 public:
   std::unique_ptr<std::string> ident;
   std::unique_ptr<ValueAST> init_val;
   InitializedVarDefAST() = default; 
 };
 
-class ArrayVarDefAST : public BaseAST { 
+class ArrayVarDefAST : public VisitableAST<ArrayVarDefAST> {
   public:
   std::unique_ptr<std::string> ident;
   std::vector<std::unique_ptr<ValueAST>> const_exps;
@@ -845,7 +861,7 @@ class ArrayVarDefAST : public BaseAST {
 };
 
 class InitValListAST;
-class ArrayInitializedVarDefAST : public BaseAST { 
+class ArrayInitializedVarDefAST : public VisitableAST<ArrayInitializedVarDefAST> {
   public:
   std::unique_ptr<std::string> ident;
   std::vector<std::unique_ptr<ValueAST>> const_exps;
@@ -854,18 +870,19 @@ class ArrayInitializedVarDefAST : public BaseAST {
 };
 
 // InitVal ::= Exp | '{' Exp { ',' Exp } '}'
-class InitValAST : public ValueAST {
+class InitValAST : public VisitableAST<InitValAST, ValueAST> {
 public:
   std::unique_ptr<ValueAST> exp;
   InitValAST() = default; 
   ConstantVal getValue(Context& context) const override;
 };
 
-class InitValListAST : public ValueAST {
+class InitValListAST : public VisitableAST<InitValListAST, ValueAST> {
 public:
   std::vector<std::unique_ptr<ValueAST>> init_vals;
   InitValListAST() = default; 
   ConstantVal getValue(Context& context) const override { return ConstantVal(0); }
+  bool isAggregateInitializer() const override;
+  const std::vector<std::unique_ptr<ValueAST>>& getInitializerElements() const override;
   std::vector<ConstantVal> getConstantVals(Context& context) const;
 };
-
