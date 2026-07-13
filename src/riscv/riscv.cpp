@@ -502,20 +502,24 @@ void Back::RiscvGenerator::EmitSd(const std::string& reg, int offset, const std:
 
 void Back::RiscvGenerator::LoadValueToReg(const IR::IRValue* val, const std::string& reg) {
   if (const auto* const_val = dynamic_cast<const IR::IRConstant*>(val)) {
-    if (const_val->GetValue() == 0) {
-      std::cout << "  mv " << reg << ", x0\n";
-    } else {
-      std::cout << "  li " << reg << ", " << const_val->GetValue() << "\n";
-    }
-  } else if (const auto* float_const = dynamic_cast<const IR::IRFloatConstant*>(val)) {
-    union { float f; uint32_t u; } conv;
-    conv.f = float_const->GetValue();
-    uint32_t u = conv.u;
-    if (!reg.empty() && reg[0] == 'f') {
-      std::cout << "  li t5, " << u << "\n";
-      std::cout << "  fmv.w.x " << reg << ", t5\n";
-    } else {
-      std::cout << "  li " << reg << ", " << u << "\n";
+    auto raw_val = const_val->GetValue();
+    if (const_val->GetType() == IR::IRType::IR_INT32) {
+      int32_t int_val = std::get<int32_t>(raw_val);
+      if (int_val == 0) {
+        std::cout << "  mv " << reg << ", x0\n";
+      } else {
+        std::cout << "  li " << reg << ", " << int_val << "\n";
+      }
+    } else { // IR_FLOAT
+      union { float f; uint32_t u; } conv;
+      conv.f = std::get<float>(raw_val);
+      uint32_t u = conv.u;
+      if (!reg.empty() && reg[0] == 'f') {
+        std::cout << "  li t5, " << u << "\n";
+        std::cout << "  fmv.w.x " << reg << ", t5\n";
+      } else {
+        std::cout << "  li " << reg << ", " << u << "\n";
+      }
     }
   } else if (dynamic_cast<const IR::IRGlobalAlloc*>(val)) {
     std::string raw_name = StripAt(val->GetOperandName());

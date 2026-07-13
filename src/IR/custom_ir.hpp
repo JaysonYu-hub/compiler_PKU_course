@@ -1,9 +1,10 @@
 #pragma once
-
 #include <string>
 #include <memory>
 #include <vector>
 #include <cstdint>
+#include <variant>
+#include <cassert>
 
 namespace IR {
 
@@ -12,7 +13,8 @@ namespace IR {
     IR_FLOAT,
     IR_VOID,
     IR_POINTER,
-    IR_ARRAY
+    IR_ARRAY,
+    IR_DEFAULT
   };
 
   enum class IRBinaryOp {
@@ -21,6 +23,20 @@ namespace IR {
     SHL, SHR, SAR, 
     EQ, NE, 
     LT, LE, GT, GE 
+  };
+
+  enum class IR_Instruction_Type {
+    IR_INST_BINARY,
+    IR_INST_ALLOC,
+    IR_INST_STORE,
+    IR_INST_LOAD,
+    IR_INST_RET,
+    IR_INST_BR,
+    IR_INST_CALL,
+    IR_INST_GETPTR,
+    IR_INST_GETELEMPTR,
+    IR_INST_JUMP,
+    IR_INST_UNKNOWN
   };
 
   std::string OpToString(IRBinaryOp op);
@@ -33,32 +49,23 @@ namespace IR {
     virtual ~IRValue() = default;
     virtual std::string DumpText() const = 0;
     virtual std::string GetOperandName() const = 0;
-    virtual IRType GetType() const = 0;
+    virtual IRType GetType() const { return IRType::IR_DEFAULT; }
   };
 
   // 整型常量类
   class IRConstant : public IRValue {
   private:
-    int32_t val;
+    IRType const_type;
+    std::variant<int32_t, float> val;
   public:
-    explicit IRConstant(int32_t val) : val(val) {}
-    int32_t GetValue() const { return val; }
+    explicit IRConstant(int32_t val) : const_type(IRType::IR_INT32), val(val) {}
+    explicit IRConstant(float val) : const_type(IRType::IR_FLOAT), val(val) {}
+
+    std::variant<int32_t, float> GetValue() const { return val; }
 
     std::string DumpText() const override;
     std::string GetOperandName() const override;
-    IRType GetType() const override;
-  };
-
-  class IRFloatConstant : public IRValue {
-  private:
-    float val;
-  public:
-    explicit IRFloatConstant(float val) : val(val) {}
-    float GetValue() const { return val; }
-
-    std::string DumpText() const override;
-    std::string GetOperandName() const override;
-    IRType GetType() const override;
+    IRType GetType() const override { return const_type; }
   };
 
   // 符号/变量引用类
@@ -70,7 +77,7 @@ namespace IR {
 
     std::string DumpText() const override;
     std::string GetOperandName() const override;
-    IRType GetType() const override;
+    IRType GetType() const override { return IRType::IR_POINTER; }
   };
 
   // 全局变量分配类
@@ -92,15 +99,17 @@ namespace IR {
                                                     size_t dim_idx, 
                                                     size_t& val_idx);
   public:
-    IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<int32_t> init_vals, std::vector<int> array_dims = {});
-    IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<float> init_float_vals, std::vector<int> array_dims = {});
+    IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<int32_t> init_vals, std::vector<int> array_dims = {})
+      : name(std::move(name)), type(std::move(type)), is_zeroinit(is_zeroinit), init_vals(std::move(init_vals)), array_dims(std::move(array_dims)) {}
+
+    IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<float> init_float_vals, std::vector<int> array_dims = {})
+      : name(std::move(name)), type(std::move(type)), is_zeroinit(is_zeroinit), init_float_vals(std::move(init_float_vals)), array_dims(std::move(array_dims)) {}
 
     bool IsZeroInit() const { return is_zeroinit; }
     const std::vector<int32_t>& GetInitVals() const { return init_vals; }
     const std::vector<float>& GetInitFloatVals() const { return init_float_vals; }
     const std::vector<int>& GetArrayDims() const { return array_dims; }
     bool IsArray() const { return !array_dims.empty(); }
-    // 返回分配的总字节数
     int GetAllocSize() const {
       if (array_dims.empty()) return 4;
       int size = 4;
@@ -110,7 +119,7 @@ namespace IR {
 
     std::string DumpText() const override;
     std::string GetOperandName() const override;
-    IRType GetType() const override;
+    IRType GetType() const override { return IRType::IR_POINTER; }
   };
 
   // 函数形参类
@@ -120,20 +129,22 @@ namespace IR {
     IRType type;
     std::string type_str;
   public:
-    IRFuncParam(std::string name, IRType type, std::string type_str);
+    IRFuncParam(std::string name, IRType type, std::string type_str) 
+      : name(std::move(name)), type(type), type_str(std::move(type_str)) {}
 
     std::string DumpText() const override;
     std::string GetOperandName() const override;
-    IRType GetType() const override;
+    IRType GetType() const override { return type; }
   };
 
   // 基础指令类
   class IRInstruction : public IRValue {
   public:
+    IR_Instruction_Type inst_type;
+    IRInstruction(IR_Instruction_Type inst_type) : inst_type(inst_type) {}
     virtual ~IRInstruction() = default;
 
     std::string GetOperandName() const override;
-    IRType GetType() const override;
   };
 
   // 具有 SSA 寄存器返回值的指令基类
@@ -141,7 +152,7 @@ namespace IR {
   protected:
     std::string name;
   public:
-    explicit IRNameInstruction(std::string name) : name(std::move(name)) {}
+    explicit IRNameInstruction(IR_Instruction_Type inst_type, std::string name) : IRInstruction(inst_type), name(std::move(name)) {}
     std::string GetName() const { return name; }
     std::string GetOperandName() const override;
   };
@@ -153,7 +164,10 @@ namespace IR {
     std::shared_ptr<IRValue> lhs;
     std::shared_ptr<IRValue> rhs;
   public:
-    IRBinary(std::string name, IRBinaryOp op, std::shared_ptr<IRValue> lhs, std::shared_ptr<IRValue> rhs);
+    IRBinary(std::string name, IRBinaryOp op, std::shared_ptr<IRValue> lhs, std::shared_ptr<IRValue> rhs)
+      : IRNameInstruction(IR_Instruction_Type::IR_INST_BINARY, std::move(name)), op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {
+      assert(this->lhs != nullptr && this->rhs != nullptr);
+    }
 
     IRBinaryOp GetOp() const { return op; }
     std::shared_ptr<IRValue> GetLhs() const { return lhs; }
@@ -170,13 +184,15 @@ namespace IR {
     std::vector<int> array_dims;
     std::string alloc_type_str;
   public:
-    IRAlloc(std::string name, std::string type_str, std::vector<int> array_dims = {});
-    IRAlloc(std::string name, std::string type_str, int array_size);
+    IRAlloc(std::string name, std::string type_str, std::vector<int> array_dims = {})
+      : IRNameInstruction(IR_Instruction_Type::IR_INST_ALLOC, std::move(name)), type(StringToType(type_str)), array_dims(std::move(array_dims)), alloc_type_str(std::move(type_str)) {}
+
+    IRAlloc(std::string name, std::string type_str, int array_size)
+      : IRAlloc(std::move(name), std::move(type_str), std::vector<int>{array_size}) {}
 
     const std::vector<int>& GetArrayDims() const { return array_dims; }
     bool IsArray() const { return !array_dims.empty(); }
     IRType GetAllocatedType() const { return type; }
-    // 返回分配的总字节数
     int GetAllocSize() const {
       if (array_dims.empty()) return 4;
       int size = 4;
@@ -206,8 +222,10 @@ namespace IR {
     std::shared_ptr<IRValue> ptr;
     IRType loaded_type;
   public:
-    IRLoad(std::string name , std::shared_ptr<IRValue> ptr, IRType type = IRType::IR_INT32);
-
+    IRLoad(std::string name, std::shared_ptr<IRValue> ptr, IRType type = IRType::IR_INT32)
+      : IRNameInstruction(IR_Instruction_Type::IR_INST_LOAD, std::move(name)), ptr(std::move(ptr)), loaded_type(type) {
+      assert(this->ptr != nullptr);
+    }
     std::shared_ptr<IRValue> GetPtr() const { return ptr; }
     std::string DumpText() const override;
     IRType GetType() const override;
@@ -220,7 +238,10 @@ namespace IR {
     std::shared_ptr<IRValue> index;
     int elem_size;  // 子元素大小（字节）
   public:
-    IRGetElemPtr(std::string name, std::shared_ptr<IRValue> arr, std::shared_ptr<IRValue> index, int elem_size = 4);
+    IRGetElemPtr(std::string name, std::shared_ptr<IRValue> arr, std::shared_ptr<IRValue> index, int elem_size = 4)
+      :  IRNameInstruction(IR_Instruction_Type::IR_INST_GETELEMPTR, std::move(name)), arr(std::move(arr)), index(std::move(index)), elem_size(elem_size) {
+      assert(this->arr != nullptr && this->index != nullptr);
+    }
 
     std::shared_ptr<IRValue> GetArr() const { return arr; }
     std::shared_ptr<IRValue> GetIndex() const { return index; }
@@ -237,7 +258,10 @@ namespace IR {
     std::shared_ptr<IRValue> index;
     int elem_size;  // 元素大小（字节）
   public:
-    IRGetPtr(std::string name, std::shared_ptr<IRValue> ptr, std::shared_ptr<IRValue> index, int elem_size = 4);
+    IRGetPtr(std::string name, std::shared_ptr<IRValue> ptr, std::shared_ptr<IRValue> index, int elem_size = 4)
+      : IRNameInstruction(IR_Instruction_Type::IR_INST_GETPTR, std::move(name)), ptr(std::move(ptr)), index(std::move(index)), elem_size(elem_size) {
+      assert(this->ptr != nullptr && this->index != nullptr);
+    }
 
     std::shared_ptr<IRValue> GetPtr() const { return ptr; }
     std::shared_ptr<IRValue> GetIndex() const { return index; }
@@ -252,8 +276,9 @@ namespace IR {
   private:
     std::shared_ptr<IRValue> target;
   public:
-    explicit IRJump(std::shared_ptr<IRValue> target);
-
+    explicit IRJump(std::shared_ptr<IRValue> target) : IRInstruction(IR_Instruction_Type::IR_INST_JUMP), target(std::move(target)) {
+      assert(this->target != nullptr);
+    }
     std::shared_ptr<IRValue> GetTarget() const { return target; }
     std::string DumpText() const override;
   };
@@ -265,7 +290,10 @@ namespace IR {
     std::shared_ptr<IRValue> then_target;
     std::shared_ptr<IRValue> else_target;
   public:
-    IRBranch(std::shared_ptr<IRValue> cond, std::shared_ptr<IRValue> then_target, std::shared_ptr<IRValue> else_target);
+    IRBranch(std::shared_ptr<IRValue> cond, std::shared_ptr<IRValue> then_target, std::shared_ptr<IRValue> else_target)
+      : IRInstruction(IR_Instruction_Type::IR_INST_BR), cond(std::move(cond)), then_target(std::move(then_target)), else_target(std::move(else_target)) {
+      assert(this->cond != nullptr && this->then_target != nullptr && this->else_target != nullptr);
+    }
 
     std::shared_ptr<IRValue> GetCond() const { return cond; }
     std::shared_ptr<IRValue> GetThenTarget() const { return then_target; }
@@ -279,7 +307,7 @@ namespace IR {
   private:
     std::shared_ptr<IRValue> val;
   public:
-    explicit IRReturn(std::shared_ptr<IRValue> val = nullptr);
+    explicit IRReturn(std::shared_ptr<IRValue> val = nullptr) : IRInstruction(IR_Instruction_Type::IR_INST_RET), val(std::move(val)) {}
 
     std::shared_ptr<IRValue> GetValue() const { return val; }
     std::string DumpText() const override;
@@ -293,7 +321,10 @@ namespace IR {
     std::vector<std::shared_ptr<IRValue>> args;
     IRType ret_type;
   public:
-    IRCall(std::string name, std::shared_ptr<IRValue> func, std::vector<std::shared_ptr<IRValue>> args, IRType ret_type);
+    IRCall(std::string name, std::shared_ptr<IRValue> func, std::vector<std::shared_ptr<IRValue>> args, IRType ret_type)
+      : IRInstruction(IR_Instruction_Type::IR_INST_CALL), name(std::move(name)), func(std::move(func)), args(std::move(args)), ret_type(ret_type) {
+      assert(this->func != nullptr);
+    }
 
     bool HasReturnValue() const { return !name.empty(); }
     std::shared_ptr<IRValue> GetFunc() const { return func; }
@@ -301,7 +332,7 @@ namespace IR {
 
     std::string DumpText() const override;
     std::string GetOperandName() const override;
-    IRType GetType() const override;
+    IRType GetType() const override { return ret_type; }
   };
 
   // 基本块类
@@ -309,10 +340,14 @@ namespace IR {
   public:
     std::string name;
     std::vector<std::shared_ptr<IRInstruction>> insts;
+    std::shared_ptr<IRBasicBlock> next_1;
+    std::shared_ptr<IRBasicBlock> next_2;
 
-    explicit IRBasicBlock(std::string name);
+    explicit IRBasicBlock(std::string name) : name(std::move(name)) {}
 
     void AddInstruction(std::shared_ptr<IRInstruction> inst);
+    void SetNext(std::shared_ptr<IRBasicBlock> next);
+    void SetNext(std::shared_ptr<IRBasicBlock> next_1, std::shared_ptr<IRBasicBlock> next_2);
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetType() const override;
@@ -329,7 +364,7 @@ namespace IR {
 
     std::string DumpText() const override;
     std::string GetOperandName() const override;
-    IRType GetType() const override;
+    IRType GetType() const override { return ret_type; }
   };
 
   // 函数类
@@ -340,11 +375,12 @@ namespace IR {
     std::vector<std::shared_ptr<IRFuncParam>> params;
     std::vector<std::shared_ptr<IRBasicBlock>> blocks;
 
-    IRFunction(std::string name, IRType ret_type);
+    IRFunction(std::string name, IRType ret_type) : name(std::move(name)), ret_type(ret_type) {}
 
     std::string DumpText() const override;
     std::string GetOperandName() const override;
-    IRType GetType() const override;
+    IRType GetRetType() const { return ret_type; }
+    IRType GetType() const override { return ret_type; }
   };
 
   // 程序根类

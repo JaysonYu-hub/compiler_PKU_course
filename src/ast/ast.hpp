@@ -221,16 +221,15 @@ public:
 
 class WhileLabelContext {
 public:
-  std::string while_label_begin;
-  std::string while_label_continue;
-  std::string while_label_end;
-  WhileLabelContext(std::string while_label_begin, 
-    std::string while_label_continue, 
-    std::string while_label_end)
-    : while_label_begin(while_label_begin), 
-    while_label_continue(while_label_continue), 
-    while_label_end(while_label_end) {}
-  WhileLabelContext() : while_label_begin(""), while_label_continue(""), while_label_end("") {}
+  std::shared_ptr<IR::IRBasicBlock> while_label_begin;
+  std::shared_ptr<IR::IRBasicBlock> while_label_continue;
+  std::shared_ptr<IR::IRBasicBlock> while_label_end;
+
+  WhileLabelContext(std::shared_ptr<IR::IRBasicBlock> while_label_begin,
+    std::shared_ptr<IR::IRBasicBlock> while_label_continue,
+    std::shared_ptr<IR::IRBasicBlock> while_label_end)
+    : while_label_begin(while_label_begin), while_label_continue(while_label_continue), while_label_end(while_label_end){};
+  WhileLabelContext() = default;
 };
 
 // 上下文：用于提供RegBuilder接口和作用域符号表
@@ -294,7 +293,7 @@ public:
       if (name.find('.') != std::string::npos) {
         try {
           float val = std::stof(name);
-          auto const_val = std::make_shared<IR::IRFloatConstant>(val);
+          auto const_val = std::make_shared<IR::IRConstant>(val);
           ir_values[name] = const_val;
           return const_val;
         } catch (...) {
@@ -326,9 +325,9 @@ public:
     }
   }
 
-  void enterNewWhileScope(std::string while_label_begin, 
-    std::string while_label_continue, 
-    std::string while_label_end) { 
+  void enterNewWhileScope(std::shared_ptr<IR::IRBasicBlock> while_label_begin, 
+    std::shared_ptr<IR::IRBasicBlock> while_label_continue, 
+    std::shared_ptr<IR::IRBasicBlock> while_label_end) { 
     while_label_contexts.push_back(WhileLabelContext(while_label_begin, while_label_continue, while_label_end));
   }
 

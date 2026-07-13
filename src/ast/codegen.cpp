@@ -325,6 +325,7 @@ std::string CodeGenerator::Generate(const IfUnmatchedStmtAST& node) {
     auto cond_val = context.GetIRValue(cond_reg);
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, end_bb);
     context.current_block->AddInstruction(br_inst);
+    context.current_block->SetNext(then_bb, end_bb);
   }
 
   context.AddExistingBlock(then_bb);
@@ -335,6 +336,7 @@ std::string CodeGenerator::Generate(const IfUnmatchedStmtAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
+      context.current_block->SetNext(end_bb);
     }
   }
   context.AddExistingBlock(end_bb);
@@ -360,6 +362,7 @@ std::string CodeGenerator::Generate(const IfElseUnmatchedStmtAST& node) {
     auto cond_val = context.GetIRValue(cond_reg);
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, else_bb);
     context.current_block->AddInstruction(br_inst);
+    context.current_block->SetNext(then_bb, else_bb);
   }
 
   context.AddExistingBlock(then_bb);
@@ -371,6 +374,7 @@ std::string CodeGenerator::Generate(const IfElseUnmatchedStmtAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
+      context.current_block->SetNext(end_bb);
     }
   }
   context.AddExistingBlock(else_bb);
@@ -382,6 +386,7 @@ std::string CodeGenerator::Generate(const IfElseUnmatchedStmtAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
+      context.current_block->SetNext(end_bb);
     }
   }
   if (!then_has_terminator || !else_has_terminator) {
@@ -547,6 +552,7 @@ std::string CodeGenerator::Generate(const IfMatchedStmtAST& node) {
     auto cond_val = context.GetIRValue(cond_reg);
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, else_bb);
     context.current_block->AddInstruction(br_inst);
+    context.current_block->SetNext(then_bb, else_bb);
   }
 
   context.AddExistingBlock(then_bb);
@@ -558,6 +564,7 @@ std::string CodeGenerator::Generate(const IfMatchedStmtAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
+      context.current_block->SetNext(end_bb);
     }
   }
   context.AddExistingBlock(else_bb);
@@ -569,6 +576,7 @@ std::string CodeGenerator::Generate(const IfMatchedStmtAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
+      context.current_block->SetNext(end_bb);
     }
   }
   if (!then_has_terminator || !else_has_terminator) {
@@ -594,10 +602,11 @@ std::string CodeGenerator::Generate(const WhileStmtAST& node) {
   context.SetIRValue(continue_loop_label, continue_loop_bb);
   context.SetIRValue(end_label, end_bb);
   // j或br语句配block
-  context.enterNewWhileScope(loop_label, continue_loop_label, end_label);
+  context.enterNewWhileScope(loop_bb, continue_loop_bb, end_bb);
   if (context.current_block) {
     auto jump_inst = std::make_shared<IR::IRJump>(loop_bb);
     context.current_block->AddInstruction(jump_inst);
+    context.current_block->SetNext(loop_bb);
   }
   context.AddExistingBlock(loop_bb);
 
@@ -606,6 +615,7 @@ std::string CodeGenerator::Generate(const WhileStmtAST& node) {
     auto cond_val = context.GetIRValue(cond_reg);
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, continue_loop_bb, end_bb);
     context.current_block->AddInstruction(br_inst);
+    context.current_block->SetNext(continue_loop_bb, end_bb);
   }
   context.AddExistingBlock(continue_loop_bb);
 
@@ -614,6 +624,7 @@ std::string CodeGenerator::Generate(const WhileStmtAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(loop_bb);
       context.current_block->AddInstruction(jump_inst);
+      context.current_block->SetNext(loop_bb);
     }
   }
   context.AddExistingBlock(end_bb);
@@ -627,13 +638,14 @@ std::string CodeGenerator::Generate(const BreakStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   WhileLabelContext while_label_context = context.GetWhileLabel();
 
-  auto end_bb = context.GetIRValue(while_label_context.while_label_end);
+  auto end_bb = context.GetWhileLabel().while_label_end;
   if (context.current_block && end_bb) {
     auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
     context.current_block->AddInstruction(jump_inst);
+    context.current_block->SetNext(end_bb);
   }
 
-  std::string tool_label = while_label_context.while_label_continue + NumBuilder::GetNum();
+  std::string tool_label = while_label_context.while_label_continue->name + NumBuilder::GetNum();
   context.AddNewBlock(tool_label);
   return "";
 }
@@ -642,13 +654,14 @@ std::string CodeGenerator::Generate(const ContinueStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   WhileLabelContext while_label_context = context.GetWhileLabel();
 
-  auto begin_bb = context.GetIRValue(while_label_context.while_label_begin);
+  auto begin_bb = context.GetWhileLabel().while_label_begin;
   if (context.current_block && begin_bb) {
     auto jump_inst = std::make_shared<IR::IRJump>(begin_bb);
     context.current_block->AddInstruction(jump_inst);
+    context.current_block->SetNext(begin_bb);
   }
 
-  std::string tool_label = while_label_context.while_label_continue + NumBuilder::GetNum();
+  std::string tool_label = while_label_context.while_label_continue->name + NumBuilder::GetNum();
   context.AddNewBlock(tool_label);
   return "";
 }
@@ -939,6 +952,7 @@ std::string CodeGenerator::Generate(const BinaryLogicalAndExprAST& node) {
       auto lhs_val = context.GetIRValue(lhs_reg);
       auto br_inst = std::make_shared<IR::IRBranch>(lhs_val, then_bb, end_bb);
       context.current_block->AddInstruction(br_inst);
+      context.current_block->SetNext(then_bb, end_bb);
     }
 
     // then块
@@ -963,6 +977,7 @@ std::string CodeGenerator::Generate(const BinaryLogicalAndExprAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
+      context.current_block->SetNext(end_bb);
     }
 
     // end块
@@ -1017,6 +1032,7 @@ std::string CodeGenerator::Generate(const BinaryLogicalOrExprAST& node) {
       auto lhs_val = context.GetIRValue(lhs_reg);
       auto br_inst = std::make_shared<IR::IRBranch>(lhs_val, end_bb, then_bb);
       context.current_block->AddInstruction(br_inst);
+      context.current_block->SetNext(then_bb, end_bb);
     }
 
     // then块
@@ -1041,6 +1057,7 @@ std::string CodeGenerator::Generate(const BinaryLogicalOrExprAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
+      context.current_block->SetNext(end_bb);
     }
 
     // end块

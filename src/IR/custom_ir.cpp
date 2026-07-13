@@ -55,24 +55,12 @@ namespace IR {
 
   // IRConstant
   std::string IRConstant::DumpText() const {
-    return std::to_string(val);
+    return std::visit([](auto&& arg) -> std::string {
+      return std::to_string(arg);
+    }, val);
   }
   std::string IRConstant::GetOperandName() const {
-    return std::to_string(val);
-  }
-  IRType IRConstant::GetType() const {
-    return IRType::IR_INT32;
-  }
-
-  // IRFloatConstant
-  std::string IRFloatConstant::DumpText() const {
-    return std::to_string(val);
-  }
-  std::string IRFloatConstant::GetOperandName() const {
-    return std::to_string(val);
-  }
-  IRType IRFloatConstant::GetType() const {
-    return IRType::IR_FLOAT;
+    return DumpText();
   }
 
   // IRSymbol
@@ -82,16 +70,8 @@ namespace IR {
   std::string IRSymbol::GetOperandName() const {
     return name;
   }
-  IRType IRSymbol::GetType() const {
-    return IRType::IR_POINTER;
-  }
 
   // IRGlobalAlloc
-  IRGlobalAlloc::IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<int32_t> init_vals, std::vector<int> array_dims)
-    : name(std::move(name)), type(std::move(type)), is_zeroinit(is_zeroinit), init_vals(std::move(init_vals)), array_dims(std::move(array_dims)) {}
-
-  IRGlobalAlloc::IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<float> init_float_vals, std::vector<int> array_dims)
-    : name(std::move(name)), type(std::move(type)), is_zeroinit(is_zeroinit), init_float_vals(std::move(init_float_vals)), array_dims(std::move(array_dims)) {}
 
   std::string IRGlobalAlloc::FormatNestedInitializer(const std::vector<int32_t>& vals, 
                                              const std::vector<int>& dims, 
@@ -204,14 +184,7 @@ namespace IR {
     return name;
   }
 
-  IRType IRGlobalAlloc::GetType() const {
-    return IRType::IR_POINTER;
-  }
-
   // IRFuncParam
-  IRFuncParam::IRFuncParam(std::string name, IRType type, std::string type_str) 
-    : name(std::move(name)), type(type), type_str(std::move(type_str)) {}
-
   std::string IRFuncParam::DumpText() const {
     return name + ": " + type_str;
   }
@@ -220,18 +193,10 @@ namespace IR {
     return name;
   }
 
-  IRType IRFuncParam::GetType() const {
-    return type;
-  }
-
   // IRInstruction
   std::string IRInstruction::GetOperandName() const {
     assert(false && "Void instruction cannot be used as an operand");
     return "";
-  }
-
-  IRType IRInstruction::GetType() const {
-    return IRType::IR_VOID;
   }
 
   // IRNameInstruction
@@ -240,10 +205,6 @@ namespace IR {
   }
 
   // IRBinary
-  IRBinary::IRBinary(std::string name, IRBinaryOp op, std::shared_ptr<IRValue> lhs, std::shared_ptr<IRValue> rhs)
-    : IRNameInstruction(std::move(name)), op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {
-    assert(this->lhs != nullptr && this->rhs != nullptr);
-  }
 
   std::string IRBinary::DumpText() const {
     return name + " = " + OpToString(op) + " " + lhs->GetOperandName() + ", " + rhs->GetOperandName();
@@ -254,11 +215,6 @@ namespace IR {
   }
 
   // IRAlloc
-  IRAlloc::IRAlloc(std::string name, std::string type_str, std::vector<int> array_dims)
-    : IRNameInstruction(std::move(name)), type(StringToType(type_str)), array_dims(std::move(array_dims)), alloc_type_str(std::move(type_str)) {}
-
-  IRAlloc::IRAlloc(std::string name, std::string type_str, int array_size)
-    : IRAlloc(std::move(name), std::move(type_str), std::vector<int>{array_size}) {}
 
   std::string IRAlloc::DumpText() const {
     if (IsArray()) {
@@ -275,9 +231,9 @@ namespace IR {
     return IRType::IR_POINTER;
   }
 
-  // IRStore
+  // store 指令类
   IRStore::IRStore(std::shared_ptr<IRValue> val, std::shared_ptr<IRValue> ptr)
-    : val(std::move(val)), ptr(std::move(ptr)) {
+    : IRInstruction(IR_Instruction_Type::IR_INST_STORE), val(std::move(val)), ptr(std::move(ptr)) {
     assert(this->ptr != nullptr && this->val != nullptr);
   }
 
@@ -286,10 +242,6 @@ namespace IR {
   }
 
   // IRLoad
-  IRLoad::IRLoad(std::string name, std::shared_ptr<IRValue> ptr, IRType type)
-    : IRNameInstruction(std::move(name)), ptr(std::move(ptr)), loaded_type(type) {
-    assert(this->ptr != nullptr);
-  }
 
   std::string IRLoad::DumpText() const {
     return name + " = load " + ptr->GetOperandName();
@@ -300,11 +252,6 @@ namespace IR {
   }
 
   // IRGetElemPtr
-  IRGetElemPtr::IRGetElemPtr(std::string name, std::shared_ptr<IRValue> arr, std::shared_ptr<IRValue> index, int elem_size)
-    : IRNameInstruction(std::move(name)), arr(std::move(arr)), index(std::move(index)), elem_size(elem_size) {
-    assert(this->arr != nullptr && this->index != nullptr);
-  }
-
   std::string IRGetElemPtr::DumpText() const {
     return name + " = getelemptr " + arr->GetOperandName() + ", " + index->GetOperandName();
   }
@@ -314,11 +261,6 @@ namespace IR {
   }
 
   // IRGetPtr
-  IRGetPtr::IRGetPtr(std::string name, std::shared_ptr<IRValue> ptr, std::shared_ptr<IRValue> index, int elem_size)
-    : IRNameInstruction(std::move(name)), ptr(std::move(ptr)), index(std::move(index)), elem_size(elem_size) {
-    assert(this->ptr != nullptr && this->index != nullptr);
-  }
-
   std::string IRGetPtr::DumpText() const {
     return name + " = getptr " + ptr->GetOperandName() + ", " + index->GetOperandName();
   }
@@ -328,26 +270,18 @@ namespace IR {
   }
 
   // IRJump
-  IRJump::IRJump(std::shared_ptr<IRValue> target) : target(std::move(target)) {
-    assert(this->target != nullptr);
-  }
 
   std::string IRJump::DumpText() const {
     return "jump " + target->GetOperandName();
   }
 
   // IRBranch
-  IRBranch::IRBranch(std::shared_ptr<IRValue> cond, std::shared_ptr<IRValue> then_target, std::shared_ptr<IRValue> else_target)
-    : cond(std::move(cond)), then_target(std::move(then_target)), else_target(std::move(else_target)) {
-    assert(this->cond != nullptr && this->then_target != nullptr && this->else_target != nullptr);
-  }
 
   std::string IRBranch::DumpText() const {
     return "br " + cond->GetOperandName() + ", " + then_target->GetOperandName() + ", " + else_target->GetOperandName();
   }
 
   // IRReturn
-  IRReturn::IRReturn(std::shared_ptr<IRValue> val) : val(std::move(val)) {}
 
   std::string IRReturn::DumpText() const {
     if (val) {
@@ -357,10 +291,6 @@ namespace IR {
   }
 
   // IRCall
-  IRCall::IRCall(std::string name, std::shared_ptr<IRValue> func, std::vector<std::shared_ptr<IRValue>> args, IRType ret_type)
-    : name(std::move(name)), func(std::move(func)), args(std::move(args)), ret_type(ret_type) {
-    assert(this->func != nullptr);
-  }
 
   std::string IRCall::DumpText() const {
     std::string str;
@@ -386,15 +316,19 @@ namespace IR {
     return "";
   }
 
-  IRType IRCall::GetType() const {
-    return ret_type;
-  }
-
   // IRBasicBlock
-  IRBasicBlock::IRBasicBlock(std::string name) : name(std::move(name)) {}
 
   void IRBasicBlock::AddInstruction(std::shared_ptr<IRInstruction> inst) {
     insts.push_back(std::move(inst));
+  }
+
+  void IRBasicBlock::SetNext(std::shared_ptr<IRBasicBlock> next) {
+    next_1 = std::move(next);
+  }
+
+  void IRBasicBlock::SetNext(std::shared_ptr<IRBasicBlock> next_1, std::shared_ptr<IRBasicBlock> next_2) {
+    this->next_1 = std::move(next_1);
+    this->next_2 = std::move(next_2);
   }
 
   std::string IRBasicBlock::DumpText() const {
@@ -456,12 +390,8 @@ namespace IR {
     return "@" + name;
   }
 
-  IRType IRFuncDecl::GetType() const {
-    return ret_type;
-  }
 
   // IRFunction
-  IRFunction::IRFunction(std::string name, IRType ret_type) : name(std::move(name)), ret_type(ret_type) {}
 
   std::string IRFunction::DumpText() const {
     std::string text = "fun @" + name + "(";
@@ -486,10 +416,6 @@ namespace IR {
 
   std::string IRFunction::GetOperandName() const {
     return "@" + name;
-  }
-
-  IRType IRFunction::GetType() const {
-    return ret_type;
   }
 
   // IRProgram
