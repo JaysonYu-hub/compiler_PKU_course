@@ -8,12 +8,20 @@
 
 namespace Back {
 
+  enum class OptimizationLevel {
+    O0,
+    O1
+  };
+
   class RiscvGenerator {
   public:
-    RiscvGenerator(bool is_64bit = true) : is_64bit(is_64bit) {}
+    RiscvGenerator(bool is_64bit = true,
+                   OptimizationLevel optimization_level = OptimizationLevel::O0)
+      : is_64bit(is_64bit), optimization_level(optimization_level) {}
     void Generate(const IR::IRProgram& program);
   private:
     bool is_64bit;
+    OptimizationLevel optimization_level;
 
     void Visit(const IR::IRProgram& program);
     void Visit(const IR::IRGlobalAlloc& global);
@@ -45,6 +53,8 @@ namespace Back {
     void EmitSw(const std::string& reg, int offset, const std::string& base_reg = "sp");
     void EmitLd(const std::string& reg, int offset, const std::string& base_reg = "sp");
     void EmitSd(const std::string& reg, int offset, const std::string& base_reg = "sp");
+    bool TryEmitMulStrengthReduction(const IR::IRBinary& inst);
+    void EmitIndexScale(int elem_size);
     std::string StripAt(const std::string& name);
     std::string StripPercent(const std::string& name);
     int GetTypeSize(IR::IRType type) const {

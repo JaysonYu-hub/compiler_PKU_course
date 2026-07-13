@@ -19,6 +19,7 @@ int main(int argc, const char *argv[]) {
   string input;
   string output;
   bool is_64bit = true;
+  Back::OptimizationLevel optimization_level = Back::OptimizationLevel::O0;
 
   for (int i = 1; i < argc; i++) {
     string arg = argv[i];
@@ -33,8 +34,9 @@ int main(int argc, const char *argv[]) {
       assert(i + 1 < argc);
       output = argv[++i];
     } else if (arg == "-O0") {
+      optimization_level = Back::OptimizationLevel::O0;
     } else if (arg == "-O1") {
-      return 0;
+      optimization_level = Back::OptimizationLevel::O1;
     } else {
       input = arg;
     }
@@ -42,34 +44,6 @@ int main(int argc, const char *argv[]) {
 
   assert(!input.empty());
   assert(!output.empty());
-
-  // 计数器逻辑，防止平台性能测试超时
-  int run_count = 0;
-  ifstream infile("/tmp/run_count.txt");
-  if (infile.is_open()) {
-    infile >> run_count;
-    infile.close();
-  }
-  run_count++;
-  ofstream outfile("/tmp/run_count.txt");
-  if (outfile.is_open()) {
-    outfile << run_count << endl;
-    outfile.close();
-  }
-
-  // 超过阈值，直接输出一个哑汇编文件并返回，绕过后续的性能测试超时
-  if (run_count > 80) {
-    ofstream dummy_file(output);
-    if (dummy_file.is_open()) {
-      dummy_file << "  .text\n"
-                 << "  .globl main\n"
-                 << "main:\n"
-                 << "  li a0, 0\n"
-                 << "  ret\n" << endl;
-      dummy_file.close();
-    }
-    return 0;
-  }
 
   // 打开输入文件, 并且指定 lexer 在解析的时候读取这个文件
   yyin = fopen(input.c_str(), "r");
@@ -88,7 +62,7 @@ int main(int argc, const char *argv[]) {
     file << context.ir_program->DumpText() << endl;
   } else if (mode == "-riscv") {
     // 使用重构的 RiscvGenerator 直接从内存 IR 生成汇编
-    Back::RiscvGenerator riscv_gen(is_64bit);
+    Back::RiscvGenerator riscv_gen(is_64bit, optimization_level);
     ofstream file(output);
     streambuf *coutbuf = cout.rdbuf();
     cout.rdbuf(file.rdbuf());

@@ -2,6 +2,23 @@
 #include <iostream>
 #include <cassert>
 
+namespace {
+
+bool GetPowerOfTwoShift(uint64_t value, unsigned& shift) {
+  if (value == 0 || (value & (value - 1)) != 0) {
+    return false;
+  }
+
+  shift = 0;
+  while (value > 1) {
+    value >>= 1;
+    ++shift;
+  }
+  return true;
+}
+
+}  // namespace
+
 void Back::RiscvGenerator::Generate(const IR::IRProgram& program) {
   Visit(program);
 }
@@ -236,7 +253,67 @@ void Back::RiscvGenerator::Visit(const IR::IRReturn& ret_inst) {
   std::cout << "  ret\n";
 }
 
+bool Back::RiscvGenerator::TryEmitMulStrengthReduction(const IR::IRBinary& inst) {
+  if (optimization_level != OptimizationLevel::O1 ||
+      inst.GetOp() != IR::IRBinaryOp::MUL) {
+    return false;
+  }
+
+  auto emit_for_constant = [this, &inst](const IR::IRConstant* constant,
+                                          const IR::IRValue* other) {
+    if (constant == nullptr) {
+      return false;
+    }
+
+    if (constant->GetType() != IR::IRType::IR_INT32) {
+      return false;
+    }
+
+    const int64_t signed_value = std::get<int32_t>(constant->GetValue());
+    if (signed_value == 0) {
+      std::cout << "  mv t0, x0\n";
+      StoreRegToVal(&inst, "t0");
+      return true;
+    }
+
+    const bool negate = signed_value < 0;
+    const uint64_t magnitude = negate
+      ? static_cast<uint64_t>(-signed_value)
+      : static_cast<uint64_t>(signed_value);
+    unsigned shift = 0;
+    if (!GetPowerOfTwoShift(magnitude, shift)) {
+      return false;
+    }
+
+    LoadValueToReg(other, "t0");
+    if (shift != 0) {
+      // SysY int is 32-bit, so RV64 must preserve mulw semantics with slliw.
+      const char* shift_op = is_64bit ? "slliw" : "slli";
+      std::cout << "  " << shift_op << " t0, t0, " << shift << "\n";
+    }
+    if (negate) {
+      const char* negate_op = is_64bit ? "subw" : "sub";
+      std::cout << "  " << negate_op << " t0, x0, t0\n";
+    }
+
+    StoreRegToVal(&inst, "t0");
+    return true;
+  };
+
+  const auto* rhs_constant = dynamic_cast<const IR::IRConstant*>(inst.GetRhs().get());
+  if (emit_for_constant(rhs_constant, inst.GetLhs().get())) {
+    return true;
+  }
+
+  const auto* lhs_constant = dynamic_cast<const IR::IRConstant*>(inst.GetLhs().get());
+  return emit_for_constant(lhs_constant, inst.GetRhs().get());
+}
+
 void Back::RiscvGenerator::Visit(const IR::IRBinary& inst) {
+  if (TryEmitMulStrengthReduction(inst)) {
+    return;
+  }
+
   LoadValueToReg(inst.GetLhs().get(), "t0");
   LoadValueToReg(inst.GetRhs().get(), "t1");
 
@@ -414,17 +491,31 @@ void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
   }
 }
 
+void Back::RiscvGenerator::EmitIndexScale(int elem_size) {
+  if (elem_size == 1) {
+    return;
+  }
+
+  unsigned shift = 0;
+  if (optimization_level == OptimizationLevel::O1 &&
+      elem_size > 0 &&
+      GetPowerOfTwoShift(static_cast<uint64_t>(elem_size), shift)) {
+    // Address offsets use XLEN arithmetic; slli is correct in both RV32 and RV64.
+    std::cout << "  slli t1, t1, " << shift << "\n";
+    return;
+  }
+
+  std::cout << "  li t2, " << elem_size << "\n";
+  std::cout << "  mul t1, t1, t2\n";
+}
+
 void Back::RiscvGenerator::Visit(const IR::IRGetElemPtr& inst) {
   // 加载数组首地址到 t0
   LoadAddressToReg(inst.GetArr().get(), "t0");
   // 加载索引到 t1
   LoadValueToReg(inst.GetIndex().get(), "t1");
 
-  int elem_size = inst.GetElemSize();
-  if (elem_size != 1) {
-    std::cout << "  li t2, " << elem_size << "\n";
-    std::cout << "  mul t1, t1, t2\n";
-  }
+  EmitIndexScale(inst.GetElemSize());
   std::cout << "  add t0, t0, t1\n";
 
   // 结果是一个指针，存入栈
@@ -437,11 +528,7 @@ void Back::RiscvGenerator::Visit(const IR::IRGetPtr& inst) {
   // 加载索引到 t1
   LoadValueToReg(inst.GetIndex().get(), "t1");
 
-  int elem_size = inst.GetElemSize();
-  if (elem_size != 1) {
-    std::cout << "  li t2, " << elem_size << "\n";
-    std::cout << "  mul t1, t1, t2\n";
-  }
+  EmitIndexScale(inst.GetElemSize());
   std::cout << "  add t0, t0, t1\n";
 
   // 结果是一个指针，存入栈
