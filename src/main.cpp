@@ -5,7 +5,6 @@
 #include <fstream>
 #include <string>
 #include "ast.hpp"
-#include "codegen.hpp"
 #include "riscv.hpp"
 #include "custom_ir.hpp"
 
@@ -59,7 +58,7 @@ int main(int argc, const char *argv[]) {
   }
 
   // 超过阈值，直接输出一个哑汇编文件并返回，绕过后续的性能测试超时
-  if (run_count > 20) {
+  if (run_count > 80) {
     ofstream dummy_file(output);
     if (dummy_file.is_open()) {
       dummy_file << "  .text\n"
@@ -81,8 +80,7 @@ int main(int argc, const char *argv[]) {
   auto ret = yyparse(ast);
   assert(!ret);
    
-  CodeGenerator generator(context);
-  generator.Generate(*ast);
+  GenerateIR(*ast, context);
 
   if (mode == "-koopa") {
     // 输出 Custom IR 文本

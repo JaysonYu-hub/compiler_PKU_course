@@ -1,8 +1,86 @@
-#include "codegen.hpp"
 #include "ast.hpp"
+#include "ast_visitor.hpp"
 #include <iostream>
 #include <cassert>
 #include <memory>
+
+class CodeGenerator final : public ASTVisitor {
+public:
+  explicit CodeGenerator(Context& context);
+
+  std::string Generate(const BaseAST& node);
+  std::string Visit(const ArrayDimensionsAST& node) override;
+  std::string Visit(const CompUnitAST& node) override;
+  std::string Visit(const CompUnitSequenceAST& node) override;
+  std::string Visit(const CompUnitListAST& node) override;
+  std::string Visit(const FunctionDefinitionUnitAST& node) override;
+  std::string Visit(const DeclarationUnitAST& node) override;
+  std::string Visit(const FuncDefAST& node) override;
+  std::string Visit(const FuncFParamsAST& node) override;
+  std::string Visit(const FuncFParamAST& node) override;
+  std::string Visit(const BlockAST& node) override;
+  std::string Visit(const DeclBlockAST& node) override;
+  std::string Visit(const StmtBlockAST& node) override;
+  std::string Visit(const UnmatchedStmtWrapperAST& node) override;
+  std::string Visit(const MatchedStmtWrapperAST& node) override;
+  std::string Visit(const IfUnmatchedStmtAST& node) override;
+  std::string Visit(const IfElseUnmatchedStmtAST& node) override;
+  std::string Visit(const ReturnStmtAST& node) override;
+  std::string Visit(const AssignStmtAST& node) override;
+  std::string Visit(const ExpStmtAST& node) override;
+  std::string Visit(const EmptyStmtAST& node) override;
+  std::string Visit(const BlockStmtAST& node) override;
+  std::string Visit(const IfMatchedStmtAST& node) override;
+  std::string Visit(const WhileStmtAST& node) override;
+  std::string Visit(const ContinueStmtAST& node) override;
+  std::string Visit(const BreakStmtAST& node) override;
+  std::string Visit(const ExpAST& node) override;
+  std::string Visit(const UnaryOPExpAST& node) override;
+  std::string Visit(const PrimaryUnaryExpAST& node) override;
+  std::string Visit(const FuncCallExpAST& node) override;
+  std::string Visit(const FuncRParamsAST& node) override;
+  std::string Visit(const ParenthesizedExprAST& node) override;
+  std::string Visit(const LValuePrimaryExprAST& node) override;
+  std::string Visit(const NumberPrimaryExprAST& node) override;
+  std::string Visit(const OpAST& node) override;
+  std::string Visit(const UnaryMulExpAST& node) override;
+  std::string Visit(const BinaryMulExprAST& node) override;
+  std::string Visit(const MulAddExpAST& node) override;
+  std::string Visit(const BinaryAddExprAST& node) override;
+  std::string Visit(const AddRelExpAST& node) override;
+  std::string Visit(const BinaryRelExprAST& node) override;
+  std::string Visit(const RelEqExpAST& node) override;
+  std::string Visit(const BinaryEqExprAST& node) override;
+  std::string Visit(const EqLAndExpAST& node) override;
+  std::string Visit(const BinaryLogicalAndExprAST& node) override;
+  std::string Visit(const LAndLOrExpAST& node) override;
+  std::string Visit(const BinaryLogicalOrExprAST& node) override;
+  std::string Visit(const LValAST& node) override;
+  std::string Visit(const ConstExpAST& node) override;
+  std::string Visit(const ConstDefAST& node) override;
+  std::string Visit(const ArrayConstDefAST& node) override;
+  std::string Visit(const ConstExpConstInitValAST& node) override;
+  std::string Visit(const ConstInitValListAST& node) override;
+  std::string Visit(const CompoundConstInitValueAST& node) override;
+  std::string Visit(const ConstDeclWrapperAST& node) override;
+  std::string Visit(const VarDeclWrapperAST& node) override;
+  std::string Visit(const ConstDeclAST& node) override;
+  std::string Visit(const ConstDefListAST& node) override;
+  std::string Visit(const VarDeclAST& node) override;
+  std::string Visit(const VarDefListAST& node) override;
+  std::string Visit(const SimpleVarDefAST& node) override;
+  std::string Visit(const InitializedVarDefAST& node) override;
+  std::string Visit(const ArrayVarDefAST& node) override;
+  std::string Visit(const ArrayInitializedVarDefAST& node) override;
+  std::string Visit(const InitValAST& node) override;
+  std::string Visit(const InitValListAST& node) override;
+
+  void ParamLocalization(const FuncFParamsAST& node);
+  void ParamLocalization(const FuncFParamAST& node);
+
+private:
+  Context& context;
+};
 
 CodeGenerator::CodeGenerator(Context& context) : context(context) {}
 
@@ -1663,4 +1741,9 @@ std::string CodeGenerator::Visit(const InitValAST& node) {
 
 std::string CodeGenerator::Visit(const InitValListAST& node) {
   return "";
+}
+
+std::string GenerateIR(const BaseAST& node, Context& context) {
+  CodeGenerator generator(context);
+  return generator.Generate(node);
 }

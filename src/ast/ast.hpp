@@ -9,7 +9,7 @@
 #include "../IR/custom_ir.hpp"
 #include "ast_visitor.hpp"
 
-class CodeGenerator;
+
 
 // 临时寄存器生成器, 在函数开始时reset
 class Counter {
@@ -886,3 +886,5 @@ public:
   const std::vector<std::unique_ptr<ValueAST>>& getInitializerElements() const override;
   std::vector<ConstantVal> getConstantVals(Context& context) const;
 };
+
+std::string GenerateIR(const BaseAST& node, Context& context);
