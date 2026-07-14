@@ -1931,10 +1931,10 @@ yyreduce:
 
   case 37: /* UnaryExp: IDENT '(' ')'  */
 #line 287 "/root/compiler/src/sysy.y"
-                  { 
+                  {
     auto func_call_exp = new FuncCallExpAST();
     func_call_exp->ident = unique_ptr<string>((yyvsp[-2].str_val));
-    func_call_exp->func_r_params = nullptr;
+    func_call_exp->func_r_params = nullptr; func_call_exp->source_line = yylineno;
     (yyval.value_ast) = func_call_exp;
   }
 #line 1941 "/root/compiler/src/sysy.tab.cpp"
@@ -1945,7 +1945,7 @@ yyreduce:
                               { 
     auto func_call_exp = new FuncCallExpAST();
     func_call_exp->ident = unique_ptr<string>((yyvsp[-3].str_val));
-    func_call_exp->func_r_params = unique_ptr<BaseAST>((yyvsp[-1].ast_val));
+    func_call_exp->func_r_params = unique_ptr<BaseAST>((yyvsp[-1].ast_val)); func_call_exp->source_line = yylineno;
     (yyval.value_ast) = func_call_exp;
   }
 #line 1952 "/root/compiler/src/sysy.tab.cpp"

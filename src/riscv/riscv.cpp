@@ -1,6 +1,7 @@
 #include "riscv.hpp"
 #include <iostream>
 #include <cassert>
+#include <cstring>
 
 namespace {
 
@@ -46,7 +47,8 @@ void Back::RiscvGenerator::Visit(const IR::IRProgram& program) {
 void Back::RiscvGenerator::Visit(const IR::IRGlobalAlloc& global) {
   std::string name = StripAt(global.GetOperandName());
 
-  if (global.IsZeroInit() || global.GetInitVals().empty()) {
+  if (global.IsZeroInit() ||
+      (global.GetInitVals().empty() && global.GetInitFloatVals().empty())) {
     std::cout << "  .data\n";
     std::cout << "  .globl " << name << "\n";
     std::cout << name << ":\n";
@@ -55,8 +57,16 @@ void Back::RiscvGenerator::Visit(const IR::IRGlobalAlloc& global) {
     std::cout << "  .data\n";
     std::cout << "  .globl " << name << "\n";
     std::cout << name << ":\n";
-    for (int32_t v : global.GetInitVals()) {
-      std::cout << "  .word " << v << "\n";
+    if (!global.GetInitFloatVals().empty()) {
+      for (float value : global.GetInitFloatVals()) {
+        int32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        std::cout << "  .word " << bits << "\n";
+      }
+    } else {
+      for (int32_t value : global.GetInitVals()) {
+        std::cout << "  .word " << value << "\n";
+      }
     }
   }
   std::cout << "\n";
@@ -66,7 +76,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   val_stack_map.clear();
   local_allocs.clear();
   has_call = false;
-  max_param_count = 0;
+  max_stack_arg_count = 0;
 
   int offset = 0;
 
@@ -82,8 +92,17 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
       // 检测 call 指令
       if (const auto* call = dynamic_cast<const IR::IRCall*>(inst.get())) {
         has_call = true;
-        int arg_count = (int)call->GetArgs().size();
-        if (arg_count > max_param_count) max_param_count = arg_count;
+        std::vector<IR::IRType> arg_types;
+        for (const auto& arg : call->GetArgs()) {
+          arg_types.push_back(arg->GetType());
+        }
+        int stack_args = 0;
+        for (const auto& location : AssignArgumentLocations(arg_types)) {
+          if (location.kind == ArgumentLocation::Kind::STACK) ++stack_args;
+        }
+        if (stack_args > max_stack_arg_count) {
+          max_stack_arg_count = stack_args;
+        }
       }
 
       bool has_retval = false;
@@ -122,10 +141,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   }
 
   int slot_size = GetRegisterSize();
-  int param_overflow_size = 0;
-  if (max_param_count > 8) {
-    param_overflow_size = slot_size * (max_param_count - 8);
-  }
+  int param_overflow_size = slot_size * max_stack_arg_count;
 
   // ra 保存空间
   int ra_size = has_call ? GetRegisterSize() : 0;
@@ -163,31 +179,38 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   }
 
   // 将寄存器参数保存到栈上
-  for (size_t i = 0; i < func.params.size() && i < 8; i++) {
+  std::vector<IR::IRType> param_types;
+  for (const auto& param : func.params) param_types.push_back(param->GetType());
+  const auto param_locations = AssignArgumentLocations(param_types);
+  for (size_t i = 0; i < func.params.size(); ++i) {
     std::string param_name = func.params[i]->GetOperandName();
     auto it = val_stack_map.find(param_name);
     assert(it != val_stack_map.end());
-    if (GetTypeSize(func.params[i]->GetType()) == 8) {
-      EmitSd("a" + std::to_string(i), it->second, "sp");
+    const auto& location = param_locations[i];
+    if (location.kind == ArgumentLocation::Kind::FLOAT_REGISTER) {
+      EmitFsw("fa" + std::to_string(location.index), it->second, "sp");
+    } else if (location.kind == ArgumentLocation::Kind::INTEGER_REGISTER) {
+      const std::string reg = "a" + std::to_string(location.index);
+      if (GetTypeSize(func.params[i]->GetType()) == 8) {
+        EmitSd(reg, it->second, "sp");
+      } else {
+        EmitSw(reg, it->second, "sp");
+      }
     } else {
-      EmitSw("a" + std::to_string(i), it->second, "sp");
+      const int caller_offset = current_stack_size + slot_size * location.index;
+      if (func.params[i]->GetType() == IR::IRType::IR_FLOAT) {
+        EmitFlw("ft0", caller_offset, "sp");
+        EmitFsw("ft0", it->second, "sp");
+      } else if (GetTypeSize(func.params[i]->GetType()) == 8) {
+        EmitLd("t0", caller_offset, "sp");
+        EmitSd("t0", it->second, "sp");
+      } else {
+        EmitLw("t0", caller_offset, "sp");
+        EmitSw("t0", it->second, "sp");
+      }
     }
   }
   // 多于8个的参数映射到调用者栈帧中的位置
-  for (size_t i = 8; i < func.params.size(); i++) {
-    std::string param_name = func.params[i]->GetOperandName();
-    int caller_offset = current_stack_size + slot_size * ((int)i - 8);
-    auto it = val_stack_map.find(param_name);
-    assert(it != val_stack_map.end());
-    if (GetTypeSize(func.params[i]->GetType()) == 8) {
-      EmitLd("t0", caller_offset, "sp");
-      EmitSd("t0", it->second, "sp");
-    } else {
-      EmitLw("t0", caller_offset, "sp");
-      EmitSw("t0", it->second, "sp");
-    }
-  }
-
   // 遍历所有基本块
   for (const auto& block : func.blocks) {
     Visit(*block);
@@ -210,6 +233,8 @@ void Back::RiscvGenerator::Visit(const IR::IRInstruction& inst) {
     Visit(*p);
   } else if (const auto* p = dynamic_cast<const IR::IRBinary*>(&inst)) {
     Visit(*p);
+  } else if (const auto* p = dynamic_cast<const IR::IRCast*>(&inst)) {
+    Visit(*p);
   } else if (const auto* p = dynamic_cast<const IR::IRAlloc*>(&inst)) {
     Visit(*p);
   } else if (const auto* p = dynamic_cast<const IR::IRStore*>(&inst)) {
@@ -231,7 +256,11 @@ void Back::RiscvGenerator::Visit(const IR::IRInstruction& inst) {
 
 void Back::RiscvGenerator::Visit(const IR::IRReturn& ret_inst) {
   if (ret_inst.GetValue()) {
-    LoadValueToReg(ret_inst.GetValue().get(), "a0");
+    if (ret_inst.GetValue()->GetType() == IR::IRType::IR_FLOAT) {
+      LoadValueToFReg(ret_inst.GetValue().get(), "fa0");
+    } else {
+      LoadValueToReg(ret_inst.GetValue().get(), "a0");
+    }
   }
   // Epilogue
   if (has_call) {
@@ -255,7 +284,8 @@ void Back::RiscvGenerator::Visit(const IR::IRReturn& ret_inst) {
 
 bool Back::RiscvGenerator::TryEmitMulStrengthReduction(const IR::IRBinary& inst) {
   if (optimization_level != OptimizationLevel::O1 ||
-      inst.GetOp() != IR::IRBinaryOp::MUL) {
+      inst.GetOp() != IR::IRBinaryOp::MUL ||
+      inst.GetOperandType() != IR::IRType::IR_INT32) {
     return false;
   }
 
@@ -310,6 +340,52 @@ bool Back::RiscvGenerator::TryEmitMulStrengthReduction(const IR::IRBinary& inst)
 }
 
 void Back::RiscvGenerator::Visit(const IR::IRBinary& inst) {
+  if (inst.GetOperandType() == IR::IRType::IR_FLOAT) {
+    LoadValueToFReg(inst.GetLhs().get(), "ft0");
+    LoadValueToFReg(inst.GetRhs().get(), "ft1");
+    switch (inst.GetOp()) {
+      case IR::IRBinaryOp::ADD:
+        std::cout << "  fadd.s ft0, ft0, ft1\n";
+        break;
+      case IR::IRBinaryOp::SUB:
+        std::cout << "  fsub.s ft0, ft0, ft1\n";
+        break;
+      case IR::IRBinaryOp::MUL:
+        std::cout << "  fmul.s ft0, ft0, ft1\n";
+        break;
+      case IR::IRBinaryOp::DIV:
+        std::cout << "  fdiv.s ft0, ft0, ft1\n";
+        break;
+      case IR::IRBinaryOp::EQ:
+        std::cout << "  feq.s t0, ft0, ft1\n";
+        break;
+      case IR::IRBinaryOp::NE:
+        std::cout << "  feq.s t0, ft0, ft1\n";
+        std::cout << "  xori t0, t0, 1\n";
+        break;
+      case IR::IRBinaryOp::LT:
+        std::cout << "  flt.s t0, ft0, ft1\n";
+        break;
+      case IR::IRBinaryOp::LE:
+        std::cout << "  fle.s t0, ft0, ft1\n";
+        break;
+      case IR::IRBinaryOp::GT:
+        std::cout << "  flt.s t0, ft1, ft0\n";
+        break;
+      case IR::IRBinaryOp::GE:
+        std::cout << "  fle.s t0, ft1, ft0\n";
+        break;
+      default:
+        assert(false && "Unsupported floating-point binary operator");
+    }
+    if (inst.GetType() == IR::IRType::IR_FLOAT) {
+      StoreFRegToVal(&inst, "ft0");
+    } else {
+      StoreRegToVal(&inst, "t0");
+    }
+    return;
+  }
+
   if (TryEmitMulStrengthReduction(inst)) {
     return;
   }
@@ -377,6 +453,18 @@ void Back::RiscvGenerator::Visit(const IR::IRBinary& inst) {
   StoreRegToVal(&inst, "t0");
 }
 
+void Back::RiscvGenerator::Visit(const IR::IRCast& inst) {
+  if (inst.GetOp() == IR::IRCastOp::INT_TO_FLOAT) {
+    LoadValueToReg(inst.GetValue().get(), "t0");
+    std::cout << "  fcvt.s.w ft0, t0\n";
+    StoreFRegToVal(&inst, "ft0");
+  } else {
+    LoadValueToFReg(inst.GetValue().get(), "ft0");
+    std::cout << "  fcvt.w.s t0, ft0, rtz\n";
+    StoreRegToVal(&inst, "t0");
+  }
+}
+
 void Back::RiscvGenerator::Visit(const IR::IRAlloc& inst) {
   return;
 }
@@ -384,6 +472,21 @@ void Back::RiscvGenerator::Visit(const IR::IRAlloc& inst) {
 void Back::RiscvGenerator::Visit(const IR::IRStore& inst) {
   const auto* ptr_raw = inst.GetPtr().get();
   std::string ptr_name = ptr_raw->GetOperandName();
+  if (inst.GetVal()->GetType() == IR::IRType::IR_FLOAT) {
+    LoadValueToFReg(inst.GetVal().get(), "ft0");
+    if (dynamic_cast<const IR::IRGlobalAlloc*>(ptr_raw)) {
+      std::cout << "  la t1, " << StripAt(ptr_name) << "\n";
+      std::cout << "  fsw ft0, 0(t1)\n";
+    } else if (local_allocs.count(ptr_name)) {
+      auto it = val_stack_map.find(ptr_name);
+      assert(it != val_stack_map.end());
+      EmitFsw("ft0", it->second, "sp");
+    } else {
+      LoadValueToReg(inst.GetPtr().get(), "t1");
+      std::cout << "  fsw ft0, 0(t1)\n";
+    }
+    return;
+  }
   if (dynamic_cast<const IR::IRGlobalAlloc*>(ptr_raw)) {
     // 全局变量
     LoadValueToReg(inst.GetVal().get(), "t0");
@@ -418,6 +521,21 @@ void Back::RiscvGenerator::Visit(const IR::IRStore& inst) {
 void Back::RiscvGenerator::Visit(const IR::IRLoad& inst) {
   const auto* ptr_raw = inst.GetPtr().get();
   std::string ptr_name = ptr_raw->GetOperandName();
+  if (inst.GetType() == IR::IRType::IR_FLOAT) {
+    if (dynamic_cast<const IR::IRGlobalAlloc*>(ptr_raw)) {
+      std::cout << "  la t0, " << StripAt(ptr_name) << "\n";
+      std::cout << "  flw ft0, 0(t0)\n";
+    } else if (local_allocs.count(ptr_name)) {
+      auto it = val_stack_map.find(ptr_name);
+      assert(it != val_stack_map.end());
+      EmitFlw("ft0", it->second, "sp");
+    } else {
+      LoadValueToReg(inst.GetPtr().get(), "t1");
+      std::cout << "  flw ft0, 0(t1)\n";
+    }
+    StoreFRegToVal(&inst, "ft0");
+    return;
+  }
   if (dynamic_cast<const IR::IRGlobalAlloc*>(ptr_raw)) {
     // 全局变量
     std::cout << "  la t0, " << StripAt(ptr_name) << "\n";
@@ -466,16 +584,28 @@ void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
   // 将参数加载到 a0-a7 或栈上
   const auto& args = inst.GetArgs();
   int slot_size = GetRegisterSize();
+  std::vector<IR::IRType> arg_types;
+  for (const auto& arg : args) arg_types.push_back(arg->GetType());
+  const auto locations = AssignArgumentLocations(arg_types);
   for (size_t i = 0; i < args.size(); i++) {
-    if (i < 8) {
-      LoadValueToReg(args[i].get(), "a" + std::to_string(i));
+    const auto& location = locations[i];
+    if (location.kind == ArgumentLocation::Kind::FLOAT_REGISTER) {
+      LoadValueToFReg(args[i].get(),
+                      "fa" + std::to_string(location.index));
+    } else if (location.kind == ArgumentLocation::Kind::INTEGER_REGISTER) {
+      LoadValueToReg(args[i].get(),
+                     "a" + std::to_string(location.index));
     } else {
       // 参数溢出到栈上
-      LoadValueToReg(args[i].get(), "t0");
-      int param_offset = slot_size * ((int)i - 8);
-      if (GetTypeSize(args[i]->GetType()) == 8) {
+      int param_offset = slot_size * location.index;
+      if (args[i]->GetType() == IR::IRType::IR_FLOAT) {
+        LoadValueToFReg(args[i].get(), "ft0");
+        EmitFsw("ft0", param_offset, "sp");
+      } else if (GetTypeSize(args[i]->GetType()) == 8) {
+        LoadValueToReg(args[i].get(), "t0");
         EmitSd("t0", param_offset, "sp");
       } else {
+        LoadValueToReg(args[i].get(), "t0");
         EmitSw("t0", param_offset, "sp");
       }
     }
@@ -487,8 +617,35 @@ void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
 
   // 如果有返回值，保存 a0 到栈
   if (inst.HasReturnValue()) {
-    StoreRegToVal(&inst, "a0");
+    if (inst.GetType() == IR::IRType::IR_FLOAT) {
+      StoreFRegToVal(&inst, "fa0");
+    } else {
+      StoreRegToVal(&inst, "a0");
+    }
   }
+}
+
+std::vector<Back::RiscvGenerator::ArgumentLocation>
+Back::RiscvGenerator::AssignArgumentLocations(
+    const std::vector<IR::IRType>& types) const {
+  int integer_register = 0;
+  int float_register = 0;
+  int stack_slot = 0;
+  std::vector<ArgumentLocation> locations;
+  locations.reserve(types.size());
+
+  for (IR::IRType type : types) {
+    if (type == IR::IRType::IR_FLOAT && float_register < 8) {
+      locations.push_back(
+          {ArgumentLocation::Kind::FLOAT_REGISTER, float_register++});
+    } else if (integer_register < 8) {
+      locations.push_back(
+          {ArgumentLocation::Kind::INTEGER_REGISTER, integer_register++});
+    } else {
+      locations.push_back({ArgumentLocation::Kind::STACK, stack_slot++});
+    }
+  }
+  return locations;
 }
 
 void Back::RiscvGenerator::EmitIndexScale(int elem_size) {
@@ -587,6 +744,30 @@ void Back::RiscvGenerator::EmitSd(const std::string& reg, int offset, const std:
   }
 }
 
+void Back::RiscvGenerator::EmitFlw(const std::string& reg, int offset,
+                                   const std::string& base_reg) {
+  if (offset >= -2048 && offset <= 2047) {
+    std::cout << "  flw " << reg << ", " << offset << "(" << base_reg
+              << ")\n";
+  } else {
+    std::cout << "  li t6, " << offset << "\n";
+    std::cout << "  add t6, " << base_reg << ", t6\n";
+    std::cout << "  flw " << reg << ", 0(t6)\n";
+  }
+}
+
+void Back::RiscvGenerator::EmitFsw(const std::string& reg, int offset,
+                                   const std::string& base_reg) {
+  if (offset >= -2048 && offset <= 2047) {
+    std::cout << "  fsw " << reg << ", " << offset << "(" << base_reg
+              << ")\n";
+  } else {
+    std::cout << "  li t6, " << offset << "\n";
+    std::cout << "  add t6, " << base_reg << ", t6\n";
+    std::cout << "  fsw " << reg << ", 0(t6)\n";
+  }
+}
+
 void Back::RiscvGenerator::LoadValueToReg(const IR::IRValue* val, const std::string& reg) {
   if (const auto* const_val = dynamic_cast<const IR::IRConstant*>(val)) {
     auto raw_val = const_val->GetValue();
@@ -637,6 +818,35 @@ void Back::RiscvGenerator::StoreRegToVal(const IR::IRValue* val, const std::stri
   } else {
     EmitSw(reg, it->second, "sp");
   }
+}
+
+void Back::RiscvGenerator::LoadValueToFReg(const IR::IRValue* val,
+                                           const std::string& reg) {
+  if (const auto* constant = dynamic_cast<const IR::IRConstant*>(val)) {
+    if (constant->GetType() == IR::IRType::IR_FLOAT) {
+      float value = std::get<float>(constant->GetValue());
+      uint32_t bits = 0;
+      std::memcpy(&bits, &value, sizeof(bits));
+      std::cout << "  li t5, " << bits << "\n";
+      std::cout << "  fmv.w.x " << reg << ", t5\n";
+    } else {
+      LoadValueToReg(val, "t5");
+      std::cout << "  fcvt.s.w " << reg << ", t5\n";
+    }
+    return;
+  }
+
+  std::string name = val->GetOperandName();
+  auto it = val_stack_map.find(name);
+  assert(it != val_stack_map.end());
+  EmitFlw(reg, it->second, "sp");
+}
+
+void Back::RiscvGenerator::StoreFRegToVal(const IR::IRValue* val,
+                                          const std::string& reg) {
+  auto it = val_stack_map.find(val->GetOperandName());
+  assert(it != val_stack_map.end());
+  EmitFsw(reg, it->second, "sp");
 }
 
 void Back::RiscvGenerator::LoadAddressToReg(const IR::IRValue* val, const std::string& reg) {

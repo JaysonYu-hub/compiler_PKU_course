@@ -28,6 +28,15 @@ namespace IR {
     return "";
   }
 
+  std::string CastOpToString(IRCastOp op) {
+    switch (op) {
+      case IRCastOp::INT_TO_FLOAT: return "sitofp";
+      case IRCastOp::FLOAT_TO_INT: return "fptosi";
+      default: assert(false && "Invalid cast operator");
+    }
+    return "";
+  }
+
   std::string TypeToString(IRType type) {
     switch (type) {
       case IRType::IR_INT32: return "i32";
@@ -206,12 +215,41 @@ namespace IR {
 
   // IRBinary
 
+  namespace {
+  bool IsComparisonOp(IRBinaryOp op) {
+    return op == IRBinaryOp::EQ || op == IRBinaryOp::NE ||
+           op == IRBinaryOp::LT || op == IRBinaryOp::LE ||
+           op == IRBinaryOp::GT || op == IRBinaryOp::GE;
+  }
+  }
+
+  IRBinary::IRBinary(std::string name, IRBinaryOp op,
+                     std::shared_ptr<IRValue> lhs,
+                     std::shared_ptr<IRValue> rhs)
+    : IRNameInstruction(IR_Instruction_Type::IR_INST_BINARY, std::move(name)),
+      op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {
+    assert(this->lhs != nullptr && this->rhs != nullptr);
+    operand_type = (this->lhs->GetType() == IRType::IR_FLOAT ||
+                    this->rhs->GetType() == IRType::IR_FLOAT)
+                     ? IRType::IR_FLOAT
+                     : IRType::IR_INT32;
+    result_type = IsComparisonOp(op) ? IRType::IR_INT32 : operand_type;
+  }
+
   std::string IRBinary::DumpText() const {
-    return name + " = " + OpToString(op) + " " + lhs->GetOperandName() + ", " + rhs->GetOperandName();
+    const std::string prefix = operand_type == IRType::IR_FLOAT ? "f" : "";
+    return name + " = " + prefix + OpToString(op) + " " +
+           lhs->GetOperandName() + ", " + rhs->GetOperandName();
   }
 
   IRType IRBinary::GetType() const {
-    return IRType::IR_INT32;
+    return result_type;
+  }
+
+  // IRCast
+
+  std::string IRCast::DumpText() const {
+    return name + " = " + CastOpToString(op) + " " + value->GetOperandName();
   }
 
   // IRAlloc
@@ -358,8 +396,8 @@ namespace IR {
     if (name == "putint") return "decl @putint(i32)";
     if (name == "putch") return "decl @putch(i32)";
     if (name == "putarray") return "decl @putarray(i32, *i32)";
-    if (name == "starttime") return "decl @starttime()";
-    if (name == "stoptime") return "decl @stoptime()";
+    if (name == "_sysy_starttime") return "decl @_sysy_starttime(i32)";
+    if (name == "_sysy_stoptime") return "decl @_sysy_stoptime(i32)";
     if (name == "getfloat") return "decl @getfloat() : float";
     if (name == "getfarray") return "decl @getfarray(*float) : i32";
     if (name == "putfloat") return "decl @putfloat(float)";

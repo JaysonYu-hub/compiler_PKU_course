@@ -68,8 +68,10 @@ public:
 class FuncInformation { 
   public:
   std::string ret_type;
+  std::vector<IR::IRType> param_types;
   FuncInformation() : ret_type("") {}
-  FuncInformation(std::string ret_type) : ret_type(ret_type) {}
+  FuncInformation(std::string ret_type, std::vector<IR::IRType> param_types = {})
+    : ret_type(std::move(ret_type)), param_types(std::move(param_types)) {}
 };
 
 class ArrayInformation { 
@@ -79,9 +81,17 @@ class ArrayInformation {
   std::vector<int> const_values;
   std::vector<float> const_float_values;
   bool is_param = false;
+  IR::IRType element_type = IR::IRType::IR_INT32;
   ArrayInformation() = default;
-  ArrayInformation(std::string address, std::vector<int> dims, std::vector<int> const_values = {}, std::vector<float> const_float_values = {}, bool is_param = false) 
-    : address(std::move(address)), dims(std::move(dims)), const_values(std::move(const_values)), const_float_values(std::move(const_float_values)), is_param(is_param) {}
+  ArrayInformation(std::string address, std::vector<int> dims,
+                   std::vector<int> const_values = {},
+                   std::vector<float> const_float_values = {},
+                   bool is_param = false,
+                   IR::IRType element_type = IR::IRType::IR_INT32)
+    : address(std::move(address)), dims(std::move(dims)),
+      const_values(std::move(const_values)),
+      const_float_values(std::move(const_float_values)), is_param(is_param),
+      element_type(element_type) {}
 
   int GetTotalSize() const {
     int total = 1;
@@ -107,10 +117,15 @@ struct Symbol {
 public:
   std::string name;
   SymbolKind kind;
+  IR::IRType object_type = IR::IRType::IR_DEFAULT;
   std::variant<int, float, std::string, FuncInformation, ArrayInformation> value;
-  Symbol(const std::string &name, SymbolKind kind, int const_value) : name(name), kind(kind), value(const_value) {}
-  Symbol(const std::string &name, SymbolKind kind, float const_value) : name(name), kind(kind), value(const_value) {}
-  Symbol(const std::string &name, SymbolKind kind, const std::string &address) : name(name), kind(kind), value(address) {}
+  Symbol(const std::string &name, SymbolKind kind, int const_value)
+    : name(name), kind(kind), object_type(IR::IRType::IR_INT32), value(const_value) {}
+  Symbol(const std::string &name, SymbolKind kind, float const_value)
+    : name(name), kind(kind), object_type(IR::IRType::IR_FLOAT), value(const_value) {}
+  Symbol(const std::string &name, SymbolKind kind, const std::string &address,
+         IR::IRType object_type = IR::IRType::IR_INT32)
+    : name(name), kind(kind), object_type(object_type), value(address) {}
 
   Symbol(const std::string &name, SymbolKind kind, FuncInformation func_information) : name(name), kind(kind), value(func_information) {}
   
@@ -599,6 +614,7 @@ class FuncCallExpAST : public VisitableAST<FuncCallExpAST, ValueAST> {
 public:
   std::unique_ptr<std::string> ident;
   std::unique_ptr<BaseAST> func_r_params;
+  int source_line = 0;
   FuncCallExpAST() = default; 
   ConstantVal getValue(Context& context) const override;
 };

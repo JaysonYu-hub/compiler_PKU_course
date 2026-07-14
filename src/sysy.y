@@ -284,16 +284,16 @@ UnaryExp
     unary_op_exp->unary_exp = unique_ptr<ValueAST>($2);
     $$ = unary_op_exp; 
   }
-  | IDENT '(' ')' { 
+  | IDENT '(' ')' {
     auto func_call_exp = new FuncCallExpAST();
     func_call_exp->ident = unique_ptr<string>($1);
-    func_call_exp->func_r_params = nullptr;
+    func_call_exp->func_r_params = nullptr; func_call_exp->source_line = yylineno;
     $$ = func_call_exp;
   }
   | IDENT '(' FuncRParams ')' { 
     auto func_call_exp = new FuncCallExpAST();
     func_call_exp->ident = unique_ptr<string>($1);
-    func_call_exp->func_r_params = unique_ptr<BaseAST>($3);
+    func_call_exp->func_r_params = unique_ptr<BaseAST>($3); func_call_exp->source_line = yylineno;
     $$ = func_call_exp;
   }
   ;

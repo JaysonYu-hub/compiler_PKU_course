@@ -25,8 +25,14 @@ namespace IR {
     LT, LE, GT, GE 
   };
 
+  enum class IRCastOp {
+    INT_TO_FLOAT,
+    FLOAT_TO_INT
+  };
+
   enum class IR_Instruction_Type {
     IR_INST_BINARY,
+    IR_INST_CAST,
     IR_INST_ALLOC,
     IR_INST_STORE,
     IR_INST_LOAD,
@@ -40,6 +46,7 @@ namespace IR {
   };
 
   std::string OpToString(IRBinaryOp op);
+  std::string CastOpToString(IRCastOp op);
   std::string TypeToString(IRType type);
   IRType StringToType(const std::string &type);
 
@@ -163,18 +170,49 @@ namespace IR {
     IRBinaryOp op;
     std::shared_ptr<IRValue> lhs;
     std::shared_ptr<IRValue> rhs;
+    IRType operand_type;
+    IRType result_type;
   public:
-    IRBinary(std::string name, IRBinaryOp op, std::shared_ptr<IRValue> lhs, std::shared_ptr<IRValue> rhs)
-      : IRNameInstruction(IR_Instruction_Type::IR_INST_BINARY, std::move(name)), op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {
+    IRBinary(std::string name, IRBinaryOp op, std::shared_ptr<IRValue> lhs,
+             std::shared_ptr<IRValue> rhs, IRType operand_type,
+             IRType result_type)
+      : IRNameInstruction(IR_Instruction_Type::IR_INST_BINARY, std::move(name)),
+        op(op), lhs(std::move(lhs)), rhs(std::move(rhs)),
+        operand_type(operand_type), result_type(result_type) {
       assert(this->lhs != nullptr && this->rhs != nullptr);
     }
+
+    IRBinary(std::string name, IRBinaryOp op, std::shared_ptr<IRValue> lhs,
+             std::shared_ptr<IRValue> rhs);
 
     IRBinaryOp GetOp() const { return op; }
     std::shared_ptr<IRValue> GetLhs() const { return lhs; }
     std::shared_ptr<IRValue> GetRhs() const { return rhs; }
+    IRType GetOperandType() const { return operand_type; }
 
     std::string DumpText() const override;
     IRType GetType() const override;
+  };
+
+  // SysY permits implicit conversion between int and float.  Keeping that
+  // conversion explicit in IR prevents the backend from guessing from a use.
+  class IRCast : public IRNameInstruction {
+  private:
+    IRCastOp op;
+    std::shared_ptr<IRValue> value;
+    IRType target_type;
+  public:
+    IRCast(std::string name, IRCastOp op, std::shared_ptr<IRValue> value,
+           IRType target_type)
+      : IRNameInstruction(IR_Instruction_Type::IR_INST_CAST, std::move(name)),
+        op(op), value(std::move(value)), target_type(target_type) {
+      assert(this->value != nullptr);
+    }
+
+    IRCastOp GetOp() const { return op; }
+    std::shared_ptr<IRValue> GetValue() const { return value; }
+    std::string DumpText() const override;
+    IRType GetType() const override { return target_type; }
   };
   
   // alloc 指令类

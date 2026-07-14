@@ -2,6 +2,7 @@
 #include "ast_visitor.hpp"
 #include <iostream>
 #include <cassert>
+#include <cmath>
 #include <memory>
 
 class CodeGenerator final : public ASTVisitor {
@@ -80,9 +81,94 @@ public:
 
 private:
   Context& context;
+  std::shared_ptr<IR::IRValue> ConvertValue(std::shared_ptr<IR::IRValue> value,
+                                            IR::IRType target_type);
+  std::shared_ptr<IR::IRBinary> BuildBinary(const std::string& name,
+                                            IR::IRBinaryOp op,
+                                            std::shared_ptr<IR::IRValue> lhs,
+                                            std::shared_ptr<IR::IRValue> rhs);
+  std::shared_ptr<IR::IRValue> BuildCondition(std::shared_ptr<IR::IRValue> value);
 };
 
 CodeGenerator::CodeGenerator(Context& context) : context(context) {}
+
+namespace {
+
+IR::IRType SysYTypeToIR(const std::string& type) {
+  if (type == "float" || type == "f32") return IR::IRType::IR_FLOAT;
+  if (type == "void") return IR::IRType::IR_VOID;
+  if (!type.empty() && (type[0] == '*' || type[0] == '[')) {
+    return IR::IRType::IR_POINTER;
+  }
+  return IR::IRType::IR_INT32;
+}
+
+bool IsComparison(IR::IRBinaryOp op) {
+  return op == IR::IRBinaryOp::EQ || op == IR::IRBinaryOp::NE ||
+         op == IR::IRBinaryOp::LT || op == IR::IRBinaryOp::LE ||
+         op == IR::IRBinaryOp::GT || op == IR::IRBinaryOp::GE;
+}
+
+}  // namespace
+
+std::shared_ptr<IR::IRValue> CodeGenerator::ConvertValue(
+    std::shared_ptr<IR::IRValue> value, IR::IRType target_type) {
+  if (!value || value->GetType() == target_type ||
+      target_type == IR::IRType::IR_DEFAULT) {
+    return value;
+  }
+
+  IR::IRCastOp op;
+  if (value->GetType() == IR::IRType::IR_INT32 &&
+      target_type == IR::IRType::IR_FLOAT) {
+    op = IR::IRCastOp::INT_TO_FLOAT;
+  } else if (value->GetType() == IR::IRType::IR_FLOAT &&
+             target_type == IR::IRType::IR_INT32) {
+    op = IR::IRCastOp::FLOAT_TO_INT;
+  } else {
+    return value;
+  }
+
+  std::string name = context.NewReg();
+  auto cast = std::make_shared<IR::IRCast>(name, op, value, target_type);
+  if (context.current_block) {
+    context.current_block->AddInstruction(cast);
+    context.SetIRValue(name, cast);
+  }
+  return cast;
+}
+
+std::shared_ptr<IR::IRBinary> CodeGenerator::BuildBinary(
+    const std::string& name, IR::IRBinaryOp op,
+    std::shared_ptr<IR::IRValue> lhs, std::shared_ptr<IR::IRValue> rhs) {
+  assert(lhs && rhs);
+  IR::IRType operand_type = IR::IRType::IR_INT32;
+  if (op != IR::IRBinaryOp::MOD &&
+      (lhs->GetType() == IR::IRType::IR_FLOAT ||
+       rhs->GetType() == IR::IRType::IR_FLOAT)) {
+    operand_type = IR::IRType::IR_FLOAT;
+  }
+  lhs = ConvertValue(std::move(lhs), operand_type);
+  rhs = ConvertValue(std::move(rhs), operand_type);
+  IR::IRType result_type = IsComparison(op) ? IR::IRType::IR_INT32
+                                             : operand_type;
+  return std::make_shared<IR::IRBinary>(name, op, std::move(lhs),
+                                        std::move(rhs), operand_type,
+                                        result_type);
+}
+
+std::shared_ptr<IR::IRValue> CodeGenerator::BuildCondition(
+    std::shared_ptr<IR::IRValue> value) {
+  if (!value || value->GetType() != IR::IRType::IR_FLOAT) return value;
+  std::string name = context.NewReg();
+  auto zero = std::make_shared<IR::IRConstant>(0.0f);
+  auto condition = BuildBinary(name, IR::IRBinaryOp::NE, value, zero);
+  if (context.current_block) {
+    context.current_block->AddInstruction(condition);
+    context.SetIRValue(name, condition);
+  }
+  return condition;
+}
 
 std::string CodeGenerator::Generate(const BaseAST& node) {
   return node.Accept(*this);
@@ -101,8 +187,8 @@ std::string CodeGenerator::Visit(const CompUnitAST& node) {
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("putint", IR::IRType::IR_VOID, std::vector<IR::IRType>{IR::IRType::IR_INT32}));
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("putch", IR::IRType::IR_VOID, std::vector<IR::IRType>{IR::IRType::IR_INT32}));
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("putarray", IR::IRType::IR_VOID, std::vector<IR::IRType>{IR::IRType::IR_INT32, IR::IRType::IR_POINTER}));
-    context.AddDecl(std::make_shared<IR::IRFuncDecl>("starttime", IR::IRType::IR_VOID, std::vector<IR::IRType>{}));
-    context.AddDecl(std::make_shared<IR::IRFuncDecl>("stoptime", IR::IRType::IR_VOID, std::vector<IR::IRType>{}));
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("_sysy_starttime", IR::IRType::IR_VOID, std::vector<IR::IRType>{IR::IRType::IR_INT32}));
+    context.AddDecl(std::make_shared<IR::IRFuncDecl>("_sysy_stoptime", IR::IRType::IR_VOID, std::vector<IR::IRType>{IR::IRType::IR_INT32}));
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("getfloat", IR::IRType::IR_FLOAT, std::vector<IR::IRType>{}));
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("getfarray", IR::IRType::IR_INT32, std::vector<IR::IRType>{IR::IRType::IR_POINTER}));
     context.AddDecl(std::make_shared<IR::IRFuncDecl>("putfloat", IR::IRType::IR_VOID, std::vector<IR::IRType>{IR::IRType::IR_FLOAT}));
@@ -112,13 +198,13 @@ std::string CodeGenerator::Visit(const CompUnitAST& node) {
     context.scope->define(symbol);
     symbol = std::make_shared<Symbol>("getch", SymbolKind::FUNCTION, FuncInformation("i32"));
     context.scope->define(symbol);
-    symbol = std::make_shared<Symbol>("getarray", SymbolKind::FUNCTION, FuncInformation("i32"));
+    symbol = std::make_shared<Symbol>("getarray", SymbolKind::FUNCTION, FuncInformation("i32", {IR::IRType::IR_POINTER}));
     context.scope->define(symbol);
-    symbol = std::make_shared<Symbol>("putint", SymbolKind::FUNCTION, FuncInformation("void"));
+    symbol = std::make_shared<Symbol>("putint", SymbolKind::FUNCTION, FuncInformation("void", {IR::IRType::IR_INT32}));
     context.scope->define(symbol);
-    symbol = std::make_shared<Symbol>("putch", SymbolKind::FUNCTION, FuncInformation("void"));
+    symbol = std::make_shared<Symbol>("putch", SymbolKind::FUNCTION, FuncInformation("void", {IR::IRType::IR_INT32}));
     context.scope->define(symbol);
-    symbol = std::make_shared<Symbol>("putarray", SymbolKind::FUNCTION, FuncInformation("void"));
+    symbol = std::make_shared<Symbol>("putarray", SymbolKind::FUNCTION, FuncInformation("void", {IR::IRType::IR_INT32, IR::IRType::IR_POINTER}));
     context.scope->define(symbol);
     symbol = std::make_shared<Symbol>("starttime", SymbolKind::FUNCTION, FuncInformation("void"));
     context.scope->define(symbol);
@@ -126,11 +212,11 @@ std::string CodeGenerator::Visit(const CompUnitAST& node) {
     context.scope->define(symbol);
     symbol = std::make_shared<Symbol>("getfloat", SymbolKind::FUNCTION, FuncInformation("float"));
     context.scope->define(symbol);
-    symbol = std::make_shared<Symbol>("getfarray", SymbolKind::FUNCTION, FuncInformation("i32"));
+    symbol = std::make_shared<Symbol>("getfarray", SymbolKind::FUNCTION, FuncInformation("i32", {IR::IRType::IR_POINTER}));
     context.scope->define(symbol);
-    symbol = std::make_shared<Symbol>("putfloat", SymbolKind::FUNCTION, FuncInformation("void"));
+    symbol = std::make_shared<Symbol>("putfloat", SymbolKind::FUNCTION, FuncInformation("void", {IR::IRType::IR_FLOAT}));
     context.scope->define(symbol);
-    symbol = std::make_shared<Symbol>("putfarray", SymbolKind::FUNCTION, FuncInformation("void"));
+    symbol = std::make_shared<Symbol>("putfarray", SymbolKind::FUNCTION, FuncInformation("void", {IR::IRType::IR_INT32, IR::IRType::IR_POINTER}));
     context.scope->define(symbol);
     Generate(*node.end_comp_unit);
   }
@@ -170,7 +256,16 @@ std::string CodeGenerator::Visit(const DeclarationUnitAST& node) {
 
 std::string CodeGenerator::Visit(const FuncDefAST& node) {
   context.ResetRegBuilder();
-  auto symbol = std::make_shared<Symbol>(*node.ident, SymbolKind::FUNCTION, FuncInformation(*node.type));
+  std::vector<IR::IRType> param_types;
+  if (node.func_f_params) {
+    for (const auto& param : node.func_f_params->func_f_params) {
+      param_types.push_back(param->is_array ? IR::IRType::IR_POINTER
+                                            : SysYTypeToIR(*param->type));
+    }
+  }
+  auto symbol = std::make_shared<Symbol>(
+      *node.ident, SymbolKind::FUNCTION,
+      FuncInformation(*node.type, std::move(param_types)));
   context.scope->define(symbol);
 
   // 初始化内存表示的 IRFunction
@@ -212,6 +307,13 @@ std::string CodeGenerator::Visit(const FuncDefAST& node) {
       context.current_block->AddInstruction(inst);
     }
   }
+  if (!context.cur_block_has_terminator && *node.type == "f32") {
+    if (context.current_block) {
+      auto val = std::make_shared<IR::IRConstant>(0.0f);
+      auto inst = std::make_shared<IR::IRReturn>(val);
+      context.current_block->AddInstruction(inst);
+    }
+  }
 
   context.exitScope();
   
@@ -233,7 +335,7 @@ static std::string GetParamType(const FuncFParamAST& node, Context& context) {
   if (!node.is_array) {
     return *node.type;
   }
-  std::string base_type = "i32";
+  std::string base_type = *node.type;
   std::vector<int> dims;
   for (auto& expr : node.array_dims) {
     dims.push_back(expr->getValue(context).getInt());
@@ -265,10 +367,13 @@ void CodeGenerator::ParamLocalization(const FuncFParamAST& node) {
       dims.push_back(expr->getValue(context).getInt());
     }
     auto symbol = std::make_shared<Symbol>(*node.ident, SymbolKind::ARRAY);
-    symbol->value = ArrayInformation(address, dims, {}, {}, true); // is_param = true
+    IR::IRType element_type = SysYTypeToIR(*node.type);
+    symbol->value = ArrayInformation(address, dims, {}, {}, true, element_type); // is_param = true
+    symbol->object_type = element_type;
     context.scope->define(symbol);
   } else {
-    auto symbol = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE, address);
+    auto symbol = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE,
+                                           address, SysYTypeToIR(*node.type));
     context.scope->define(symbol);
   }
 
@@ -340,7 +445,7 @@ std::string CodeGenerator::Visit(const IfUnmatchedStmtAST& node) {
   context.SetIRValue(end_label, end_bb);
 
   if (context.current_block) {
-    auto cond_val = context.GetIRValue(cond_reg);
+    auto cond_val = BuildCondition(context.GetIRValue(cond_reg));
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, end_bb);
     context.current_block->AddInstruction(br_inst);
     context.current_block->SetNext(then_bb, end_bb);
@@ -377,7 +482,7 @@ std::string CodeGenerator::Visit(const IfElseUnmatchedStmtAST& node) {
   context.SetIRValue(end_label, end_bb);
 
   if (context.current_block) {
-    auto cond_val = context.GetIRValue(cond_reg);
+    auto cond_val = BuildCondition(context.GetIRValue(cond_reg));
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, else_bb);
     context.current_block->AddInstruction(br_inst);
     context.current_block->SetNext(then_bb, else_bb);
@@ -426,6 +531,9 @@ std::string CodeGenerator::Visit(const ReturnStmtAST& node) {
 
   if (context.current_block) {
     auto val = node.exp ? context.GetIRValue(ret_val) : nullptr;
+    if (val && context.current_func) {
+      val = ConvertValue(val, context.current_func->GetRetType());
+    }
     auto inst = std::make_shared<IR::IRReturn>(val);
     context.current_block->AddInstruction(inst);
   }
@@ -526,6 +634,11 @@ std::string CodeGenerator::Visit(const AssignStmtAST& node) {
 
     if (context.current_block) {
       auto val = context.GetIRValue(rhs_reg);
+      IR::IRType target_type = sym->object_type;
+      if (sym->kind == SymbolKind::ARRAY || sym->kind == SymbolKind::CONST_ARRAY) {
+        target_type = std::get<ArrayInformation>(sym->value).element_type;
+      }
+      val = ConvertValue(val, target_type);
       auto store_inst = std::make_shared<IR::IRStore>(val, ptr_val);
       context.current_block->AddInstruction(store_inst);
     }
@@ -567,7 +680,7 @@ std::string CodeGenerator::Visit(const IfMatchedStmtAST& node) {
   context.SetIRValue(end_label, end_bb);
 
   if (context.current_block) {
-    auto cond_val = context.GetIRValue(cond_reg);
+    auto cond_val = BuildCondition(context.GetIRValue(cond_reg));
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, else_bb);
     context.current_block->AddInstruction(br_inst);
     context.current_block->SetNext(then_bb, else_bb);
@@ -630,7 +743,7 @@ std::string CodeGenerator::Visit(const WhileStmtAST& node) {
 
   std::string cond_reg = Generate(*node.while_exp);
   if (context.current_block) {
-    auto cond_val = context.GetIRValue(cond_reg);
+    auto cond_val = BuildCondition(context.GetIRValue(cond_reg));
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, continue_loop_bb, end_bb);
     context.current_block->AddInstruction(br_inst);
     context.current_block->SetNext(continue_loop_bb, end_bb);
@@ -701,7 +814,7 @@ std::string CodeGenerator::Visit(const UnaryOPExpAST& node) {
     if (context.current_block) {
       auto lhs = context.GetIRValue("0");
       auto rhs = context.GetIRValue(src_reg);
-      auto inst = std::make_shared<IR::IRBinary>(dest_reg, IR::IRBinaryOp::SUB, lhs, rhs);
+      auto inst = BuildBinary(dest_reg, IR::IRBinaryOp::SUB, lhs, rhs);
       context.current_block->AddInstruction(inst);
       context.SetIRValue(dest_reg, inst);
     }
@@ -712,7 +825,7 @@ std::string CodeGenerator::Visit(const UnaryOPExpAST& node) {
     if (context.current_block) {
       auto lhs = context.GetIRValue("0");
       auto rhs = context.GetIRValue(src_reg);
-      auto inst = std::make_shared<IR::IRBinary>(dest_reg, IR::IRBinaryOp::EQ, lhs, rhs);
+      auto inst = BuildBinary(dest_reg, IR::IRBinaryOp::EQ, lhs, rhs);
       context.current_block->AddInstruction(inst);
       context.SetIRValue(dest_reg, inst);
     }
@@ -749,9 +862,21 @@ std::string CodeGenerator::Visit(const FuncCallExpAST& node) {
   auto args = std::move(context.arg_stack.back());
   context.arg_stack.pop_back(); // Pop it
 
-  auto target_func = context.GetIRValue("@" + func_name);
+  for (size_t i = 0; i < args.size() && i < func_inf.param_types.size(); ++i) {
+    args[i] = ConvertValue(args[i], func_inf.param_types[i]);
+  }
+
+  std::string target_name = func_name;
+  if (func_name == "starttime" || func_name == "stoptime") {
+    target_name = func_name == "starttime" ? "_sysy_starttime"
+                                           : "_sysy_stoptime";
+    args.insert(args.begin(),
+                std::make_shared<IR::IRConstant>(node.source_line));
+  }
+
+  auto target_func = context.GetIRValue("@" + target_name);
   if (!target_func) {
-    target_func = std::make_shared<IR::IRSymbol>("@" + func_name);
+    target_func = std::make_shared<IR::IRSymbol>("@" + target_name);
   }
 
   if (func_inf.ret_type != "void") {
@@ -840,7 +965,7 @@ std::string CodeGenerator::Visit(const BinaryMulExprAST& node) {
   if (context.current_block) {
     auto lhs = context.GetIRValue(lhs_reg);
     auto rhs = context.GetIRValue(rhs_reg);
-    auto inst = std::make_shared<IR::IRBinary>(dest_reg, op, lhs, rhs);
+    auto inst = BuildBinary(dest_reg, op, lhs, rhs);
     context.current_block->AddInstruction(inst);
     context.SetIRValue(dest_reg, inst);
   }
@@ -868,7 +993,7 @@ std::string CodeGenerator::Visit(const BinaryAddExprAST& node) {
   if (context.current_block) {
     auto lhs = context.GetIRValue(lhs_reg);
     auto rhs = context.GetIRValue(rhs_reg);
-    auto inst = std::make_shared<IR::IRBinary>(dest_reg, op, lhs, rhs);
+    auto inst = BuildBinary(dest_reg, op, lhs, rhs);
     context.current_block->AddInstruction(inst);
     context.SetIRValue(dest_reg, inst);
   }
@@ -900,7 +1025,7 @@ std::string CodeGenerator::Visit(const BinaryRelExprAST& node) {
   if (context.current_block) {
     auto lhs = context.GetIRValue(lhs_reg);
     auto rhs = context.GetIRValue(rhs_reg);
-    auto inst = std::make_shared<IR::IRBinary>(dest_reg, op, lhs, rhs);
+    auto inst = BuildBinary(dest_reg, op, lhs, rhs);
     context.current_block->AddInstruction(inst);
     context.SetIRValue(dest_reg, inst);
   }
@@ -928,7 +1053,7 @@ std::string CodeGenerator::Visit(const BinaryEqExprAST& node) {
   if (context.current_block) {
     auto lhs = context.GetIRValue(lhs_reg);
     auto rhs = context.GetIRValue(rhs_reg);
-    auto inst = std::make_shared<IR::IRBinary>(dest_reg, op, lhs, rhs);
+    auto inst = BuildBinary(dest_reg, op, lhs, rhs);
     context.current_block->AddInstruction(inst);
     context.SetIRValue(dest_reg, inst);
   }
@@ -967,7 +1092,7 @@ std::string CodeGenerator::Visit(const BinaryLogicalAndExprAST& node) {
     }
 
     if (context.current_block) {
-      auto lhs_val = context.GetIRValue(lhs_reg);
+      auto lhs_val = BuildCondition(context.GetIRValue(lhs_reg));
       auto br_inst = std::make_shared<IR::IRBranch>(lhs_val, then_bb, end_bb);
       context.current_block->AddInstruction(br_inst);
       context.current_block->SetNext(then_bb, end_bb);
@@ -983,7 +1108,7 @@ std::string CodeGenerator::Visit(const BinaryLogicalAndExprAST& node) {
     if (context.current_block) {
       auto rhs_val = context.GetIRValue(rhs_reg);
       auto const_zero = context.GetIRValue("0");
-      auto ne_inst = std::make_shared<IR::IRBinary>(temp_reg, IR::IRBinaryOp::NE, rhs_val, const_zero);
+      auto ne_inst = BuildBinary(temp_reg, IR::IRBinaryOp::NE, rhs_val, const_zero);
       context.current_block->AddInstruction(ne_inst);
       context.SetIRValue(temp_reg, ne_inst);
 
@@ -1047,7 +1172,7 @@ std::string CodeGenerator::Visit(const BinaryLogicalOrExprAST& node) {
     }
 
     if (context.current_block) {
-      auto lhs_val = context.GetIRValue(lhs_reg);
+      auto lhs_val = BuildCondition(context.GetIRValue(lhs_reg));
       auto br_inst = std::make_shared<IR::IRBranch>(lhs_val, end_bb, then_bb);
       context.current_block->AddInstruction(br_inst);
       context.current_block->SetNext(then_bb, end_bb);
@@ -1063,7 +1188,7 @@ std::string CodeGenerator::Visit(const BinaryLogicalOrExprAST& node) {
     if (context.current_block) {
       auto rhs_val = context.GetIRValue(rhs_reg);
       auto const_zero = context.GetIRValue("0");
-      auto ne_inst = std::make_shared<IR::IRBinary>(temp_reg, IR::IRBinaryOp::NE, const_zero, rhs_val);
+      auto ne_inst = BuildBinary(temp_reg, IR::IRBinaryOp::NE, const_zero, rhs_val);
       context.current_block->AddInstruction(ne_inst);
       context.SetIRValue(temp_reg, ne_inst);
 
@@ -1107,7 +1232,8 @@ std::string CodeGenerator::Visit(const LValAST& node) {
 
     if (context.current_block) {
       auto ptr_val = context.GetIRValue(ptr);
-      auto load_inst = std::make_shared<IR::IRLoad>(new_reg, ptr_val);
+      auto load_inst = std::make_shared<IR::IRLoad>(new_reg, ptr_val,
+                                                    sym->object_type);
       context.current_block->AddInstruction(load_inst);
       context.SetIRValue(new_reg, load_inst);
     }
@@ -1198,7 +1324,8 @@ std::string CodeGenerator::Visit(const LValAST& node) {
       if (node.index_exp.size() == (size_t)total_dims) {
         std::string final_reg = context.NewReg();
         if (context.current_block) {
-          auto load_final_inst = std::make_shared<IR::IRLoad>(final_reg, prev_val);
+          auto load_final_inst = std::make_shared<IR::IRLoad>(
+              final_reg, prev_val, arr_info.element_type);
           context.current_block->AddInstruction(load_final_inst);
           context.SetIRValue(final_reg, load_final_inst);
         }
@@ -1387,11 +1514,12 @@ std::string CodeGenerator::Visit(const ArrayConstDefAST& node) {
     for (auto& val : init_vals) {
       float f = val.getFloat();
       const_float_values.push_back(f);
-      if (f != 0.0f) {
+      if (f != 0.0f || std::signbit(f)) {
         is_all_zero = false;
       }
     }
-    arr_info = ArrayInformation(address, dims, {}, const_float_values);
+    arr_info = ArrayInformation(address, dims, {}, const_float_values, false,
+                                IR::IRType::IR_FLOAT);
     if (context.scope->isGlobal()) {
       global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, is_all_zero, const_float_values, dims);
     }
@@ -1405,7 +1533,8 @@ std::string CodeGenerator::Visit(const ArrayConstDefAST& node) {
         is_all_zero = false;
       }
     }
-    arr_info = ArrayInformation(address, dims, const_values, {});
+    arr_info = ArrayInformation(address, dims, const_values, {}, false,
+                                IR::IRType::IR_INT32);
     if (context.scope->isGlobal()) {
       global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, arr_type, is_all_zero, const_values, dims);
     }
@@ -1534,8 +1663,10 @@ std::string CodeGenerator::Visit(const VarDefListAST& node) {
 
 std::string CodeGenerator::Visit(const SimpleVarDefAST& node) {
   std::string address = context.GetAddress(*node.ident);
-  auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE, address);
   std::string b_type = *context.decl_type_context;
+  IR::IRType value_type = SysYTypeToIR(b_type);
+  auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE,
+                                      address, value_type);
 
   if (context.scope->isGlobal()) {
     auto global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, b_type, true, std::vector<int32_t>{});
@@ -1558,11 +1689,13 @@ std::string CodeGenerator::Visit(const SimpleVarDefAST& node) {
 std::string CodeGenerator::Visit(const InitializedVarDefAST& node) {
   std::string address = context.GetAddress(*node.ident);
   std::string b_type = *context.decl_type_context;
-  auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE, address);
+  IR::IRType value_type = SysYTypeToIR(b_type);
+  auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::VARIABLE,
+                                      address, value_type);
   if (context.scope->isGlobal()) {
     ConstantVal init_val = node.init_val->getValue(context);
     std::shared_ptr<IR::IRGlobalAlloc> global_alloc;
-    if (b_type == "float") {
+    if (value_type == IR::IRType::IR_FLOAT) {
       global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, b_type, false, std::vector<float>{init_val.getFloat()});
     } else {
       global_alloc = std::make_shared<IR::IRGlobalAlloc>(address, b_type, false, std::vector<int32_t>{init_val.getInt()});
@@ -1578,7 +1711,9 @@ std::string CodeGenerator::Visit(const InitializedVarDefAST& node) {
     context.SetIRValue(address, alloc_inst);
 
     std::string init_val_reg = Generate(*node.init_val);
-    auto store_inst = std::make_shared<IR::IRStore>(context.GetIRValue(init_val_reg), context.GetIRValue(address));
+    auto init_value = ConvertValue(context.GetIRValue(init_val_reg), value_type);
+    auto store_inst = std::make_shared<IR::IRStore>(init_value,
+                                                    context.GetIRValue(address));
     context.current_block->AddInstruction(store_inst);
   }
   context.scope->define(sym);
@@ -1596,7 +1731,9 @@ std::string CodeGenerator::Visit(const ArrayVarDefAST& node) {
   }
 
   auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::ARRAY);
-  sym->value = ArrayInformation(address, dims);
+  IR::IRType element_type = SysYTypeToIR(b_type);
+  sym->value = ArrayInformation(address, dims, {}, {}, false, element_type);
+  sym->object_type = element_type;
 
   std::string arr_type = b_type;
   for (auto it = dims.rbegin(); it != dims.rend(); ++it) {
@@ -1634,9 +1771,11 @@ std::string CodeGenerator::Visit(const ArrayInitializedVarDefAST& node) {
   }
 
   auto sym = std::make_shared<Symbol>(*node.ident, SymbolKind::ARRAY);
-  sym->value = ArrayInformation(address, dims);
+  IR::IRType element_type = SysYTypeToIR(b_type);
+  sym->value = ArrayInformation(address, dims, {}, {}, false, element_type);
+  sym->object_type = element_type;
 
-  std::string arr_type = (b_type == "float") ? "float" : "i32";
+  std::string arr_type = (element_type == IR::IRType::IR_FLOAT) ? "float" : "i32";
   for (auto it = dims.rbegin(); it != dims.rend(); ++it) {
     arr_type = "[" + arr_type + ", " + std::to_string(*it) + "]";
   }
@@ -1655,13 +1794,13 @@ std::string CodeGenerator::Visit(const ArrayInitializedVarDefAST& node) {
     FillConstantValInitValFromInitVal(*node.init_val_list, dims, sub_sizes, -1, fill_index, init_vals, context);
 
     std::shared_ptr<IR::IRGlobalAlloc> global_alloc;
-    if (b_type == "float") {
+    if (element_type == IR::IRType::IR_FLOAT) {
       std::vector<float> init_nums;
       bool is_all_zero = true;
       for (auto& val : init_vals) {
         float f = val.getFloat();
         init_nums.push_back(f);
-        if (f != 0.0f) {
+        if (f != 0.0f || std::signbit(f)) {
           is_all_zero = false;
         }
       }
@@ -1684,7 +1823,8 @@ std::string CodeGenerator::Visit(const ArrayInitializedVarDefAST& node) {
       context.scope->define(sym);
       return "";
     }
-    std::vector<std::string> init_vals(arr_size, (b_type == "float") ? "0.0" : "0");
+    std::vector<std::string> init_vals(
+        arr_size, (element_type == IR::IRType::IR_FLOAT) ? "0.0" : "0");
     int fill_index = 0;
     FillInitValRegs(*node.init_val_list, dims, sub_sizes, -1, fill_index, init_vals, *this, context);
 
@@ -1722,7 +1862,7 @@ std::string CodeGenerator::Visit(const ArrayInitializedVarDefAST& node) {
       }
 
       if (context.current_block) {
-        auto val = context.GetIRValue(init_vals[i]);
+        auto val = ConvertValue(context.GetIRValue(init_vals[i]), element_type);
         auto store_inst = std::make_shared<IR::IRStore>(val, prev_val);
         context.current_block->AddInstruction(store_inst);
       }
