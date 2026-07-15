@@ -8,3 +8,5 @@
 /libsysy
 /my_autotest.py
 /ai_test
+/sync_and_test.sh
+/vm_autotest_sy.py

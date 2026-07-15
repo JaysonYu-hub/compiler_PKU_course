@@ -226,7 +226,7 @@ namespace IR {
   IRBinary::IRBinary(std::string name, IRBinaryOp op,
                      std::shared_ptr<IRValue> lhs,
                      std::shared_ptr<IRValue> rhs)
-    : IRNameInstruction(IR_Instruction_Type::IR_INST_BINARY, std::move(name)),
+    : IRNameInstruction(IRInstructionType::IR_INST_BINARY, std::move(name)),
       op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {
     assert(this->lhs != nullptr && this->rhs != nullptr);
     operand_type = (this->lhs->GetType() == IRType::IR_FLOAT ||
@@ -271,7 +271,7 @@ namespace IR {
 
   // store 指令类
   IRStore::IRStore(std::shared_ptr<IRValue> val, std::shared_ptr<IRValue> ptr)
-    : IRInstruction(IR_Instruction_Type::IR_INST_STORE), val(std::move(val)), ptr(std::move(ptr)) {
+    : IRInstruction(IRInstructionType::IR_INST_STORE), val(std::move(val)), ptr(std::move(ptr)) {
     assert(this->ptr != nullptr && this->val != nullptr);
   }
 
@@ -387,7 +387,7 @@ namespace IR {
 
   // IRFuncDecl
   IRFuncDecl::IRFuncDecl(std::string name, IRType ret_type, std::vector<IRType> param_types)
-    : name(std::move(name)), ret_type(ret_type), param_types(std::move(param_types)) {}
+    : IRValue(IRValueKind::IR_FUNC_DECL), name(std::move(name)), ret_type(ret_type), param_types(std::move(param_types)) {}
 
   std::string IRFuncDecl::DumpText() const {
     if (name == "getint") return "decl @getint() : i32";
