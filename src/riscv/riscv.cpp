@@ -3,6 +3,10 @@
 #include <cassert>
 #include <cstring>
 
+// Definition of the global architecture flag (declared in riscv.hpp).
+bool g_is_64bit = true;
+
+
 namespace {
 
 bool GetPowerOfTwoShift(uint64_t value, unsigned& shift) {

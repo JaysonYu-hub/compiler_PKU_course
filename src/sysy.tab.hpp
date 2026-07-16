@@ -35,8 +35,8 @@
    especially those whose name start with YY_ or yy_.  They are
    private implementation details that can be changed or removed.  */
 
-#ifndef YY_YY_ROOT_COMPILER_SRC_SYSY_TAB_HPP_INCLUDED
-# define YY_YY_ROOT_COMPILER_SRC_SYSY_TAB_HPP_INCLUDED
+#ifndef YY_YY_MNT_D_PROJECT_COMPILER_SRC_COMPILER_SRC_SYSY_TAB_HPP_INCLUDED
+# define YY_YY_MNT_D_PROJECT_COMPILER_SRC_COMPILER_SRC_SYSY_TAB_HPP_INCLUDED
 /* Debug traces.  */
 #ifndef YYDEBUG
 # define YYDEBUG 0
@@ -45,13 +45,13 @@
 extern int yydebug;
 #endif
 /* "%code requires" blocks.  */
-#line 2 "/root/compiler/src/sysy.y"
+#line 2 "/mnt/d/project/compiler_src/compiler/src/sysy.y"
 
   #include <memory>
   #include <string>
   #include "ast.hpp"
 
-#line 55 "/root/compiler/src/sysy.tab.hpp"
+#line 55 "/mnt/d/project/compiler_src/compiler/src/sysy.tab.hpp"
 
 /* Token kinds.  */
 #ifndef YYTOKENTYPE
@@ -98,7 +98,7 @@ extern int yydebug;
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#line 27 "/root/compiler/src/sysy.y"
+#line 27 "/mnt/d/project/compiler_src/compiler/src/sysy.y"
 
   std::string *str_val;
   int int_val;
@@ -107,7 +107,7 @@ union YYSTYPE
   ValueAST *value_ast;
   OpAST *op_ast;
 
-#line 111 "/root/compiler/src/sysy.tab.hpp"
+#line 111 "/mnt/d/project/compiler_src/compiler/src/sysy.tab.hpp"
 
 };
 typedef union YYSTYPE YYSTYPE;
@@ -122,4 +122,4 @@ extern YYSTYPE yylval;
 int yyparse (std::unique_ptr<BaseAST> &ast);
 
 
-#endif /* !YY_YY_ROOT_COMPILER_SRC_SYSY_TAB_HPP_INCLUDED  */
+#endif /* !YY_YY_MNT_D_PROJECT_COMPILER_SRC_COMPILER_SRC_SYSY_TAB_HPP_INCLUDED  */

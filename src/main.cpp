@@ -10,6 +10,7 @@
 
 using namespace std;
 
+extern bool g_is_64bit;
 extern FILE *yyin;
 extern int yyparse(unique_ptr<BaseAST> &ast);
 int main(int argc, const char *argv[]) {
@@ -18,7 +19,7 @@ int main(int argc, const char *argv[]) {
   string mode = "-riscv";
   string input;
   string output;
-  bool is_64bit = true;
+  g_is_64bit = true;
   Back::OptimizationLevel optimization_level = Back::OptimizationLevel::O0;
 
   for (int i = 1; i < argc; i++) {
@@ -26,7 +27,7 @@ int main(int argc, const char *argv[]) {
     if (arg == "-S" || arg == "-riscv" || arg == "-perf") {
       mode = "-riscv";
       if (arg == "-riscv" || arg == "-perf") {
-        is_64bit = false;
+        g_is_64bit = false;
       }
     } else if (arg == "-koopa") {
       mode = "-koopa";
@@ -61,8 +62,8 @@ int main(int argc, const char *argv[]) {
     ofstream file(output);
     file << context.ir_program->DumpText() << endl;
   } else if (mode == "-riscv") {
-    // 使用重构的 RiscvGenerator 直接从内存 IR 生成汇编
-    Back::RiscvGenerator riscv_gen(is_64bit, optimization_level);
+    // 使用重构 of RiscvGenerator 直接从内存 IR 生成汇编
+    Back::RiscvGenerator riscv_gen(optimization_level);
     ofstream file(output);
     streambuf *coutbuf = cout.rdbuf();
     cout.rdbuf(file.rdbuf());

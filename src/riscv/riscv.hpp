@@ -7,6 +7,10 @@
 #include <vector>
 #include "../IR/custom_ir.hpp"
 
+// Global architecture flag. Set in main() before code generation.
+extern bool g_is_64bit;
+inline int RegSize() { return g_is_64bit ? 8 : 4; }
+
 namespace Back {
 
   enum class OptimizationLevel {
@@ -16,13 +20,14 @@ namespace Back {
 
   class RiscvGenerator {
   public:
-    RiscvGenerator(bool is_64bit = true,
-                   OptimizationLevel optimization_level = OptimizationLevel::O0)
-      : is_64bit(is_64bit), optimization_level(optimization_level) {}
+    RiscvGenerator(OptimizationLevel optimization_level = OptimizationLevel::O0)
+      : is_64bit(g_is_64bit), optimization_level(optimization_level) {}
     void Generate(const IR::IRProgram& program);
   private:
     bool is_64bit;
     OptimizationLevel optimization_level;
+    std::unordered_map<std::string, std::string> reg_map;
+    
 
     void Visit(const IR::IRProgram& program);
     void Visit(const IR::IRGlobalAlloc& global);
@@ -70,10 +75,10 @@ namespace Back {
     std::vector<ArgumentLocation> AssignArgumentLocations(
         const std::vector<IR::IRType>& types) const;
     int GetTypeSize(IR::IRType type) const {
-      return (is_64bit && type == IR::IRType::IR_POINTER) ? 8 : 4;
+      return (type == IR::IRType::IR_POINTER) ? RegSize() : 4;
     }
     int GetRegisterSize() const {
-      return is_64bit ? 8 : 4;
+      return RegSize();
     }
   };
 };
