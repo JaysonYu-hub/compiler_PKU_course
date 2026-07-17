@@ -7,9 +7,10 @@
 #include <vector>
 #include "../IR/custom_ir.hpp"
 
-// Global architecture flag. Set in main() before code generation.
 extern bool g_is_64bit;
 inline int RegSize() { return g_is_64bit ? 8 : 4; }
+
+class LiveVarAnalysis;
 
 namespace Back {
 
@@ -27,6 +28,12 @@ namespace Back {
     bool is_64bit;
     OptimizationLevel optimization_level;
     std::unordered_map<std::string, std::string> reg_map;
+    std::unordered_map<std::string, int> spill_offsets;
+    std::unordered_map<std::string, IR::IRType> val_type_map;
+    std::vector<std::string> used_s_regs;
+    int s_reg_start_offset = 0;
+    int param_overflow_size = 0;
+    LiveVarAnalysis* lva_ptr = nullptr;
     
 
     void Visit(const IR::IRProgram& program);
@@ -80,5 +87,7 @@ namespace Back {
     int GetRegisterSize() const {
       return RegSize();
     }
+    void StoreRegToValByName(const std::string& name, const std::string& reg, IR::IRType type);
+    void LoadValueToRegByName(const std::string& name, const std::string& reg, IR::IRType type);
   };
 };

@@ -7,7 +7,7 @@ if "%MODE%"=="" set MODE=64
 echo =============================================
 echo Step 1/3: Syncing local code to RISC-V VM...
 echo =============================================
-wsl rsync -avz --delete -e "ssh -p 2222 -i /home/cs61c/.ssh/id_rsa -o StrictHostKeyChecking=no" --exclude="build" --exclude=".git" --exclude="debug" /mnt/d/project/compiler_src/compiler/ ubuntu@localhost:/home/ubuntu/compiler/
+wsl rsync -rlvzc --delete -e "ssh -p 2222 -i /home/cs61c/.ssh/id_rsa -o StrictHostKeyChecking=no" --exclude="build" --exclude=".git" --exclude="debug" /mnt/d/project/compiler_src/compiler/ ubuntu@localhost:/home/ubuntu/compiler/
 
 if %errorlevel% neq 0 (
     echo Sync failed! Please check if the VM is running.

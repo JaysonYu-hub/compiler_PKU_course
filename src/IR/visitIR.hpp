@@ -16,6 +16,7 @@ public:
   std::unordered_map<std::string, std::unordered_set<std::string>> live_in;
   std::unordered_map<std::shared_ptr<IR::IRInstruction>, std::unordered_set<std::string>> live_out_inst;
   std::unordered_map<std::shared_ptr<IR::IRInstruction>, std::unordered_set<std::string>> live_in_inst;
+  std::unordered_map<std::string, std::unordered_map<std::string, std::array<long long int, 2>>> func_intervals;
   long long int max_inf = std::numeric_limits<long long int>::max();
   long long int min_inf = std::numeric_limits<long long int>::min();
   const std::vector<std::string> caller_saved_registers = {
@@ -30,31 +31,36 @@ public:
     while (changed) {
       changed = false;
       for (auto func = program->funcs.rbegin(); func != program->funcs.rend(); func++) {
+        std::string func_name = (*func)->name;
         for (auto block = (*func)->blocks.rbegin(); block != (*func)->blocks.rend(); block++) {
-          auto old_live_in = live_in[(*block)->name];
+          std::string unique_block_name = func_name + ":" + (*block)->name;
+          auto old_live_in = live_in[unique_block_name];
           auto var_kill = std::unordered_set<std::string>();
           auto var_gen = std::unordered_set<std::string>();
           
           hard_code_block(*block, var_gen, var_kill);
           
-          live_out[(*block)->name].clear();
+          live_out[unique_block_name].clear();
           // for S in successors(B): LIVEOUT[B] = LIVEOUT[B].union(LIVEIN[S])
           if ((*block)->next_1) {
-            live_out[(*block)->name].insert(live_in[(*block)->next_1->name].begin(), live_in[(*block)->next_1->name].end());
+            std::string succ1_name = func_name + ":" + (*block)->next_1->name;
+            live_out[unique_block_name].insert(live_in[succ1_name].begin(), live_in[succ1_name].end());
             if ((*block)->next_2) {
-              live_out[(*block)->name].insert(live_in[(*block)->next_2->name].begin(), live_in[(*block)->next_2->name].end());
+              std::string succ2_name = func_name + ":" + (*block)->next_2->name;
+              live_out[unique_block_name].insert(live_in[succ2_name].begin(), live_in[succ2_name].end());
             }
           }
           
           // LIVEOUT[B] - KILL[B]
+          auto current_live_in = live_out[unique_block_name];
           for (const auto& var : var_kill) {
-            live_out[(*block)->name].erase(var);
+            current_live_in.erase(var);
           }
           // LIVEOUT[B] U GEN[B]
-          live_out[(*block)->name].insert(var_gen.begin(), var_gen.end());
+          current_live_in.insert(var_gen.begin(), var_gen.end());
           
-          live_in[(*block)->name] = live_out[(*block)->name];
-          if (old_live_in != live_in[(*block)->name]) {
+          live_in[unique_block_name] = current_live_in;
+          if (old_live_in != live_in[unique_block_name]) {
             changed = true;
           }
         }
@@ -63,8 +69,10 @@ public:
 
     // 遍历每一个基本块，产出指令级别的活跃表
     for (auto func = program->funcs.begin(); func != program->funcs.end(); ++func) {
+      std::string func_name = (*func)->name;
       for (auto block = (*func)->blocks.begin(); block != (*func)->blocks.end(); ++block) {
-        auto current_live = live_out[(*block)->name];
+        std::string unique_block_name = func_name + ":" + (*block)->name;
+        auto current_live = live_out[unique_block_name];
         
         auto try_add_gen = [&current_live](std::shared_ptr<IR::IRValue> value) { 
           if (!value) return;
@@ -189,6 +197,7 @@ public:
         }
       }
     } 
+    func_intervals[(*func)->name] = intervals;
   }
   }
 
@@ -303,7 +312,7 @@ public:
   // Available physical registers for allocation (excluding sp, gp, tp, zero)
   // Ordered by preference: temporaries first, then callee-saved registers (s-series), then argument registers
   const std::vector<std::string> reg_pool = {
-    "t0", "t1", "t2", "t3", "t4", "t5", "t6",
+    "t0", "t1", "t2", "t3",
     "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11",
     "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"
   };
@@ -391,7 +400,6 @@ private:
   // Checks if a variable name represents a virtual register/variable to be allocated
   bool is_virtual_register(const std::string& var) const {
     if (var.empty()) return false;
-    if (var[0] == '%') return true; // Koopa IR variables start with '%'
     
     static const std::unordered_set<std::string> physical_regs = {
       "zero", "ra", "sp", "gp", "tp", 
