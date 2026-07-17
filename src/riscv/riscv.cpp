@@ -1,5 +1,6 @@
 #include "riscv.hpp"
 #include "../IR/visitIR.hpp"
+#include <algorithm>
 #include <iostream>
 #include <cassert>
 #include <cstring>
@@ -24,11 +25,18 @@ bool GetPowerOfTwoShift(uint64_t value, unsigned& shift) {
 }
 
 void Back::RiscvGenerator::Generate(const IR::IRProgram& program) {
-  LiveVarAnalysis lva;
-  lva.Analyze(const_cast<IR::IRProgram*>(&program));
-  this->lva_ptr = &lva;
-  Visit(program);
-  this->lva_ptr = nullptr;
+  // Keep O0 as a conservative stack-based correctness baseline. The global
+  // linear-scan allocator is enabled only for O1.
+  if (optimization_level == OptimizationLevel::O1) {
+    LiveVarAnalysis lva;
+    lva.Analyze(const_cast<IR::IRProgram*>(&program));
+    this->lva_ptr = &lva;
+    Visit(program);
+    this->lva_ptr = nullptr;
+  } else {
+    this->lva_ptr = nullptr;
+    Visit(program);
+  }
 }
 
 std::string Back::RiscvGenerator::StripAt(const std::string& name) {
@@ -88,6 +96,8 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   used_s_regs.clear();
   has_call = false;
   max_stack_arg_count = 0;
+  max_call_arg_count = 0;
+  argument_buffer_size = 0;
 
   // 收集属于虚拟寄存器或参数的变量名称，排除局部变量 alloc 
   std::unordered_set<std::string> virtual_regs;
@@ -157,6 +167,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
 
   int offset = spill_size;
   // 为被保护的 s 寄存器分配栈偏移量
+  offset = AlignTo(offset, GetRegisterSize());
   s_reg_start_offset = offset;
   offset += used_s_regs.size() * GetRegisterSize();
 
@@ -178,6 +189,10 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
       if (has_retval) {
         if (const auto* alloc = dynamic_cast<const IR::IRAlloc*>(inst.get())) {
           local_allocs.insert(val_name);
+          const int alloc_alignment = alloc->IsArray()
+              ? 4
+              : GetStackAlignment(alloc->GetAllocatedType());
+          offset = AlignTo(offset, alloc_alignment);
           val_stack_map[val_name] = offset;
           val_type_map[val_name] = alloc->GetAllocatedType();
           int alloc_size = 4;
@@ -202,6 +217,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     if (spill_offsets.count(param_name)) {
       val_stack_map[param_name] = spill_offsets[param_name];
     } else {
+      offset = AlignTo(offset, GetStackAlignment(func.params[i]->GetType()));
       val_stack_map[param_name] = offset;
       offset += GetTypeSize(func.params[i]->GetType());
     }
@@ -242,6 +258,8 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     for (const auto& inst : block->insts) {
       if (const auto* call = dynamic_cast<const IR::IRCall*>(inst.get())) {
         has_call = true;
+        max_call_arg_count = std::max(
+            max_call_arg_count, static_cast<int>(call->GetArgs().size()));
         std::vector<IR::IRType> arg_types;
         for (const auto& arg : call->GetArgs()) {
           arg_types.push_back(arg->GetType());
@@ -268,6 +286,11 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
       }
 
       if (has_retval && val_stack_map.find(val_name) == val_stack_map.end()) {
+        IR::IRType value_type = inst->GetType();
+        if (const auto* alloc = dynamic_cast<const IR::IRAlloc*>(inst.get())) {
+          value_type = alloc->GetAllocatedType();
+        }
+        offset = AlignTo(offset, GetStackAlignment(value_type));
         val_stack_map[val_name] = offset;
         if (const auto* alloc = dynamic_cast<const IR::IRAlloc*>(inst.get())) {
           val_type_map[val_name] = alloc->GetAllocatedType();
@@ -284,21 +307,25 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   param_overflow_size = slot_size * max_stack_arg_count;
 
   // 如果有函数调用，在栈帧最底部（参数溢出区之后）额外分配 128 字节参数暂存区
-  int arg_buf_size = has_call ? 128 : 0;
+  // Snapshot register-bound arguments before assigning a0-a7/fa0-fa7. The
+  // old fixed 128-byte area overflowed for large mixed-argument calls.
+  argument_buffer_size = has_call
+      ? AlignTo(max_call_arg_count * slot_size, 16)
+      : 0;
 
   // ra 保存空间
   int ra_size = has_call ? GetRegisterSize() : 0;
 
   // 计算总栈帧大小
-  int total = param_overflow_size + arg_buf_size + offset + ra_size;
-  current_stack_size = (total + 15) / 16 * 16;
+  int total = param_overflow_size + argument_buffer_size + offset + ra_size;
+  current_stack_size = AlignTo(total, 16);
 
   // 调整所有 val_stack_map 偏移量，加上参数溢出区和参数暂存区的偏移
   for (auto& kv : val_stack_map) {
-    kv.second += param_overflow_size + arg_buf_size;
+    kv.second += param_overflow_size + argument_buffer_size;
   }
   // 调整 s_reg_start_offset
-  s_reg_start_offset += param_overflow_size + arg_buf_size;
+  s_reg_start_offset += param_overflow_size + argument_buffer_size;
 
   std::cout << "  .globl " << func.name << "\n";
   std::cout << func.name << ":\n";
@@ -470,6 +497,8 @@ void Back::RiscvGenerator::Visit(const IR::IRInstruction& inst) {
   } else if (const auto* p = dynamic_cast<const IR::IRAlloc*>(&inst)) {
     Visit(*p);
   } else if (const auto* p = dynamic_cast<const IR::IRStore*>(&inst)) {
+    Visit(*p);
+  } else if (const auto* p = dynamic_cast<const IR::IRZeroInit*>(&inst)) {
     Visit(*p);
   } else if (const auto* p = dynamic_cast<const IR::IRLoad*>(&inst)) {
     Visit(*p);
@@ -764,6 +793,21 @@ void Back::RiscvGenerator::Visit(const IR::IRAlloc& inst) {
   return;
 }
 
+void Back::RiscvGenerator::Visit(const IR::IRZeroInit& inst) {
+  const int word_count = inst.GetByteSize() / 4;
+  if (word_count == 0) return;
+
+  const std::string loop_label =
+      ".Lzero_init_" + std::to_string(zero_init_counter++);
+  LoadAddressToReg(inst.GetPtr().get(), "t5");
+  std::cout << "  li t6, " << word_count << "\n";
+  std::cout << loop_label << ":\n";
+  std::cout << "  sw zero, 0(t5)\n";
+  std::cout << "  addi t5, t5, 4\n";
+  std::cout << "  addi t6, t6, -1\n";
+  std::cout << "  bnez t6, " << loop_label << "\n";
+}
+
 void Back::RiscvGenerator::Visit(const IR::IRStore& inst) {
   const auto* ptr_raw = inst.GetPtr().get();
   std::string ptr_name = ptr_raw->GetOperandName();
@@ -818,8 +862,10 @@ void Back::RiscvGenerator::Visit(const IR::IRStore& inst) {
     }
   } else {
     // 计算出的指针地址
-    LoadValueToReg(inst.GetVal().get(), "t5");
+    // Loading a large-offset pointer into t6 uses t5 as address scratch, so
+    // materialize the address before placing the stored value in t5.
     LoadValueToReg(inst.GetPtr().get(), "t6");
+    LoadValueToReg(inst.GetVal().get(), "t5");
     if (GetTypeSize(inst.GetVal()->GetType()) == 8) {
       std::cout << "  sd t5, 0(t6)\n";
     } else {
@@ -920,14 +966,14 @@ void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
     const auto& location = locations[i];
     if (location.kind == ArgumentLocation::Kind::FLOAT_REGISTER) {
       LoadValueToFReg(args[i].get(), "ft5");
-      EmitFsw("ft5", arg_buf_offset + i * 8, "sp");
+      EmitFsw("ft5", arg_buf_offset + i * slot_size, "sp");
     } else if (location.kind == ArgumentLocation::Kind::INTEGER_REGISTER) {
       if (GetTypeSize(args[i]->GetType()) == 8) {
         LoadValueToReg(args[i].get(), "t5");
-        EmitSd("t5", arg_buf_offset + i * 8, "sp");
+        EmitSd("t5", arg_buf_offset + i * slot_size, "sp");
       } else {
         LoadValueToReg(args[i].get(), "t5");
-        EmitSw("t5", arg_buf_offset + i * 8, "sp");
+        EmitSw("t5", arg_buf_offset + i * slot_size, "sp");
       }
     } else {
       // 参数溢出到栈上
@@ -949,12 +995,12 @@ void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
   for (size_t i = 0; i < args.size(); i++) {
     const auto& location = locations[i];
     if (location.kind == ArgumentLocation::Kind::FLOAT_REGISTER) {
-      EmitFlw("fa" + std::to_string(location.index), arg_buf_offset + i * 8, "sp");
+      EmitFlw("fa" + std::to_string(location.index), arg_buf_offset + i * slot_size, "sp");
     } else if (location.kind == ArgumentLocation::Kind::INTEGER_REGISTER) {
       if (GetTypeSize(args[i]->GetType()) == 8) {
-        EmitLd("a" + std::to_string(location.index), arg_buf_offset + i * 8, "sp");
+        EmitLd("a" + std::to_string(location.index), arg_buf_offset + i * slot_size, "sp");
       } else {
-        EmitLw("a" + std::to_string(location.index), arg_buf_offset + i * 8, "sp");
+        EmitLw("a" + std::to_string(location.index), arg_buf_offset + i * slot_size, "sp");
       }
     }
   }
@@ -1016,9 +1062,11 @@ void Back::RiscvGenerator::EmitIndexScale(int elem_size) {
 
 void Back::RiscvGenerator::Visit(const IR::IRGetElemPtr& inst) {
   // 加载数组首地址到 t5
-  LoadAddressToReg(inst.GetArr().get(), "t5");
+  // Base materialization is deferred until after the index load because a
+  // large-offset load into t6 uses t5 as its address scratch register.
   // 加载索引到 t6
   LoadValueToReg(inst.GetIndex().get(), "t6");
+  LoadAddressToReg(inst.GetArr().get(), "t5");
 
   EmitIndexScale(inst.GetElemSize());
   std::cout << "  add t5, t5, t6\n";
@@ -1029,9 +1077,10 @@ void Back::RiscvGenerator::Visit(const IR::IRGetElemPtr& inst) {
 
 void Back::RiscvGenerator::Visit(const IR::IRGetPtr& inst) {
   // 加载指针值到 t5（getptr 的 src 已经是指针值，不是 alloc 地址）
-  LoadValueToReg(inst.GetPtr().get(), "t5");
+  // Preserve the same scratch-register ordering as getelemptr.
   // 加载索引到 t6
   LoadValueToReg(inst.GetIndex().get(), "t6");
+  LoadValueToReg(inst.GetPtr().get(), "t5");
 
   EmitIndexScale(inst.GetElemSize());
   std::cout << "  add t5, t5, t6\n";

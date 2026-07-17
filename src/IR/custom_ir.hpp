@@ -47,6 +47,7 @@ namespace IR {
     IR_INST_CAST,
     IR_INST_ALLOC,
     IR_INST_STORE,
+    IR_INST_ZERO_INIT,
     IR_INST_LOAD,
     IR_INST_RET,
     IR_INST_BR,
@@ -62,6 +63,7 @@ namespace IR {
   std::string CastOpToString(IRCastOp op);
   std::string TypeToString(IRType type);
   IRType StringToType(const std::string &type);
+  std::string FloatToString(float value);
 
 
   // 基础 Value 类
@@ -86,6 +88,14 @@ namespace IR {
     virtual ~IRInstruction() = default;
 
     std::string GetOperandName() const override;
+    virtual std::vector<std::shared_ptr<IRValue>> GetUses() const { return {}; }
+    virtual bool ReplaceUse(const IRValue* old_value,
+                            std::shared_ptr<IRValue> new_value) {
+      (void)old_value;
+      (void)new_value;
+      return false;
+    }
+    virtual bool HasSideEffect() const { return false; }
   };
 
   // 具有 SSA 寄存器返回值的指令基类
@@ -213,6 +223,9 @@ namespace IR {
     std::shared_ptr<IRValue> GetRhs() const { return rhs; }
     IRType GetOperandType() const { return operand_type; }
 
+    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
+    bool ReplaceUse(const IRValue* old_value,
+                    std::shared_ptr<IRValue> new_value) override;
     std::string DumpText() const override;
     IRType GetType() const override;
   };
@@ -234,6 +247,9 @@ namespace IR {
 
     IRCastOp GetOp() const { return op; }
     std::shared_ptr<IRValue> GetValue() const { return value; }
+    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
+    bool ReplaceUse(const IRValue* old_value,
+                    std::shared_ptr<IRValue> new_value) override;
     std::string DumpText() const override;
     IRType GetType() const override { return target_type; }
   };
@@ -274,6 +290,32 @@ namespace IR {
     IRStore(std::shared_ptr<IRValue> val, std::shared_ptr<IRValue> ptr);
     std::shared_ptr<IRValue> GetVal() const { return val; }
     std::shared_ptr<IRValue> GetPtr() const { return ptr; }
+    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
+    bool ReplaceUse(const IRValue* old_value,
+                    std::shared_ptr<IRValue> new_value) override;
+    bool HasSideEffect() const override { return true; }
+    std::string DumpText() const override;
+  };
+
+  // Compactly clear a contiguous local allocation before explicit stores.
+  class IRZeroInit : public IRInstruction {
+  private:
+    std::shared_ptr<IRValue> ptr;
+    int byte_size;
+  public:
+    IRZeroInit(std::shared_ptr<IRValue> ptr, int byte_size)
+      : IRInstruction(IRInstructionType::IR_INST_ZERO_INIT),
+        ptr(std::move(ptr)), byte_size(byte_size) {
+      assert(this->ptr != nullptr);
+      assert(this->byte_size >= 0 && this->byte_size % 4 == 0);
+    }
+
+    std::shared_ptr<IRValue> GetPtr() const { return ptr; }
+    int GetByteSize() const { return byte_size; }
+    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
+    bool ReplaceUse(const IRValue* old_value,
+                    std::shared_ptr<IRValue> new_value) override;
+    bool HasSideEffect() const override { return true; }
     std::string DumpText() const override;
   };
 
@@ -288,6 +330,9 @@ namespace IR {
       assert(this->ptr != nullptr);
     }
     std::shared_ptr<IRValue> GetPtr() const { return ptr; }
+    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
+    bool ReplaceUse(const IRValue* old_value,
+                    std::shared_ptr<IRValue> new_value) override;
     std::string DumpText() const override;
     IRType GetType() const override;
   };
@@ -308,6 +353,9 @@ namespace IR {
     std::shared_ptr<IRValue> GetIndex() const { return index; }
     int GetElemSize() const { return elem_size; }
 
+    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
+    bool ReplaceUse(const IRValue* old_value,
+                    std::shared_ptr<IRValue> new_value) override;
     std::string DumpText() const override;
     IRType GetType() const override;
   };
@@ -328,6 +376,9 @@ namespace IR {
     std::shared_ptr<IRValue> GetIndex() const { return index; }
     int GetElemSize() const { return elem_size; }
 
+    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
+    bool ReplaceUse(const IRValue* old_value,
+                    std::shared_ptr<IRValue> new_value) override;
     std::string DumpText() const override;
     IRType GetType() const override;
   };
@@ -341,6 +392,7 @@ namespace IR {
       assert(this->target != nullptr);
     }
     std::shared_ptr<IRValue> GetTarget() const { return target; }
+    bool HasSideEffect() const override { return true; }
     std::string DumpText() const override;
   };
 
@@ -360,6 +412,10 @@ namespace IR {
     std::shared_ptr<IRValue> GetThenTarget() const { return then_target; }
     std::shared_ptr<IRValue> GetElseTarget() const { return else_target; }
 
+    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
+    bool ReplaceUse(const IRValue* old_value,
+                    std::shared_ptr<IRValue> new_value) override;
+    bool HasSideEffect() const override { return true; }
     std::string DumpText() const override;
   };
 
@@ -371,6 +427,10 @@ namespace IR {
     explicit IRReturn(std::shared_ptr<IRValue> val = nullptr) : IRInstruction(IRInstructionType::IR_INST_RET), val(std::move(val)) {}
 
     std::shared_ptr<IRValue> GetValue() const { return val; }
+    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
+    bool ReplaceUse(const IRValue* old_value,
+                    std::shared_ptr<IRValue> new_value) override;
+    bool HasSideEffect() const override { return true; }
     std::string DumpText() const override;
   };
 
@@ -391,6 +451,10 @@ namespace IR {
     std::shared_ptr<IRValue> GetFunc() const { return func; }
     const std::vector<std::shared_ptr<IRValue>>& GetArgs() const { return args; }
 
+    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
+    bool ReplaceUse(const IRValue* old_value,
+                    std::shared_ptr<IRValue> new_value) override;
+    bool HasSideEffect() const override { return true; }
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetType() const override { return ret_type; }

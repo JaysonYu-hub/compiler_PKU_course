@@ -7,6 +7,7 @@
 #include "ast.hpp"
 #include "riscv.hpp"
 #include "custom_ir.hpp"
+#include "ir_pass.hpp"
 
 using namespace std;
 
@@ -53,9 +54,15 @@ int main(int argc, const char *argv[]) {
   // 调用 parser 函数, parser 函数会进一步调用 lexer 解析输入文件的
   unique_ptr<BaseAST> ast;
   auto ret = yyparse(ast);
-  assert(!ret);
+  if (ret != 0) return ret;
    
   GenerateIR(*ast, context);
+
+  if (optimization_level == Back::OptimizationLevel::O1) {
+    IR::RunO1Passes(*context.ir_program);
+  } else {
+    IR::IRVerifier::VerifyOrThrow(*context.ir_program);
+  }
 
   if (mode == "-koopa") {
     // 输出 Custom IR 文本

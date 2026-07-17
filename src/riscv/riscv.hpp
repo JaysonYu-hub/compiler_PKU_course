@@ -33,6 +33,7 @@ namespace Back {
     std::vector<std::string> used_s_regs;
     int s_reg_start_offset = 0;
     int param_overflow_size = 0;
+    int argument_buffer_size = 0;
     LiveVarAnalysis* lva_ptr = nullptr;
     
 
@@ -46,6 +47,7 @@ namespace Back {
     void Visit(const IR::IRCast& inst);
     void Visit(const IR::IRAlloc& inst);
     void Visit(const IR::IRStore& inst);
+    void Visit(const IR::IRZeroInit& inst);
     void Visit(const IR::IRLoad& inst);
     void Visit(const IR::IRJump& inst);
     void Visit(const IR::IRBranch& inst);
@@ -56,6 +58,8 @@ namespace Back {
     int current_stack_size = 0;
     bool has_call = false;
     int max_stack_arg_count = 0;
+    int max_call_arg_count = 0;
+    unsigned zero_init_counter = 0;
 
     std::unordered_map<std::string, int> val_stack_map;
     std::unordered_set<std::string> local_allocs;
@@ -86,6 +90,12 @@ namespace Back {
     }
     int GetRegisterSize() const {
       return RegSize();
+    }
+    int GetStackAlignment(IR::IRType type) const {
+      return GetTypeSize(type) >= 8 ? 8 : 4;
+    }
+    int AlignTo(int value, int alignment) const {
+      return (value + alignment - 1) / alignment * alignment;
     }
     void StoreRegToValByName(const std::string& name, const std::string& reg, IR::IRType type);
     void LoadValueToRegByName(const std::string& name, const std::string& reg, IR::IRType type);

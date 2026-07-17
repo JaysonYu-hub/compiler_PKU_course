@@ -129,6 +129,11 @@ public:
                 try_add_gen(store->GetPtr());
                 break;
               }
+              case IR::IRInstructionType::IR_INST_ZERO_INIT: {
+                auto zero_init = IR::cast<IR::IRZeroInit>(inst);
+                try_add_gen(zero_init->GetPtr());
+                break;
+              }
               case IR::IRInstructionType::IR_INST_GETELEMPTR: {
                 auto gep = IR::cast<IR::IRGetElemPtr>(inst);
                 try_add_gen(gep->GetArr());
@@ -245,6 +250,11 @@ private:
             try_add_gen(store->GetPtr());
             break;
           }
+          case IR::IRInstructionType::IR_INST_ZERO_INIT: {
+            auto zero_init = IR::cast<IR::IRZeroInit>(inst);
+            try_add_gen(zero_init->GetPtr());
+            break;
+          }
           case IR::IRInstructionType::IR_INST_GETELEMPTR: {
             auto gep = IR::cast<IR::IRGetElemPtr>(inst);
             try_add_gen(gep->GetArr());
@@ -333,7 +343,8 @@ public:
 
   void Allocate() {
     int offset = 0;
-    std::vector<std::string> free_regs = reg_pool;
+    // Allocate from the declared preference order while keeping pop_back O(1).
+    std::vector<std::string> free_regs(reg_pool.rbegin(), reg_pool.rend());
     std::vector<LiveInterval*> active_regs = {};
     for (auto& current : intervals_list) {
       auto it = active_regs.begin();
@@ -363,6 +374,9 @@ public:
           active_regs.pop_back();
           active_regs.push_back(&current);
           current.reg = spill_candidate->reg;
+          std::sort(active_regs.begin(), active_regs.end(), [](const LiveInterval* a, const LiveInterval* b) {
+            return a->end < b->end;
+          });
         } else { 
           current.spilled = true;
           current.stack_offset = offset;

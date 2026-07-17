@@ -103,6 +103,55 @@ IR::IRType SysYTypeToIR(const std::string& type) {
   return IR::IRType::IR_INT32;
 }
 
+void PredeclareFunctionSignatures(const BaseAST& node, Context& context) {
+  if (const auto* root = dynamic_cast<const CompUnitAST*>(&node)) {
+    if (root->end_comp_unit) {
+      PredeclareFunctionSignatures(*root->end_comp_unit, context);
+    }
+    return;
+  }
+  if (const auto* sequence =
+          dynamic_cast<const CompUnitSequenceAST*>(&node)) {
+    if (sequence->comp_unit) {
+      PredeclareFunctionSignatures(*sequence->comp_unit, context);
+    }
+    return;
+  }
+  if (const auto* list = dynamic_cast<const CompUnitListAST*>(&node)) {
+    if (list->end_comp_unit) {
+      PredeclareFunctionSignatures(*list->end_comp_unit, context);
+    }
+    if (list->comp_unit) {
+      PredeclareFunctionSignatures(*list->comp_unit, context);
+    }
+    return;
+  }
+  if (const auto* unit =
+          dynamic_cast<const FunctionDefinitionUnitAST*>(&node)) {
+    if (unit->func_def) {
+      PredeclareFunctionSignatures(*unit->func_def, context);
+    }
+    return;
+  }
+  if (const auto* function = dynamic_cast<const FuncDefAST*>(&node)) {
+    if (!function->ident || !function->type) {
+      return;
+    }
+    std::vector<IR::IRType> param_types;
+    if (function->func_f_params) {
+      for (const auto& param : function->func_f_params->func_f_params) {
+        param_types.push_back(param->is_array
+            ? IR::IRType::IR_POINTER
+            : SysYTypeToIR(*param->type));
+      }
+    }
+    auto symbol = std::make_shared<Symbol>(
+        *function->ident, SymbolKind::FUNCTION,
+        FuncInformation(*function->type, std::move(param_types)));
+    context.scope->define(symbol);
+  }
+}
+
 bool IsComparison(IR::IRBinaryOp op) {
   return op == IR::IRBinaryOp::EQ || op == IR::IRBinaryOp::NE ||
          op == IR::IRBinaryOp::LT || op == IR::IRBinaryOp::LE ||
@@ -263,10 +312,15 @@ std::string CodeGenerator::Visit(const FuncDefAST& node) {
                                             : SysYTypeToIR(*param->type));
     }
   }
-  auto symbol = std::make_shared<Symbol>(
-      *node.ident, SymbolKind::FUNCTION,
-      FuncInformation(*node.type, std::move(param_types)));
-  context.scope->define(symbol);
+  auto symbol = context.scope->lookupLocal(*node.ident);
+  if (symbol == nullptr || symbol->kind != SymbolKind::FUNCTION) {
+    symbol = std::make_shared<Symbol>(
+        *node.ident, SymbolKind::FUNCTION,
+        FuncInformation(*node.type, std::move(param_types)));
+    context.scope->define(symbol);
+  } else {
+    symbol->value = FuncInformation(*node.type, std::move(param_types));
+  }
 
   // 初始化内存表示的 IRFunction
   IR::IRType ret_type = (*node.type == "void") ? IR::IRType::IR_VOID : ((*node.type == "f32") ? IR::IRType::IR_FLOAT : IR::IRType::IR_INT32);
@@ -812,9 +866,17 @@ std::string CodeGenerator::Visit(const UnaryOPExpAST& node) {
   else if (node.op->op == "-") {
     std::string dest_reg = context.NewReg();
     if (context.current_block) {
-      auto lhs = context.GetIRValue("0");
       auto rhs = context.GetIRValue(src_reg);
-      auto inst = BuildBinary(dest_reg, IR::IRBinaryOp::SUB, lhs, rhs);
+      // Floating-point unary negation must flip the sign bit of zero.
+      // Lowering it as +0.0 - x would incorrectly turn -0.0 into +0.0.
+      const bool is_float = rhs && rhs->GetType() == IR::IRType::IR_FLOAT;
+      auto lhs = is_float
+                     ? std::make_shared<IR::IRConstant>(-1.0f)
+                     : context.GetIRValue("0");
+      auto inst = BuildBinary(dest_reg,
+                              is_float ? IR::IRBinaryOp::MUL
+                                       : IR::IRBinaryOp::SUB,
+                              lhs, rhs);
       context.current_block->AddInstruction(inst);
       context.SetIRValue(dest_reg, inst);
     }
@@ -932,7 +994,7 @@ std::string CodeGenerator::Visit(const LValuePrimaryExprAST& node) {
 
 std::string CodeGenerator::Visit(const NumberPrimaryExprAST& node) {
   if (node.value.isFloat()) {
-    return std::to_string(node.value.getFloat());
+    return IR::FloatToString(node.value.getFloat());
   } else {
     return std::to_string(node.value.getInt());
   }
@@ -1240,7 +1302,7 @@ std::string CodeGenerator::Visit(const LValAST& node) {
     return new_reg;
   } else if (sym->kind == SymbolKind::CONSTANT) {
     if (std::holds_alternative<float>(sym->value)) {
-      std::string float_value = std::to_string(std::get<float>(sym->value));
+      std::string float_value = IR::FloatToString(std::get<float>(sym->value));
       context.GetIRValue(float_value);
       return float_value;
     } else {
@@ -1555,40 +1617,32 @@ std::string CodeGenerator::Visit(const ArrayConstDefAST& node) {
       alloc_inst = std::make_shared<IR::IRAlloc>(address, (decl_type == "f32") ? "float" : "i32", dims);
       context.current_block->AddInstruction(alloc_inst);
       context.SetIRValue(address, alloc_inst);
+      context.current_block->AddInstruction(
+          std::make_shared<IR::IRZeroInit>(alloc_inst,
+                                          alloc_inst->GetAllocSize()));
     }
     for (int i = 0; i < arr_size; i++) {
-      std::vector<int> idxs(dims.size());
-      int temp_idx = i;
-      for (int j = (int)dims.size() - 1; j >= 0; --j) {
-        idxs[j] = temp_idx % dims[j];
-        temp_idx /= dims[j];
-      }
+      const bool is_zero =
+          decl_type == "f32"
+              ? (init_vals[i].getFloat() == 0.0f &&
+                 !std::signbit(init_vals[i].getFloat()))
+              : init_vals[i].getInt() == 0;
+      if (is_zero || !context.current_block) continue;
 
-      std::string prev_reg = address;
-      std::shared_ptr<IR::IRValue> prev_val = alloc_inst;
+      auto idx_val = context.GetIRValue(std::to_string(i));
+      std::string element_reg = context.NewReg();
+      auto element_ptr = std::make_shared<IR::IRGetElemPtr>(
+          element_reg, alloc_inst, idx_val, 4);
+      context.current_block->AddInstruction(element_ptr);
+      context.SetIRValue(element_reg, element_ptr);
 
-      for (size_t j = 0; j < idxs.size(); j++) {
-        std::string next_reg = context.NewReg();
-        if (context.current_block) {
-          auto idx_val = context.GetIRValue(std::to_string(idxs[j]));
-          int elem_size = 4;
-          for (size_t k = j + 1; k < dims.size(); k++) {
-            elem_size *= dims[k];
-          }
-          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(next_reg, prev_val, idx_val, elem_size);
-          context.current_block->AddInstruction(getelemptr_inst);
-          context.SetIRValue(next_reg, getelemptr_inst);
-          prev_val = getelemptr_inst;
-        }
-        prev_reg = next_reg;
-      }
-
-      if (context.current_block) {
-        std::string val_str = (decl_type == "f32") ? std::to_string(init_vals[i].getFloat()) : std::to_string(init_vals[i].getInt());
-        auto val = context.GetIRValue(val_str);
-        auto store_inst = std::make_shared<IR::IRStore>(val, prev_val);
-        context.current_block->AddInstruction(store_inst);
-      }
+      std::string val_str =
+          (decl_type == "f32")
+              ? IR::FloatToString(init_vals[i].getFloat())
+              : std::to_string(init_vals[i].getInt());
+      auto val = context.GetIRValue(val_str);
+      context.current_block->AddInstruction(
+          std::make_shared<IR::IRStore>(val, element_ptr));
     }
   }
   context.scope->define(sym);
@@ -1833,39 +1887,26 @@ std::string CodeGenerator::Visit(const ArrayInitializedVarDefAST& node) {
       alloc_inst = std::make_shared<IR::IRAlloc>(address, b_type, dims);
       context.current_block->AddInstruction(alloc_inst);
       context.SetIRValue(address, alloc_inst);
+      context.current_block->AddInstruction(
+          std::make_shared<IR::IRZeroInit>(alloc_inst,
+                                          alloc_inst->GetAllocSize()));
     }
     for (int i = 0; i < arr_size; i++) {
-      std::vector<int> idxs(dims.size());
-      int temp_idx = i;
-      for (int j = (int)dims.size() - 1; j >= 0; --j) {
-        idxs[j] = temp_idx % dims[j];
-        temp_idx /= dims[j];
+      if ((init_vals[i] == "0" || init_vals[i] == "0.0") ||
+          !context.current_block) {
+        continue;
       }
 
-      std::string prev_reg = address;
-      std::shared_ptr<IR::IRValue> prev_val = alloc_inst;
+      auto idx_val = context.GetIRValue(std::to_string(i));
+      std::string element_reg = context.NewReg();
+      auto element_ptr = std::make_shared<IR::IRGetElemPtr>(
+          element_reg, alloc_inst, idx_val, 4);
+      context.current_block->AddInstruction(element_ptr);
+      context.SetIRValue(element_reg, element_ptr);
 
-      for (size_t j = 0; j < idxs.size(); j++) {
-        std::string next_reg = context.NewReg();
-        if (context.current_block) {
-          auto idx_val = context.GetIRValue(std::to_string(idxs[j]));
-          int elem_size = 4;
-          for (size_t k = j + 1; k < dims.size(); k++) {
-            elem_size *= dims[k];
-          }
-          auto getelemptr_inst = std::make_shared<IR::IRGetElemPtr>(next_reg, prev_val, idx_val, elem_size);
-          context.current_block->AddInstruction(getelemptr_inst);
-          context.SetIRValue(next_reg, getelemptr_inst);
-          prev_val = getelemptr_inst;
-        }
-        prev_reg = next_reg;
-      }
-
-      if (context.current_block) {
-        auto val = ConvertValue(context.GetIRValue(init_vals[i]), element_type);
-        auto store_inst = std::make_shared<IR::IRStore>(val, prev_val);
-        context.current_block->AddInstruction(store_inst);
-      }
+      auto val = ConvertValue(context.GetIRValue(init_vals[i]), element_type);
+      context.current_block->AddInstruction(
+          std::make_shared<IR::IRStore>(val, element_ptr));
     }
   }
   context.scope->define(sym);
@@ -1884,6 +1925,7 @@ std::string CodeGenerator::Visit(const InitValListAST& node) {
 }
 
 std::string GenerateIR(const BaseAST& node, Context& context) {
+  PredeclareFunctionSignatures(node, context);
   CodeGenerator generator(context);
   return generator.Generate(node);
 }
