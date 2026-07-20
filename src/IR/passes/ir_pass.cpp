@@ -648,5 +648,5 @@ IROptimizationStats RunO1Passes(IRProgram& program) {
   return stats;
 }
 
-}  // namespace IR
+}
 

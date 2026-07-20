@@ -38,5 +38,5 @@ struct IROptimizationStats {
 
 IROptimizationStats RunO1Passes(IRProgram& program);
 
-}  // namespace IR
+}
 

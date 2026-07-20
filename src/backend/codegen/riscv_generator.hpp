@@ -22,8 +22,7 @@
 #include "../abi/calling_convention.hpp"
 #include "../stack/stack_layout.hpp"
 #include "../asm/asm_emitter.hpp"
-#include "../pass/liveness_pass.hpp"
-#include "../pass/regalloc_pass.hpp"
+#include "../../IR/passes/liveness.hpp"
 
 namespace Back {
 
@@ -82,8 +81,10 @@ private:
   void Visit(const IR::IRCall&       inst);
   void Visit(const IR::IRGetElemPtr& inst);
   void Visit(const IR::IRGetPtr&     inst);
+  void Visit(const IR::IRZeroInit&   inst);
 
   // ----- Helpers -----
+  int zero_init_label_counter_ = 0;
   int GetRegSize()  const { return target_.GetRegSize(); }
   int GetTypeSize(IR::IRType t) const {
     return (t == IR::IRType::IR_POINTER) ? target_.GetRegSize() : 4;

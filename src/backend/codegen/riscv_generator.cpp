@@ -1,5 +1,4 @@
 #include "riscv_generator.hpp"
-#include "../../IR/passes/liveness.hpp"
 #include "../regalloc/linear_scan_allocator.hpp"
 #include <iostream>
 #include <cassert>
@@ -327,6 +326,7 @@ void Back::RiscvGenerator::Visit(const IR::IRInstruction& inst) {
   if (auto* p = dynamic_cast<const IR::IRCall*>      (&inst)) { Visit(*p); return; }
   if (auto* p = dynamic_cast<const IR::IRGetElemPtr*>(&inst)) { Visit(*p); return; }
   if (auto* p = dynamic_cast<const IR::IRGetPtr*>    (&inst)) { Visit(*p); return; }
+  if (auto* p = dynamic_cast<const IR::IRZeroInit*>  (&inst)) { Visit(*p); return; }
 }
 
 // Return
@@ -668,6 +668,34 @@ void Back::RiscvGenerator::Visit(const IR::IRGetPtr& inst) {
   EmitIndexScale(inst.GetElemSize());
   emitter_.EmitInst("add", "t5", "t5", "t6");
   StoreRegToVal(&inst, "t5");
+}
+
+void Back::RiscvGenerator::Visit(const IR::IRZeroInit& inst) {
+  int size = inst.GetByteSize();
+  if (size <= 0) return;
+
+  LoadAddressToReg(inst.GetPtr().get(), "t5");
+
+  if (size <= 32) {
+    // Loop unrolling for small sizes to maximize performance
+    for (int offset = 0; offset < size; offset += 4) {
+      emitter_.EmitSw("zero", offset, "t5");
+    }
+  } else {
+    // Large array: emit an assembly loop
+    emitter_.EmitInst("li", "t4", std::to_string(size));
+    emitter_.EmitInst("add", "t6", "t5", "t4");
+
+    std::string loop_label = "zero_init_loop_" + std::to_string(zero_init_label_counter_);
+    std::string end_label = "zero_init_end_" + std::to_string(zero_init_label_counter_++);
+
+    emitter_.EmitLabel(loop_label);
+    emitter_.EmitInst("bge", "t5", "t6", end_label);
+    emitter_.EmitSw("zero", 0, "t5");
+    emitter_.EmitInst("addi", "t5", "t5", "4");
+    emitter_.EmitInst("j", loop_label);
+    emitter_.EmitLabel(end_label);
+  }
 }
 
 // Value load/store helpers
