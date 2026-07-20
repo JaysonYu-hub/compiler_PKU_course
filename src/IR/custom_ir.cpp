@@ -1,5 +1,8 @@
 #include "custom_ir.hpp"
 #include <cassert>
+#include <iomanip>
+#include <limits>
+#include <sstream>
 
 namespace IR {
 
@@ -62,11 +65,31 @@ namespace IR {
     return IRType::IR_VOID;
   }
 
+  std::string FloatToString(float value) {
+    std::ostringstream stream;
+    stream << std::setprecision(std::numeric_limits<float>::max_digits10)
+           << value;
+    std::string text = stream.str();
+
+    // Keep the textual value distinguishable from an integer while retaining
+    // enough digits for an exact float -> text -> float round trip.
+    if (text.find('.') == std::string::npos) {
+      const size_t exponent = text.find_first_of("eE");
+      if (exponent == std::string::npos) {
+        text += ".0";
+      } else {
+        text.insert(exponent, ".0");
+      }
+    }
+    return text;
+  }
+
   // IRConstant
   std::string IRConstant::DumpText() const {
-    return std::visit([](auto&& arg) -> std::string {
-      return std::to_string(arg);
-    }, val);
+    if (const_type == IRType::IR_FLOAT) {
+      return FloatToString(std::get<float>(val));
+    }
+    return std::to_string(std::get<int32_t>(val));
   }
   std::string IRConstant::GetOperandName() const {
     return DumpText();
@@ -90,9 +113,9 @@ namespace IR {
       std::string res = "{";
       for (int i = 0; i < dims[dim_idx]; i++) {
         if (val_idx < vals.size()) {
-          res += std::to_string(vals[val_idx++]);
+          res += FloatToString(vals[val_idx++]);
         } else {
-          res += "0";
+          res += "0.0";
         }
         if (i != dims[dim_idx] - 1) {
           res += ", ";
@@ -150,7 +173,7 @@ namespace IR {
     }
     if (!init_float_vals.empty()) {
       if (init_float_vals.size() == 1 && array_dims.empty()) {
-        return "global " + name + " = alloc " + type + ", " + std::to_string(init_float_vals[0]);
+        return "global " + name + " = alloc " + type + ", " + FloatToString(init_float_vals[0]);
       }
       std::string str;
       if (!array_dims.empty()) {
@@ -159,7 +182,7 @@ namespace IR {
       } else {
         str = "{";
         for (size_t i = 0; i < init_float_vals.size(); i++) {
-          str += std::to_string(init_float_vals[i]);
+          str += FloatToString(init_float_vals[i]);
           if (i != init_float_vals.size() - 1) {
             str += ", ";
           }
@@ -216,6 +239,14 @@ namespace IR {
   // IRBinary
 
   namespace {
+  bool ReplaceOperand(std::shared_ptr<IRValue>& operand,
+                      const IRValue* old_value,
+                      const std::shared_ptr<IRValue>& new_value) {
+    if (!new_value || operand.get() != old_value) return false;
+    operand = new_value;
+    return true;
+  }
+
   bool IsComparisonOp(IRBinaryOp op) {
     return op == IRBinaryOp::EQ || op == IRBinaryOp::NE ||
            op == IRBinaryOp::LT || op == IRBinaryOp::LE ||
@@ -246,7 +277,27 @@ namespace IR {
     return result_type;
   }
 
+  std::vector<std::shared_ptr<IRValue>> IRBinary::GetUses() const {
+    return {lhs, rhs};
+  }
+
+  bool IRBinary::ReplaceUse(const IRValue* old_value,
+                            std::shared_ptr<IRValue> new_value) {
+    bool changed = ReplaceOperand(lhs, old_value, new_value);
+    changed = ReplaceOperand(rhs, old_value, new_value) || changed;
+    return changed;
+  }
+
   // IRCast
+
+  std::vector<std::shared_ptr<IRValue>> IRCast::GetUses() const {
+    return {value};
+  }
+
+  bool IRCast::ReplaceUse(const IRValue* old_value,
+                          std::shared_ptr<IRValue> new_value) {
+    return ReplaceOperand(value, old_value, new_value);
+  }
 
   std::string IRCast::DumpText() const {
     return name + " = " + CastOpToString(op) + " " + value->GetOperandName();
@@ -275,11 +326,45 @@ namespace IR {
     assert(this->ptr != nullptr && this->val != nullptr);
   }
 
+  std::vector<std::shared_ptr<IRValue>> IRStore::GetUses() const {
+    return {val, ptr};
+  }
+
+  bool IRStore::ReplaceUse(const IRValue* old_value,
+                           std::shared_ptr<IRValue> new_value) {
+    bool changed = ReplaceOperand(val, old_value, new_value);
+    changed = ReplaceOperand(ptr, old_value, new_value) || changed;
+    return changed;
+  }
+
   std::string IRStore::DumpText() const {
     return "store " + val->GetOperandName() + ", " + ptr->GetOperandName();
   }
 
+  std::string IRZeroInit::DumpText() const {
+    return "zero_init " + ptr->GetOperandName() + ", " +
+           std::to_string(byte_size);
+  }
+
+  std::vector<std::shared_ptr<IRValue>> IRZeroInit::GetUses() const {
+    return {ptr};
+  }
+
+  bool IRZeroInit::ReplaceUse(const IRValue* old_value,
+                              std::shared_ptr<IRValue> new_value) {
+    return ReplaceOperand(ptr, old_value, new_value);
+  }
+
   // IRLoad
+
+  std::vector<std::shared_ptr<IRValue>> IRLoad::GetUses() const {
+    return {ptr};
+  }
+
+  bool IRLoad::ReplaceUse(const IRValue* old_value,
+                          std::shared_ptr<IRValue> new_value) {
+    return ReplaceOperand(ptr, old_value, new_value);
+  }
 
   std::string IRLoad::DumpText() const {
     return name + " = load " + ptr->GetOperandName();
@@ -290,6 +375,17 @@ namespace IR {
   }
 
   // IRGetElemPtr
+  std::vector<std::shared_ptr<IRValue>> IRGetElemPtr::GetUses() const {
+    return {arr, index};
+  }
+
+  bool IRGetElemPtr::ReplaceUse(const IRValue* old_value,
+                                std::shared_ptr<IRValue> new_value) {
+    bool changed = ReplaceOperand(arr, old_value, new_value);
+    changed = ReplaceOperand(index, old_value, new_value) || changed;
+    return changed;
+  }
+
   std::string IRGetElemPtr::DumpText() const {
     return name + " = getelemptr " + arr->GetOperandName() + ", " + index->GetOperandName();
   }
@@ -299,6 +395,17 @@ namespace IR {
   }
 
   // IRGetPtr
+  std::vector<std::shared_ptr<IRValue>> IRGetPtr::GetUses() const {
+    return {ptr, index};
+  }
+
+  bool IRGetPtr::ReplaceUse(const IRValue* old_value,
+                            std::shared_ptr<IRValue> new_value) {
+    bool changed = ReplaceOperand(ptr, old_value, new_value);
+    changed = ReplaceOperand(index, old_value, new_value) || changed;
+    return changed;
+  }
+
   std::string IRGetPtr::DumpText() const {
     return name + " = getptr " + ptr->GetOperandName() + ", " + index->GetOperandName();
   }
@@ -315,11 +422,30 @@ namespace IR {
 
   // IRBranch
 
+  std::vector<std::shared_ptr<IRValue>> IRBranch::GetUses() const {
+    return {cond};
+  }
+
+  bool IRBranch::ReplaceUse(const IRValue* old_value,
+                            std::shared_ptr<IRValue> new_value) {
+    return ReplaceOperand(cond, old_value, new_value);
+  }
+
   std::string IRBranch::DumpText() const {
     return "br " + cond->GetOperandName() + ", " + then_target->GetOperandName() + ", " + else_target->GetOperandName();
   }
 
   // IRReturn
+
+  std::vector<std::shared_ptr<IRValue>> IRReturn::GetUses() const {
+    return val ? std::vector<std::shared_ptr<IRValue>>{val}
+               : std::vector<std::shared_ptr<IRValue>>{};
+  }
+
+  bool IRReturn::ReplaceUse(const IRValue* old_value,
+                            std::shared_ptr<IRValue> new_value) {
+    return ReplaceOperand(val, old_value, new_value);
+  }
 
   std::string IRReturn::DumpText() const {
     if (val) {
@@ -329,6 +455,19 @@ namespace IR {
   }
 
   // IRCall
+
+  std::vector<std::shared_ptr<IRValue>> IRCall::GetUses() const {
+    return args;
+  }
+
+  bool IRCall::ReplaceUse(const IRValue* old_value,
+                          std::shared_ptr<IRValue> new_value) {
+    bool changed = false;
+    for (auto& arg : args) {
+      changed = ReplaceOperand(arg, old_value, new_value) || changed;
+    }
+    return changed;
+  }
 
   std::string IRCall::DumpText() const {
     std::string str;
