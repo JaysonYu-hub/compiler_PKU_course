@@ -47,7 +47,7 @@ link_directories(${LIB_DIR})
 include_directories(src)
 include_directories(src/IR)
 include_directories(src/ast)
-include_directories(src/riscv)
+include_directories(src/backend/codegen)
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 include_directories(${INC_DIR})
 

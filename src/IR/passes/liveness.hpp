@@ -1,0 +1,39 @@
+#pragma once
+
+#include "../custom_ir.hpp"
+#include <unordered_map>
+#include <unordered_set>
+#include <memory>
+#include <string>
+#include <vector>
+#include <limits>
+#include <array>
+#include <algorithm>
+
+namespace IR {
+namespace Pass {
+
+class LiveVarAnalysis {
+public:
+  std::unordered_map<std::string, std::unordered_set<std::string>> live_out;
+  std::unordered_map<std::string, std::unordered_set<std::string>> live_in;
+  std::unordered_map<std::shared_ptr<IR::IRInstruction>, std::unordered_set<std::string>> live_out_inst;
+  std::unordered_map<std::shared_ptr<IR::IRInstruction>, std::unordered_set<std::string>> live_in_inst;
+  std::unordered_map<std::string, std::unordered_map<std::string, std::array<long long int, 2>>> func_intervals;
+  long long int max_inf = std::numeric_limits<long long int>::max();
+  long long int min_inf = std::numeric_limits<long long int>::min();
+  const std::vector<std::string> caller_saved_registers = {
+    "ra", "t0", "t1", "t2", "t3", "t4", "t5", "t6",
+    "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7",
+    "ft0", "ft1", "ft2", "ft3", "ft4", "ft5", "ft6", "ft7", "ft8", "ft9", "ft10", "ft11",
+    "fa0", "fa1", "fa2", "fa3", "fa4", "fa5", "fa6", "fa7"
+  };
+
+  void Analyze(IR::IRProgram *program);
+
+private:
+  void hard_code_block(std::shared_ptr<IR::IRBasicBlock> block, std::unordered_set<std::string> &var_gen, std::unordered_set<std::string> &var_kill);
+};
+
+}
+}

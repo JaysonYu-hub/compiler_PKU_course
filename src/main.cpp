@@ -5,12 +5,12 @@
 #include <fstream>
 #include <string>
 #include "ast.hpp"
-#include "riscv.hpp"
-#include "custom_ir.hpp"
+#include "IR/custom_ir.hpp"
+#include "backend/target/riscv_target.hpp"
+#include "backend/codegen/riscv_generator.hpp"
 
 using namespace std;
 
-extern bool g_is_64bit;
 extern FILE *yyin;
 extern int yyparse(unique_ptr<BaseAST> &ast);
 int main(int argc, const char *argv[]) {
@@ -19,7 +19,8 @@ int main(int argc, const char *argv[]) {
   string mode = "-riscv";
   string input;
   string output;
-  g_is_64bit = true;
+  Back::TargetConfig target_config;
+  target_config.is_64bit = true;
   Back::OptimizationLevel optimization_level = Back::OptimizationLevel::O0;
 
   for (int i = 1; i < argc; i++) {
@@ -27,7 +28,7 @@ int main(int argc, const char *argv[]) {
     if (arg == "-S" || arg == "-riscv" || arg == "-perf") {
       mode = "-riscv";
       if (arg == "-riscv" || arg == "-perf") {
-        g_is_64bit = false;
+        target_config.is_64bit = false;
       }
     } else if (arg == "-koopa") {
       mode = "-koopa";
@@ -63,7 +64,7 @@ int main(int argc, const char *argv[]) {
     file << context.ir_program->DumpText() << endl;
   } else if (mode == "-riscv") {
     // 使用重构 of RiscvGenerator 直接从内存 IR 生成汇编
-    Back::RiscvGenerator riscv_gen(optimization_level);
+    Back::RiscvGenerator riscv_gen(target_config, optimization_level);
     ofstream file(output);
     streambuf *coutbuf = cout.rdbuf();
     cout.rdbuf(file.rdbuf());
