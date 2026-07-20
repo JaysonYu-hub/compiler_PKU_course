@@ -1,6 +1,6 @@
 #pragma once
 
-#include "custom_ir.hpp"
+#include "../custom_ir.hpp"
 #include <cstddef>
 #include <string>
 #include <unordered_map>

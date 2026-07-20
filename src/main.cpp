@@ -6,7 +6,7 @@
 #include <string>
 #include "ast.hpp"
 #include "IR/custom_ir.hpp"
-#include "IR/ir_pass.hpp"
+#include "IR/passes/ir_pass.hpp"
 #include "backend/target/riscv_target.hpp"
 #include "backend/codegen/riscv_generator.hpp"
 
