@@ -76,13 +76,16 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     for (const auto& inst : block->insts) {
       bool has_retval = false;
       std::string val_name;
-      if (const auto* ni = dynamic_cast<const IR::IRNameInstruction*>(inst.get())) {
-        if (const auto* al = dynamic_cast<const IR::IRAlloc*>(inst.get())) {
+      if (IR::isa<IR::IRNameInstruction>(inst.get())) {
+        const auto* ni = IR::cast<IR::IRNameInstruction>(inst.get());
+        if (IR::isa<IR::IRAlloc>(inst.get())) {
+          const auto* al = IR::cast<IR::IRAlloc>(inst.get());
           if (!al->IsArray()) { has_retval = true; val_name = ni->GetName(); }
         } else {
           has_retval = true; val_name = ni->GetName();
         }
-      } else if (const auto* ci = dynamic_cast<const IR::IRCall*>(inst.get())) {
+      } else if (IR::isa<IR::IRCall>(inst.get())) {
+        const auto* ci = IR::cast<IR::IRCall>(inst.get());
         if (ci->HasReturnValue()) { has_retval = true; val_name = ci->GetOperandName(); }
       }
       if (has_retval) virtual_regs.insert(val_name);
@@ -121,8 +124,10 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
 
   for (const auto& block : func.blocks) {
     for (const auto& inst : block->insts) {
-      if (const auto* ni = dynamic_cast<const IR::IRNameInstruction*>(inst.get())) {
-        if (const auto* al = dynamic_cast<const IR::IRAlloc*>(inst.get())) {
+      if (IR::isa<IR::IRNameInstruction>(inst.get())) {
+        const auto* ni = IR::cast<IR::IRNameInstruction>(inst.get());
+        if (IR::isa<IR::IRAlloc>(inst.get())) {
+          const auto* al = IR::cast<IR::IRAlloc>(inst.get());
           local_allocs_.insert(ni->GetName());
           val_stack_map_[ni->GetName()] = offset;
           val_type_map_[ni->GetName()]  = al->GetAllocatedType();
@@ -147,16 +152,20 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   for (const auto& block : func.blocks) {
     for (const auto& inst : block->insts) {
       bool has_retval = false; std::string val_name;
-      if (const auto* ni = dynamic_cast<const IR::IRNameInstruction*>(inst.get())) {
+      if (IR::isa<IR::IRNameInstruction>(inst.get())) {
+        const auto* ni = IR::cast<IR::IRNameInstruction>(inst.get());
         has_retval = true; val_name = ni->GetName();
-      } else if (const auto* ci = dynamic_cast<const IR::IRCall*>(inst.get())) {
+      } else if (IR::isa<IR::IRCall>(inst.get())) {
+        const auto* ci = IR::cast<IR::IRCall>(inst.get());
         if (ci->HasReturnValue()) { has_retval = true; val_name = ci->GetOperandName(); }
       }
       if (has_retval) {
-        if (const auto* al = dynamic_cast<const IR::IRAlloc*>(inst.get()))
+        if (IR::isa<IR::IRAlloc>(inst.get())) {
+          const auto* al = IR::cast<IR::IRAlloc>(inst.get());
           val_type_map_[val_name] = al->GetAllocatedType();
-        else
+        } else {
           val_type_map_[val_name] = inst->GetType();
+        }
       }
     }
   }
@@ -165,7 +174,8 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
 
   for (const auto& block : func.blocks) {
     for (const auto& inst : block->insts) {
-      if (const auto* ci = dynamic_cast<const IR::IRCall*>(inst.get())) {
+      if (IR::isa<IR::IRCall>(inst.get())) {
+        const auto* ci = IR::cast<IR::IRCall>(inst.get());
         has_call_ = true;
         std::vector<IR::IRType> arg_types;
         for (const auto& a : ci->GetArgs()) arg_types.push_back(a->GetType());
@@ -175,14 +185,17 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
         if (stack_args > max_stack_arg_count_) max_stack_arg_count_ = stack_args;
       }
       bool has_retval = false; std::string val_name;
-      if (const auto* ni = dynamic_cast<const IR::IRNameInstruction*>(inst.get())) {
+      if (IR::isa<IR::IRNameInstruction>(inst.get())) {
+        const auto* ni = IR::cast<IR::IRNameInstruction>(inst.get());
         has_retval = true; val_name = ni->GetName();
-      } else if (const auto* ci = dynamic_cast<const IR::IRCall*>(inst.get())) {
+      } else if (IR::isa<IR::IRCall>(inst.get())) {
+        const auto* ci = IR::cast<IR::IRCall>(inst.get());
         if (ci->HasReturnValue()) { has_retval = true; val_name = ci->GetOperandName(); }
       }
       if (has_retval && !val_stack_map_.count(val_name)) {
         val_stack_map_[val_name] = offset;
-        if (const auto* al = dynamic_cast<const IR::IRAlloc*>(inst.get())) {
+        if (IR::isa<IR::IRAlloc>(inst.get())) {
+          const auto* al = IR::cast<IR::IRAlloc>(inst.get());
           val_type_map_[val_name] = al->GetAllocatedType();
           offset += GetTypeSize(al->GetAllocatedType());
         } else {
@@ -315,18 +328,46 @@ void Back::RiscvGenerator::Visit(const IR::IRBasicBlock& block) {
 
 // Instruction dispatch
 void Back::RiscvGenerator::Visit(const IR::IRInstruction& inst) {
-  if (auto* p = dynamic_cast<const IR::IRReturn*>    (&inst)) { Visit(*p); return; }
-  if (auto* p = dynamic_cast<const IR::IRBinary*>    (&inst)) { Visit(*p); return; }
-  if (auto* p = dynamic_cast<const IR::IRCast*>      (&inst)) { Visit(*p); return; }
-  if (auto* p = dynamic_cast<const IR::IRAlloc*>     (&inst)) { Visit(*p); return; }
-  if (auto* p = dynamic_cast<const IR::IRStore*>     (&inst)) { Visit(*p); return; }
-  if (auto* p = dynamic_cast<const IR::IRLoad*>      (&inst)) { Visit(*p); return; }
-  if (auto* p = dynamic_cast<const IR::IRJump*>      (&inst)) { Visit(*p); return; }
-  if (auto* p = dynamic_cast<const IR::IRBranch*>    (&inst)) { Visit(*p); return; }
-  if (auto* p = dynamic_cast<const IR::IRCall*>      (&inst)) { Visit(*p); return; }
-  if (auto* p = dynamic_cast<const IR::IRGetElemPtr*>(&inst)) { Visit(*p); return; }
-  if (auto* p = dynamic_cast<const IR::IRGetPtr*>    (&inst)) { Visit(*p); return; }
-  if (auto* p = dynamic_cast<const IR::IRZeroInit*>  (&inst)) { Visit(*p); return; }
+  switch (inst.inst_type) {
+    case IR::IRInstructionType::IR_INST_RET:
+      Visit(*IR::cast<IR::IRReturn>(&inst));
+      break;
+    case IR::IRInstructionType::IR_INST_BINARY:
+      Visit(*IR::cast<IR::IRBinary>(&inst));
+      break;
+    case IR::IRInstructionType::IR_INST_CAST:
+      Visit(*IR::cast<IR::IRCast>(&inst));
+      break;
+    case IR::IRInstructionType::IR_INST_ALLOC:
+      Visit(*IR::cast<IR::IRAlloc>(&inst));
+      break;
+    case IR::IRInstructionType::IR_INST_STORE:
+      Visit(*IR::cast<IR::IRStore>(&inst));
+      break;
+    case IR::IRInstructionType::IR_INST_LOAD:
+      Visit(*IR::cast<IR::IRLoad>(&inst));
+      break;
+    case IR::IRInstructionType::IR_INST_JUMP:
+      Visit(*IR::cast<IR::IRJump>(&inst));
+      break;
+    case IR::IRInstructionType::IR_INST_BR:
+      Visit(*IR::cast<IR::IRBranch>(&inst));
+      break;
+    case IR::IRInstructionType::IR_INST_CALL:
+      Visit(*IR::cast<IR::IRCall>(&inst));
+      break;
+    case IR::IRInstructionType::IR_INST_GETELEMPTR:
+      Visit(*IR::cast<IR::IRGetElemPtr>(&inst));
+      break;
+    case IR::IRInstructionType::IR_INST_GETPTR:
+      Visit(*IR::cast<IR::IRGetPtr>(&inst));
+      break;
+    case IR::IRInstructionType::IR_INST_ZERO_INIT:
+      Visit(*IR::cast<IR::IRZeroInit>(&inst));
+      break;
+    default:
+      assert(false && "Unknown instruction type");
+  }
 }
 
 // Return
@@ -384,9 +425,9 @@ bool Back::RiscvGenerator::TryEmitMulStrengthReduction(const IR::IRBinary& inst)
     return true;
   };
 
-  const auto* rhs_c = dynamic_cast<const IR::IRConstant*>(inst.GetRhs().get());
+  const auto* rhs_c = IR::dyn_cast<IR::IRConstant>(inst.GetRhs().get());
   if (try_const(rhs_c, inst.GetLhs().get())) return true;
-  const auto* lhs_c = dynamic_cast<const IR::IRConstant*>(inst.GetLhs().get());
+  const auto* lhs_c = IR::dyn_cast<IR::IRConstant>(inst.GetLhs().get());
   return try_const(lhs_c, inst.GetRhs().get());
 }
 
@@ -510,7 +551,7 @@ void Back::RiscvGenerator::Visit(const IR::IRStore& inst) {
 
   if (inst.GetVal()->GetType() == IR::IRType::IR_FLOAT) {
     LoadValueToFReg(inst.GetVal().get(), "ft5");
-    if (dynamic_cast<const IR::IRGlobalAlloc*>(ptr_raw)) {
+    if (IR::isa<IR::IRGlobalAlloc>(ptr_raw)) {
       emitter_.EmitInst("la", "t6", StripAt(ptr_name));
       emitter_.Out() << "  fsw ft5, 0(t6)\n";
     } else if (local_allocs_.count(ptr_name)) {
@@ -523,7 +564,7 @@ void Back::RiscvGenerator::Visit(const IR::IRStore& inst) {
   }
 
   LoadValueToReg(inst.GetVal().get(), "t5");
-  if (dynamic_cast<const IR::IRGlobalAlloc*>(ptr_raw)) {
+  if (IR::isa<IR::IRGlobalAlloc>(ptr_raw)) {
     emitter_.EmitInst("la", "t6", StripAt(ptr_name));
     if (GetTypeSize(inst.GetVal()->GetType()) == 8) emitter_.Out() << "  sd t5, 0(t6)\n";
     else                                            emitter_.Out() << "  sw t5, 0(t6)\n";
@@ -552,7 +593,7 @@ void Back::RiscvGenerator::Visit(const IR::IRLoad& inst) {
   }
 
   if (inst.GetType() == IR::IRType::IR_FLOAT) {
-    if (dynamic_cast<const IR::IRGlobalAlloc*>(ptr_raw)) {
+    if (IR::isa<IR::IRGlobalAlloc>(ptr_raw)) {
       emitter_.EmitInst("la", "t5", StripAt(ptr_name));
       emitter_.Out() << "  flw ft5, 0(t5)\n";
     } else if (local_allocs_.count(ptr_name)) {
@@ -565,7 +606,7 @@ void Back::RiscvGenerator::Visit(const IR::IRLoad& inst) {
     return;
   }
 
-  if (dynamic_cast<const IR::IRGlobalAlloc*>(ptr_raw)) {
+  if (IR::isa<IR::IRGlobalAlloc>(ptr_raw)) {
     emitter_.EmitInst("la", "t5", StripAt(ptr_name));
     if (GetTypeSize(inst.GetType()) == 8) emitter_.Out() << "  ld t5, 0(t5)\n";
     else                                  emitter_.Out() << "  lw t5, 0(t5)\n";
@@ -700,7 +741,8 @@ void Back::RiscvGenerator::Visit(const IR::IRZeroInit& inst) {
 
 // Value load/store helpers
 void Back::RiscvGenerator::LoadValueToReg(const IR::IRValue* val, const std::string& reg) {
-  if (const auto* c = dynamic_cast<const IR::IRConstant*>(val)) {
+  if (IR::isa<IR::IRConstant>(val)) {
+    const auto* c = IR::cast<IR::IRConstant>(val);
     if (c->GetType() == IR::IRType::IR_INT32) {
       int32_t iv = std::get<int32_t>(c->GetValue());
       if (iv == 0) emitter_.EmitInst("mv", reg, "x0");
@@ -716,7 +758,7 @@ void Back::RiscvGenerator::LoadValueToReg(const IR::IRValue* val, const std::str
     }
     return;
   }
-  if (dynamic_cast<const IR::IRGlobalAlloc*>(val)) {
+  if (IR::isa<IR::IRGlobalAlloc>(val)) {
     emitter_.EmitInst("la", reg, StripAt(val->GetOperandName()));
     if (GetTypeSize(val->GetType()) == 8) emitter_.Out() << "  ld " << reg << ", 0(" << reg << ")\n";
     else                                  emitter_.Out() << "  lw " << reg << ", 0(" << reg << ")\n";
@@ -760,7 +802,8 @@ void Back::RiscvGenerator::StoreRegToVal(const IR::IRValue* val, const std::stri
 }
 
 void Back::RiscvGenerator::LoadValueToFReg(const IR::IRValue* val, const std::string& reg) {
-  if (const auto* c = dynamic_cast<const IR::IRConstant*>(val)) {
+  if (IR::isa<IR::IRConstant>(val)) {
+    const auto* c = IR::cast<IR::IRConstant>(val);
     if (c->GetType() == IR::IRType::IR_FLOAT) {
       float fv = std::get<float>(c->GetValue());
       uint32_t bits = 0; std::memcpy(&bits, &fv, sizeof(bits));
@@ -798,7 +841,8 @@ void Back::RiscvGenerator::StoreFRegToVal(const IR::IRValue* val, const std::str
 }
 
 void Back::RiscvGenerator::LoadAddressToReg(const IR::IRValue* val, const std::string& reg) {
-  if (const auto* al = dynamic_cast<const IR::IRAlloc*>(val)) {
+  if (IR::isa<IR::IRAlloc>(val)) {
+    const auto* al = IR::cast<IR::IRAlloc>(val);
     auto it = val_stack_map_.find(al->GetName());
     assert(it != val_stack_map_.end());
     int off = it->second;
@@ -807,7 +851,7 @@ void Back::RiscvGenerator::LoadAddressToReg(const IR::IRValue* val, const std::s
       emitter_.EmitInst("li",  reg, std::to_string(off));
       emitter_.EmitInst("add", reg, "sp", reg);
     }
-  } else if (dynamic_cast<const IR::IRGlobalAlloc*>(val)) {
+  } else if (IR::isa<IR::IRGlobalAlloc>(val)) {
     emitter_.EmitInst("la", reg, StripAt(val->GetOperandName()));
   } else {
     std::string name = val->GetOperandName();

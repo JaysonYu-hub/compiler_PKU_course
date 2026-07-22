@@ -6,8 +6,7 @@
 #include <string>
 #include "ast.hpp"
 #include "IR/custom_ir.hpp"
-#include "IR/passes/ir_pass.hpp"
-#include "backend/target/riscv_target.hpp"
+#include "backend/riscv_target.hpp"
 #include "backend/codegen/riscv_generator.hpp"
 
 using namespace std;
@@ -58,12 +57,6 @@ int main(int argc, const char *argv[]) {
   if (ret != 0) return ret;
    
   GenerateIR(*ast, context);
-
-  if (optimization_level == Back::OptimizationLevel::O1) {
-    IR::RunO1Passes(*context.ir_program);
-  } else {
-    IR::IRVerifier::VerifyOrThrow(*context.ir_program);
-  }
 
   if (mode == "-koopa") {
     // 输出 Custom IR 文本

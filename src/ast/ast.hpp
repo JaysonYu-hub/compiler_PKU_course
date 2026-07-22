@@ -6,10 +6,9 @@
 #include <iostream>
 #include <variant>
 #include <cassert>
+#include <charconv>
 #include "../IR/custom_ir.hpp"
 #include "ast_visitor.hpp"
-
-
 
 // 临时寄存器生成器, 在函数开始时reset
 class Counter {
@@ -119,17 +118,18 @@ public:
   SymbolKind kind;
   IR::IRType object_type = IR::IRType::IR_DEFAULT;
   std::variant<int, float, std::string, FuncInformation, ArrayInformation> value;
-  Symbol(const std::string &name, SymbolKind kind, int const_value)
-    : name(name), kind(kind), object_type(IR::IRType::IR_INT32), value(const_value) {}
-  Symbol(const std::string &name, SymbolKind kind, float const_value)
-    : name(name), kind(kind), object_type(IR::IRType::IR_FLOAT), value(const_value) {}
-  Symbol(const std::string &name, SymbolKind kind, const std::string &address,
+  Symbol(std::string name, SymbolKind kind, int const_value)
+    : name(std::move(name)), kind(kind), object_type(IR::IRType::IR_INT32), value(const_value) {}
+  Symbol(std::string name, SymbolKind kind, float const_value)
+    : name(std::move(name)), kind(kind), object_type(IR::IRType::IR_FLOAT), value(const_value) {}
+  Symbol(std::string name, SymbolKind kind, std::string address,
          IR::IRType object_type = IR::IRType::IR_INT32)
-    : name(name), kind(kind), object_type(object_type), value(address) {}
+    : name(std::move(name)), kind(kind), object_type(object_type), value(std::move(address)) {}
 
-  Symbol(const std::string &name, SymbolKind kind, FuncInformation func_information) : name(name), kind(kind), value(func_information) {}
+  Symbol(std::string name, SymbolKind kind, FuncInformation func_information)
+    : name(std::move(name)), kind(kind), value(std::move(func_information)) {}
   
-  Symbol(const std::string &name, SymbolKind kind) : name(name), kind(kind) {
+  Symbol(std::string name, SymbolKind kind) : name(std::move(name)), kind(kind) {
     if (kind == SymbolKind::CONSTANT) {
       value = 0;
     } else if (kind == SymbolKind::FUNCTION) {
@@ -302,8 +302,9 @@ public:
   }
 
   std::shared_ptr<IR::IRValue> GetIRValue(const std::string& name) {
-    if (ir_values.find(name) != ir_values.end()) {
-      return ir_values[name];
+    auto it = ir_values.find(name);
+    if (it != ir_values.end()) {
+      return it->second;
     }
     if (!name.empty() && name[0] != '%' && name[0] != '@') {
       if (name.find('.') != std::string::npos) {
@@ -315,12 +316,12 @@ public:
         } catch (...) {
         }
       } else {
-        try {
-          int val = std::stoi(name);
+        int val = 0;
+        auto [ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), val);
+        if (ec == std::errc{}) {
           auto const_val = std::make_shared<IR::IRConstant>(val);
           ir_values[name] = const_val;
           return const_val;
-        } catch (...) {
         }
       }
     }

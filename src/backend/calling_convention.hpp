@@ -5,7 +5,7 @@
 //                          overflow → stack (index is slot index from sp).
 
 #include <vector>
-#include "../../IR/custom_ir.hpp"
+#include "../IR/custom_ir.hpp"
 
 namespace Back {
 
@@ -20,7 +20,30 @@ public:
 
   // Assigns each argument to a physical location following the RISC-V ILAP ABI.
   std::vector<ArgumentLocation> AssignArgumentLocations(
-      const std::vector<IR::IRType>& types) const;
+      const std::vector<IR::IRType>& types) const {
+    std::vector<ArgumentLocation> locs;
+    locs.reserve(types.size());
+
+    int int_idx   = 0;
+    int float_idx = 0;
+    int stack_idx = 0;
+
+    for (IR::IRType t : types) {
+      ArgumentLocation loc;
+      if (t == IR::IRType::IR_FLOAT && float_idx < 8) {
+        loc.kind  = ArgumentLocation::Kind::FLOAT_REGISTER;
+        loc.index = float_idx++;
+      } else if (t != IR::IRType::IR_FLOAT && int_idx < 8) {
+        loc.kind  = ArgumentLocation::Kind::INTEGER_REGISTER;
+        loc.index = int_idx++;
+      } else {
+        loc.kind  = ArgumentLocation::Kind::STACK;
+        loc.index = stack_idx++;
+      }
+      locs.push_back(loc);
+    }
+    return locs;
+  }
 
   // Size in bytes of one stack argument slot.
   int GetStackArgSlotSize() const { return is_64bit_ ? 8 : 4; }

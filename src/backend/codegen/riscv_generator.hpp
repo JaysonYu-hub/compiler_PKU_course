@@ -18,10 +18,10 @@
 #include <iostream>
 
 #include "../../IR/custom_ir.hpp"
-#include "../target/riscv_target.hpp"
-#include "../abi/calling_convention.hpp"
-#include "../stack/stack_layout.hpp"
-#include "../asm/asm_emitter.hpp"
+#include "../riscv_target.hpp"
+#include "../calling_convention.hpp"
+#include "../stack_layout.hpp"
+#include "../asm_emitter.hpp"
 #include "../../IR/passes/liveness.hpp"
 
 namespace Back {

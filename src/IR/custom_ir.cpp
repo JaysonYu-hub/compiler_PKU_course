@@ -105,66 +105,48 @@ namespace IR {
 
   // IRGlobalAlloc
 
+  namespace {
+  template <typename T>
+  std::string FormatNestedInitializerImpl(const std::vector<T>& vals,
+                                          const std::vector<int>& dims,
+                                          size_t dim_idx,
+                                          size_t& val_idx) {
+    std::string res = "{";
+    for (int i = 0; i < dims[dim_idx]; i++) {
+      if (dim_idx == dims.size() - 1) {
+        if (val_idx < vals.size()) {
+          if constexpr (std::is_same_v<T, float>) {
+            res += FloatToString(vals[val_idx++]);
+          } else {
+            res += std::to_string(vals[val_idx++]);
+          }
+        } else {
+          res += std::is_same_v<T, float> ? "0.0" : "0";
+        }
+      } else {
+        res += FormatNestedInitializerImpl(vals, dims, dim_idx + 1, val_idx);
+      }
+      if (i != dims[dim_idx] - 1) {
+        res += ", ";
+      }
+    }
+    res += "}";
+    return res;
+  }
+  }
+
   std::string IRGlobalAlloc::FormatNestedInitializer(const std::vector<int32_t>& vals, 
                                              const std::vector<int>& dims, 
                                              size_t dim_idx, 
                                              size_t& val_idx) {
-    if (dim_idx == dims.size() - 1) {
-      std::string res = "{";
-      for (int i = 0; i < dims[dim_idx]; i++) {
-        if (val_idx < vals.size()) {
-          res += FloatToString(vals[val_idx++]);
-        } else {
-          res += "0.0";
-        }
-        if (i != dims[dim_idx] - 1) {
-          res += ", ";
-        }
-      }
-      res += "}";
-      return res;
-    } else {
-      std::string res = "{";
-      for (int i = 0; i < dims[dim_idx]; i++) {
-        res += FormatNestedInitializer(vals, dims, dim_idx + 1, val_idx);
-        if (i != dims[dim_idx] - 1) {
-          res += ", ";
-        }
-      }
-      res += "}";
-      return res;
-    }
+    return FormatNestedInitializerImpl(vals, dims, dim_idx, val_idx);
   }
 
   std::string IRGlobalAlloc::FormatNestedFloatInitializer(const std::vector<float>& vals, 
                                                   const std::vector<int>& dims, 
                                                   size_t dim_idx, 
                                                   size_t& val_idx) {
-    if (dim_idx == dims.size() - 1) {
-      std::string res = "{";
-      for (int i = 0; i < dims[dim_idx]; i++) {
-        if (val_idx < vals.size()) {
-          res += std::to_string(vals[val_idx++]);
-        } else {
-          res += "0.0";
-        }
-        if (i != dims[dim_idx] - 1) {
-          res += ", ";
-        }
-      }
-      res += "}";
-      return res;
-    } else {
-      std::string res = "{";
-      for (int i = 0; i < dims[dim_idx]; i++) {
-        res += FormatNestedFloatInitializer(vals, dims, dim_idx + 1, val_idx);
-        if (i != dims[dim_idx] - 1) {
-          res += ", ";
-        }
-      }
-      res += "}";
-      return res;
-    }
+    return FormatNestedInitializerImpl(vals, dims, dim_idx, val_idx);
   }
 
   std::string IRGlobalAlloc::DumpText() const {
@@ -231,6 +213,19 @@ namespace IR {
     return "";
   }
 
+  bool IRInstruction::ReplaceUse(const IRValue* old_value,
+                                 std::shared_ptr<IRValue> new_value) {
+    if (!new_value) return false;
+    bool changed = false;
+    for (auto& op : operands) {
+      if (op.get() == old_value) {
+        op = new_value;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   // IRNameInstruction
   std::string IRNameInstruction::GetOperandName() const {
     return name;
@@ -239,14 +234,6 @@ namespace IR {
   // IRBinary
 
   namespace {
-  bool ReplaceOperand(std::shared_ptr<IRValue>& operand,
-                      const IRValue* old_value,
-                      const std::shared_ptr<IRValue>& new_value) {
-    if (!new_value || operand.get() != old_value) return false;
-    operand = new_value;
-    return true;
-  }
-
   bool IsComparisonOp(IRBinaryOp op) {
     return op == IRBinaryOp::EQ || op == IRBinaryOp::NE ||
            op == IRBinaryOp::LT || op == IRBinaryOp::LE ||
@@ -256,12 +243,23 @@ namespace IR {
 
   IRBinary::IRBinary(std::string name, IRBinaryOp op,
                      std::shared_ptr<IRValue> lhs,
+                     std::shared_ptr<IRValue> rhs,
+                     IRType operand_type, IRType result_type)
+    : IRNameInstruction(IRInstructionType::IR_INST_BINARY, std::move(name)),
+      op(op), operand_type(operand_type), result_type(result_type) {
+    operands = {std::move(lhs), std::move(rhs)};
+    assert(operands[0] != nullptr && operands[1] != nullptr);
+  }
+
+  IRBinary::IRBinary(std::string name, IRBinaryOp op,
+                     std::shared_ptr<IRValue> lhs,
                      std::shared_ptr<IRValue> rhs)
     : IRNameInstruction(IRInstructionType::IR_INST_BINARY, std::move(name)),
-      op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {
-    assert(this->lhs != nullptr && this->rhs != nullptr);
-    operand_type = (this->lhs->GetType() == IRType::IR_FLOAT ||
-                    this->rhs->GetType() == IRType::IR_FLOAT)
+      op(op) {
+    operands = {std::move(lhs), std::move(rhs)};
+    assert(operands[0] != nullptr && operands[1] != nullptr);
+    operand_type = (operands[0]->GetType() == IRType::IR_FLOAT ||
+                    operands[1]->GetType() == IRType::IR_FLOAT)
                      ? IRType::IR_FLOAT
                      : IRType::IR_INT32;
     result_type = IsComparisonOp(op) ? IRType::IR_INT32 : operand_type;
@@ -270,37 +268,25 @@ namespace IR {
   std::string IRBinary::DumpText() const {
     const std::string prefix = operand_type == IRType::IR_FLOAT ? "f" : "";
     return name + " = " + prefix + OpToString(op) + " " +
-           lhs->GetOperandName() + ", " + rhs->GetOperandName();
+           operands[0]->GetOperandName() + ", " + operands[1]->GetOperandName();
   }
 
   IRType IRBinary::GetType() const {
     return result_type;
   }
 
-  std::vector<std::shared_ptr<IRValue>> IRBinary::GetUses() const {
-    return {lhs, rhs};
-  }
-
-  bool IRBinary::ReplaceUse(const IRValue* old_value,
-                            std::shared_ptr<IRValue> new_value) {
-    bool changed = ReplaceOperand(lhs, old_value, new_value);
-    changed = ReplaceOperand(rhs, old_value, new_value) || changed;
-    return changed;
-  }
-
   // IRCast
 
-  std::vector<std::shared_ptr<IRValue>> IRCast::GetUses() const {
-    return {value};
-  }
-
-  bool IRCast::ReplaceUse(const IRValue* old_value,
-                          std::shared_ptr<IRValue> new_value) {
-    return ReplaceOperand(value, old_value, new_value);
+  IRCast::IRCast(std::string name, IRCastOp op, std::shared_ptr<IRValue> value,
+                 IRType target_type)
+    : IRNameInstruction(IRInstructionType::IR_INST_CAST, std::move(name)),
+      op(op), target_type(target_type) {
+    operands = {std::move(value)};
+    assert(operands[0] != nullptr);
   }
 
   std::string IRCast::DumpText() const {
-    return name + " = " + CastOpToString(op) + " " + value->GetOperandName();
+    return name + " = " + CastOpToString(op) + " " + operands[0]->GetOperandName();
   }
 
   // IRAlloc
@@ -322,52 +308,37 @@ namespace IR {
 
   // store 指令类
   IRStore::IRStore(std::shared_ptr<IRValue> val, std::shared_ptr<IRValue> ptr)
-    : IRInstruction(IRInstructionType::IR_INST_STORE), val(std::move(val)), ptr(std::move(ptr)) {
-    assert(this->ptr != nullptr && this->val != nullptr);
-  }
-
-  std::vector<std::shared_ptr<IRValue>> IRStore::GetUses() const {
-    return {val, ptr};
-  }
-
-  bool IRStore::ReplaceUse(const IRValue* old_value,
-                           std::shared_ptr<IRValue> new_value) {
-    bool changed = ReplaceOperand(val, old_value, new_value);
-    changed = ReplaceOperand(ptr, old_value, new_value) || changed;
-    return changed;
+    : IRInstruction(IRInstructionType::IR_INST_STORE) {
+    operands = {std::move(val), std::move(ptr)};
+    assert(operands[0] != nullptr && operands[1] != nullptr);
   }
 
   std::string IRStore::DumpText() const {
-    return "store " + val->GetOperandName() + ", " + ptr->GetOperandName();
+    return "store " + operands[0]->GetOperandName() + ", " + operands[1]->GetOperandName();
+  }
+
+  IRZeroInit::IRZeroInit(std::shared_ptr<IRValue> ptr, int byte_size)
+    : IRInstruction(IRInstructionType::IR_INST_ZERO_INIT), byte_size(byte_size) {
+    operands = {std::move(ptr)};
+    assert(operands[0] != nullptr);
+    assert(this->byte_size >= 0 && this->byte_size % 4 == 0);
   }
 
   std::string IRZeroInit::DumpText() const {
-    return "zero_init " + ptr->GetOperandName() + ", " +
+    return "zero_init " + operands[0]->GetOperandName() + ", " +
            std::to_string(byte_size);
-  }
-
-  std::vector<std::shared_ptr<IRValue>> IRZeroInit::GetUses() const {
-    return {ptr};
-  }
-
-  bool IRZeroInit::ReplaceUse(const IRValue* old_value,
-                              std::shared_ptr<IRValue> new_value) {
-    return ReplaceOperand(ptr, old_value, new_value);
   }
 
   // IRLoad
 
-  std::vector<std::shared_ptr<IRValue>> IRLoad::GetUses() const {
-    return {ptr};
-  }
-
-  bool IRLoad::ReplaceUse(const IRValue* old_value,
-                          std::shared_ptr<IRValue> new_value) {
-    return ReplaceOperand(ptr, old_value, new_value);
+  IRLoad::IRLoad(std::string name, std::shared_ptr<IRValue> ptr, IRType type)
+    : IRNameInstruction(IRInstructionType::IR_INST_LOAD, std::move(name)), loaded_type(type) {
+    operands = {std::move(ptr)};
+    assert(operands[0] != nullptr);
   }
 
   std::string IRLoad::DumpText() const {
-    return name + " = load " + ptr->GetOperandName();
+    return name + " = load " + operands[0]->GetOperandName();
   }
 
   IRType IRLoad::GetType() const {
@@ -375,19 +346,14 @@ namespace IR {
   }
 
   // IRGetElemPtr
-  std::vector<std::shared_ptr<IRValue>> IRGetElemPtr::GetUses() const {
-    return {arr, index};
-  }
-
-  bool IRGetElemPtr::ReplaceUse(const IRValue* old_value,
-                                std::shared_ptr<IRValue> new_value) {
-    bool changed = ReplaceOperand(arr, old_value, new_value);
-    changed = ReplaceOperand(index, old_value, new_value) || changed;
-    return changed;
+  IRGetElemPtr::IRGetElemPtr(std::string name, std::shared_ptr<IRValue> arr, std::shared_ptr<IRValue> index, int elem_size)
+    : IRNameInstruction(IRInstructionType::IR_INST_GETELEMPTR, std::move(name)), elem_size(elem_size) {
+    operands = {std::move(arr), std::move(index)};
+    assert(operands[0] != nullptr && operands[1] != nullptr);
   }
 
   std::string IRGetElemPtr::DumpText() const {
-    return name + " = getelemptr " + arr->GetOperandName() + ", " + index->GetOperandName();
+    return name + " = getelemptr " + operands[0]->GetOperandName() + ", " + operands[1]->GetOperandName();
   }
 
   IRType IRGetElemPtr::GetType() const {
@@ -395,19 +361,14 @@ namespace IR {
   }
 
   // IRGetPtr
-  std::vector<std::shared_ptr<IRValue>> IRGetPtr::GetUses() const {
-    return {ptr, index};
-  }
-
-  bool IRGetPtr::ReplaceUse(const IRValue* old_value,
-                            std::shared_ptr<IRValue> new_value) {
-    bool changed = ReplaceOperand(ptr, old_value, new_value);
-    changed = ReplaceOperand(index, old_value, new_value) || changed;
-    return changed;
+  IRGetPtr::IRGetPtr(std::string name, std::shared_ptr<IRValue> ptr, std::shared_ptr<IRValue> index, int elem_size)
+    : IRNameInstruction(IRInstructionType::IR_INST_GETPTR, std::move(name)), elem_size(elem_size) {
+    operands = {std::move(ptr), std::move(index)};
+    assert(operands[0] != nullptr && operands[1] != nullptr);
   }
 
   std::string IRGetPtr::DumpText() const {
-    return name + " = getptr " + ptr->GetOperandName() + ", " + index->GetOperandName();
+    return name + " = getptr " + operands[0]->GetOperandName() + ", " + operands[1]->GetOperandName();
   }
 
   IRType IRGetPtr::GetType() const {
@@ -415,58 +376,45 @@ namespace IR {
   }
 
   // IRJump
+  IRJump::IRJump(std::shared_ptr<IRValue> target)
+    : IRInstruction(IRInstructionType::IR_INST_JUMP) {
+    operands = {std::move(target)};
+    assert(operands[0] != nullptr);
+  }
 
   std::string IRJump::DumpText() const {
-    return "jump " + target->GetOperandName();
+    return "jump " + operands[0]->GetOperandName();
   }
 
   // IRBranch
-
-  std::vector<std::shared_ptr<IRValue>> IRBranch::GetUses() const {
-    return {cond};
-  }
-
-  bool IRBranch::ReplaceUse(const IRValue* old_value,
-                            std::shared_ptr<IRValue> new_value) {
-    return ReplaceOperand(cond, old_value, new_value);
+  IRBranch::IRBranch(std::shared_ptr<IRValue> cond, std::shared_ptr<IRValue> then_target, std::shared_ptr<IRValue> else_target)
+    : IRInstruction(IRInstructionType::IR_INST_BR), then_target(std::move(then_target)), else_target(std::move(else_target)) {
+    operands = {std::move(cond)};
+    assert(operands[0] != nullptr && this->then_target != nullptr && this->else_target != nullptr);
   }
 
   std::string IRBranch::DumpText() const {
-    return "br " + cond->GetOperandName() + ", " + then_target->GetOperandName() + ", " + else_target->GetOperandName();
+    return "br " + operands[0]->GetOperandName() + ", " + then_target->GetOperandName() + ", " + else_target->GetOperandName();
   }
 
   // IRReturn
-
-  std::vector<std::shared_ptr<IRValue>> IRReturn::GetUses() const {
-    return val ? std::vector<std::shared_ptr<IRValue>>{val}
-               : std::vector<std::shared_ptr<IRValue>>{};
-  }
-
-  bool IRReturn::ReplaceUse(const IRValue* old_value,
-                            std::shared_ptr<IRValue> new_value) {
-    return ReplaceOperand(val, old_value, new_value);
+  IRReturn::IRReturn(std::shared_ptr<IRValue> val)
+    : IRInstruction(IRInstructionType::IR_INST_RET) {
+    if (val) operands = {std::move(val)};
   }
 
   std::string IRReturn::DumpText() const {
-    if (val) {
-      return "ret " + val->GetOperandName();
+    if (!operands.empty() && operands[0]) {
+      return "ret " + operands[0]->GetOperandName();
     }
     return "ret";
   }
 
   // IRCall
-
-  std::vector<std::shared_ptr<IRValue>> IRCall::GetUses() const {
-    return args;
-  }
-
-  bool IRCall::ReplaceUse(const IRValue* old_value,
-                          std::shared_ptr<IRValue> new_value) {
-    bool changed = false;
-    for (auto& arg : args) {
-      changed = ReplaceOperand(arg, old_value, new_value) || changed;
-    }
-    return changed;
+  IRCall::IRCall(std::string name, std::shared_ptr<IRValue> func, std::vector<std::shared_ptr<IRValue>> args, IRType ret_type)
+    : IRInstruction(IRInstructionType::IR_INST_CALL), name(std::move(name)), func(std::move(func)), ret_type(ret_type) {
+    operands = std::move(args);
+    assert(this->func != nullptr);
   }
 
   std::string IRCall::DumpText() const {
@@ -475,9 +423,9 @@ namespace IR {
       str += name + " = ";
     }
     str += "call " + func->GetOperandName() + "(";
-    for (size_t i = 0; i < args.size(); i++) {
-      str += args[i]->GetOperandName();
-      if (i != args.size() - 1) {
+    for (size_t i = 0; i < operands.size(); i++) {
+      str += operands[i]->GetOperandName();
+      if (i != operands.size() - 1) {
         str += ", ";
       }
     }
@@ -506,6 +454,21 @@ namespace IR {
   void IRBasicBlock::SetNext(std::shared_ptr<IRBasicBlock> next_1, std::shared_ptr<IRBasicBlock> next_2) {
     this->next_1 = std::move(next_1);
     this->next_2 = std::move(next_2);
+  }
+
+  std::vector<IRBasicBlock*> IRBasicBlock::GetSuccessors() const {
+    if (insts.empty()) return {};
+    auto last = insts.back();
+    if (auto br = dyn_cast<IRBranch>(last.get())) {
+      std::vector<IRBasicBlock*> succs;
+      if (auto t1 = dyn_cast<IRBasicBlock>(br->GetThenTarget().get())) succs.push_back(t1);
+      if (auto t2 = dyn_cast<IRBasicBlock>(br->GetElseTarget().get())) succs.push_back(t2);
+      return succs;
+    }
+    if (auto jmp = dyn_cast<IRJump>(last.get())) {
+      if (auto t = dyn_cast<IRBasicBlock>(jmp->GetTarget().get())) return {t};
+    }
+    return {};
   }
 
   std::string IRBasicBlock::DumpText() const {

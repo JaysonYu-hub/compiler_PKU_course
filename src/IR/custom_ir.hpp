@@ -77,10 +77,13 @@ namespace IR {
     virtual std::string DumpText() const = 0;
     virtual std::string GetOperandName() const = 0;
     virtual IRType GetType() const { return IRType::IR_DEFAULT; }
+    static bool classof(const IRValue* v) { return v != nullptr; }
   };
 
   // 基础指令类
   class IRInstruction : public IRValue {
+  protected:
+    std::vector<std::shared_ptr<IRValue>> operands;
   public:
     IRInstructionType inst_type;
     IRInstruction(IRValueKind kind, IRInstructionType inst_type) : IRValue(kind), inst_type(inst_type) {}
@@ -88,14 +91,13 @@ namespace IR {
     virtual ~IRInstruction() = default;
 
     std::string GetOperandName() const override;
-    virtual std::vector<std::shared_ptr<IRValue>> GetUses() const { return {}; }
+    virtual std::vector<std::shared_ptr<IRValue>> GetUses() const { return operands; }
     virtual bool ReplaceUse(const IRValue* old_value,
-                            std::shared_ptr<IRValue> new_value) {
-      (void)old_value;
-      (void)new_value;
-      return false;
-    }
+                            std::shared_ptr<IRValue> new_value);
     virtual bool HasSideEffect() const { return false; }
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION;
+    }
   };
 
   // 具有 SSA 寄存器返回值的指令基类
@@ -109,6 +111,17 @@ namespace IR {
       : IRInstruction(IRValueKind::IR_INSTRUCTION, inst_type), name(std::move(name)) {}
     std::string GetName() const { return name; }
     std::string GetOperandName() const override;
+    static bool classof(const IRValue* v) {
+      if (!v || v->GetKind() != IRValueKind::IR_INSTRUCTION) return false;
+      auto t = static_cast<const IRInstruction*>(v)->inst_type;
+      return t == IRInstructionType::IR_INST_BINARY ||
+             t == IRInstructionType::IR_INST_CAST ||
+             t == IRInstructionType::IR_INST_ALLOC ||
+             t == IRInstructionType::IR_INST_LOAD ||
+             t == IRInstructionType::IR_INST_GETELEMPTR ||
+             t == IRInstructionType::IR_INST_GETPTR ||
+             t == IRInstructionType::IR_INST_CALL;
+    }
   };
 
   // 整型常量类
@@ -125,6 +138,9 @@ namespace IR {
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetType() const override { return const_type; }
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_CONSTANT;
+    }
   };
 
   // 符号/变量引用类
@@ -137,6 +153,9 @@ namespace IR {
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetType() const override { return IRType::IR_POINTER; }
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_SYMBOL;
+    }
   };
 
   // 全局变量分配类
@@ -179,6 +198,9 @@ namespace IR {
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetType() const override { return IRType::IR_POINTER; }
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_GLOBAL_ALLOC;
+    }
   };
 
   // 函数形参类
@@ -194,6 +216,9 @@ namespace IR {
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetType() const override { return type; }
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_FUNC_PARAM;
+    }
   };
 
 
@@ -201,33 +226,27 @@ namespace IR {
   class IRBinary : public IRNameInstruction {
   private:
     IRBinaryOp op;
-    std::shared_ptr<IRValue> lhs;
-    std::shared_ptr<IRValue> rhs;
     IRType operand_type;
     IRType result_type;
   public:
     IRBinary(std::string name, IRBinaryOp op, std::shared_ptr<IRValue> lhs,
              std::shared_ptr<IRValue> rhs, IRType operand_type,
-             IRType result_type)
-      : IRNameInstruction(IRInstructionType::IR_INST_BINARY, std::move(name)),
-        op(op), lhs(std::move(lhs)), rhs(std::move(rhs)),
-        operand_type(operand_type), result_type(result_type) {
-      assert(this->lhs != nullptr && this->rhs != nullptr);
-    }
+             IRType result_type);
 
     IRBinary(std::string name, IRBinaryOp op, std::shared_ptr<IRValue> lhs,
              std::shared_ptr<IRValue> rhs);
 
     IRBinaryOp GetOp() const { return op; }
-    std::shared_ptr<IRValue> GetLhs() const { return lhs; }
-    std::shared_ptr<IRValue> GetRhs() const { return rhs; }
+    std::shared_ptr<IRValue> GetLhs() const { return operands[0]; }
+    std::shared_ptr<IRValue> GetRhs() const { return operands[1]; }
     IRType GetOperandType() const { return operand_type; }
 
-    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
-    bool ReplaceUse(const IRValue* old_value,
-                    std::shared_ptr<IRValue> new_value) override;
     std::string DumpText() const override;
     IRType GetType() const override;
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION &&
+             static_cast<const IRInstruction*>(v)->inst_type == IRInstructionType::IR_INST_BINARY;
+    }
   };
 
   // SysY permits implicit conversion between int and float.  Keeping that
@@ -235,23 +254,19 @@ namespace IR {
   class IRCast : public IRNameInstruction {
   private:
     IRCastOp op;
-    std::shared_ptr<IRValue> value;
     IRType target_type;
   public:
     IRCast(std::string name, IRCastOp op, std::shared_ptr<IRValue> value,
-           IRType target_type)
-      : IRNameInstruction(IRInstructionType::IR_INST_CAST, std::move(name)),
-        op(op), value(std::move(value)), target_type(target_type) {
-      assert(this->value != nullptr);
-    }
+           IRType target_type);
 
     IRCastOp GetOp() const { return op; }
-    std::shared_ptr<IRValue> GetValue() const { return value; }
-    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
-    bool ReplaceUse(const IRValue* old_value,
-                    std::shared_ptr<IRValue> new_value) override;
+    std::shared_ptr<IRValue> GetValue() const { return operands[0]; }
     std::string DumpText() const override;
     IRType GetType() const override { return target_type; }
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION &&
+             static_cast<const IRInstruction*>(v)->inst_type == IRInstructionType::IR_INST_CAST;
+    }
   };
   
   // alloc 指令类
@@ -279,159 +294,141 @@ namespace IR {
 
     std::string DumpText() const override;
     IRType GetType() const override;
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION &&
+             static_cast<const IRInstruction*>(v)->inst_type == IRInstructionType::IR_INST_ALLOC;
+    }
   };
 
   // store 指令类
   class IRStore : public IRInstruction {
-  private:
-    std::shared_ptr<IRValue> val;
-    std::shared_ptr<IRValue> ptr;
   public:
     IRStore(std::shared_ptr<IRValue> val, std::shared_ptr<IRValue> ptr);
-    std::shared_ptr<IRValue> GetVal() const { return val; }
-    std::shared_ptr<IRValue> GetPtr() const { return ptr; }
-    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
-    bool ReplaceUse(const IRValue* old_value,
-                    std::shared_ptr<IRValue> new_value) override;
+    std::shared_ptr<IRValue> GetVal() const { return operands[0]; }
+    std::shared_ptr<IRValue> GetPtr() const { return operands[1]; }
     bool HasSideEffect() const override { return true; }
     std::string DumpText() const override;
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION &&
+             static_cast<const IRInstruction*>(v)->inst_type == IRInstructionType::IR_INST_STORE;
+    }
   };
 
   // Compactly clear a contiguous local allocation before explicit stores.
   class IRZeroInit : public IRInstruction {
   private:
-    std::shared_ptr<IRValue> ptr;
     int byte_size;
   public:
-    IRZeroInit(std::shared_ptr<IRValue> ptr, int byte_size)
-      : IRInstruction(IRInstructionType::IR_INST_ZERO_INIT),
-        ptr(std::move(ptr)), byte_size(byte_size) {
-      assert(this->ptr != nullptr);
-      assert(this->byte_size >= 0 && this->byte_size % 4 == 0);
-    }
+    IRZeroInit(std::shared_ptr<IRValue> ptr, int byte_size);
 
-    std::shared_ptr<IRValue> GetPtr() const { return ptr; }
+    std::shared_ptr<IRValue> GetPtr() const { return operands[0]; }
     int GetByteSize() const { return byte_size; }
-    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
-    bool ReplaceUse(const IRValue* old_value,
-                    std::shared_ptr<IRValue> new_value) override;
     bool HasSideEffect() const override { return true; }
     std::string DumpText() const override;
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION &&
+             static_cast<const IRInstruction*>(v)->inst_type == IRInstructionType::IR_INST_ZERO_INIT;
+    }
   };
 
   // load 指令类
   class IRLoad : public IRNameInstruction {
   private:
-    std::shared_ptr<IRValue> ptr;
     IRType loaded_type;
   public:
-    IRLoad(std::string name, std::shared_ptr<IRValue> ptr, IRType type = IRType::IR_INT32)
-      : IRNameInstruction(IRInstructionType::IR_INST_LOAD, std::move(name)), ptr(std::move(ptr)), loaded_type(type) {
-      assert(this->ptr != nullptr);
-    }
-    std::shared_ptr<IRValue> GetPtr() const { return ptr; }
-    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
-    bool ReplaceUse(const IRValue* old_value,
-                    std::shared_ptr<IRValue> new_value) override;
+    IRLoad(std::string name, std::shared_ptr<IRValue> ptr, IRType type = IRType::IR_INT32);
+    std::shared_ptr<IRValue> GetPtr() const { return operands[0]; }
     std::string DumpText() const override;
     IRType GetType() const override;
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION &&
+             static_cast<const IRInstruction*>(v)->inst_type == IRInstructionType::IR_INST_LOAD;
+    }
   };
 
   // getelemptr 指令类
   class IRGetElemPtr : public IRNameInstruction {
   private:
-    std::shared_ptr<IRValue> arr;
-    std::shared_ptr<IRValue> index;
     int elem_size;  // 子元素大小（字节）
   public:
-    IRGetElemPtr(std::string name, std::shared_ptr<IRValue> arr, std::shared_ptr<IRValue> index, int elem_size = 4)
-      :  IRNameInstruction(IRInstructionType::IR_INST_GETELEMPTR, std::move(name)), arr(std::move(arr)), index(std::move(index)), elem_size(elem_size) {
-      assert(this->arr != nullptr && this->index != nullptr);
-    }
+    IRGetElemPtr(std::string name, std::shared_ptr<IRValue> arr, std::shared_ptr<IRValue> index, int elem_size = 4);
 
-    std::shared_ptr<IRValue> GetArr() const { return arr; }
-    std::shared_ptr<IRValue> GetIndex() const { return index; }
+    std::shared_ptr<IRValue> GetArr() const { return operands[0]; }
+    std::shared_ptr<IRValue> GetIndex() const { return operands[1]; }
     int GetElemSize() const { return elem_size; }
 
-    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
-    bool ReplaceUse(const IRValue* old_value,
-                    std::shared_ptr<IRValue> new_value) override;
     std::string DumpText() const override;
     IRType GetType() const override;
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION &&
+             static_cast<const IRInstruction*>(v)->inst_type == IRInstructionType::IR_INST_GETELEMPTR;
+    }
   };
 
   // getptr 指令类
   class IRGetPtr : public IRNameInstruction {
   private:
-    std::shared_ptr<IRValue> ptr;
-    std::shared_ptr<IRValue> index;
     int elem_size;  // 元素大小（字节）
   public:
-    IRGetPtr(std::string name, std::shared_ptr<IRValue> ptr, std::shared_ptr<IRValue> index, int elem_size = 4)
-      : IRNameInstruction(IRInstructionType::IR_INST_GETPTR, std::move(name)), ptr(std::move(ptr)), index(std::move(index)), elem_size(elem_size) {
-      assert(this->ptr != nullptr && this->index != nullptr);
-    }
+    IRGetPtr(std::string name, std::shared_ptr<IRValue> ptr, std::shared_ptr<IRValue> index, int elem_size = 4);
 
-    std::shared_ptr<IRValue> GetPtr() const { return ptr; }
-    std::shared_ptr<IRValue> GetIndex() const { return index; }
+    std::shared_ptr<IRValue> GetPtr() const { return operands[0]; }
+    std::shared_ptr<IRValue> GetIndex() const { return operands[1]; }
     int GetElemSize() const { return elem_size; }
 
-    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
-    bool ReplaceUse(const IRValue* old_value,
-                    std::shared_ptr<IRValue> new_value) override;
     std::string DumpText() const override;
     IRType GetType() const override;
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION &&
+             static_cast<const IRInstruction*>(v)->inst_type == IRInstructionType::IR_INST_GETPTR;
+    }
   };
 
   // jump 指令类
   class IRJump : public IRInstruction {
-  private:
-    std::shared_ptr<IRValue> target;
   public:
-    explicit IRJump(std::shared_ptr<IRValue> target) : IRInstruction(IRInstructionType::IR_INST_JUMP), target(std::move(target)) {
-      assert(this->target != nullptr);
-    }
-    std::shared_ptr<IRValue> GetTarget() const { return target; }
+    explicit IRJump(std::shared_ptr<IRValue> target);
+    std::shared_ptr<IRValue> GetTarget() const { return operands[0]; }
     bool HasSideEffect() const override { return true; }
     std::string DumpText() const override;
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION &&
+             static_cast<const IRInstruction*>(v)->inst_type == IRInstructionType::IR_INST_JUMP;
+    }
   };
 
   // branch 指令类
   class IRBranch : public IRInstruction {
   private:
-    std::shared_ptr<IRValue> cond;
     std::shared_ptr<IRValue> then_target;
     std::shared_ptr<IRValue> else_target;
   public:
-    IRBranch(std::shared_ptr<IRValue> cond, std::shared_ptr<IRValue> then_target, std::shared_ptr<IRValue> else_target)
-      : IRInstruction(IRInstructionType::IR_INST_BR), cond(std::move(cond)), then_target(std::move(then_target)), else_target(std::move(else_target)) {
-      assert(this->cond != nullptr && this->then_target != nullptr && this->else_target != nullptr);
-    }
+    IRBranch(std::shared_ptr<IRValue> cond, std::shared_ptr<IRValue> then_target, std::shared_ptr<IRValue> else_target);
 
-    std::shared_ptr<IRValue> GetCond() const { return cond; }
+    std::shared_ptr<IRValue> GetCond() const { return operands[0]; }
     std::shared_ptr<IRValue> GetThenTarget() const { return then_target; }
     std::shared_ptr<IRValue> GetElseTarget() const { return else_target; }
 
-    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
-    bool ReplaceUse(const IRValue* old_value,
-                    std::shared_ptr<IRValue> new_value) override;
     bool HasSideEffect() const override { return true; }
     std::string DumpText() const override;
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION &&
+             static_cast<const IRInstruction*>(v)->inst_type == IRInstructionType::IR_INST_BR;
+    }
   };
 
   // 返回指令类
   class IRReturn : public IRInstruction {
-  private:
-    std::shared_ptr<IRValue> val;
   public:
-    explicit IRReturn(std::shared_ptr<IRValue> val = nullptr) : IRInstruction(IRInstructionType::IR_INST_RET), val(std::move(val)) {}
+    explicit IRReturn(std::shared_ptr<IRValue> val = nullptr);
 
-    std::shared_ptr<IRValue> GetValue() const { return val; }
-    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
-    bool ReplaceUse(const IRValue* old_value,
-                    std::shared_ptr<IRValue> new_value) override;
+    std::shared_ptr<IRValue> GetValue() const { return operands.empty() ? nullptr : operands[0]; }
     bool HasSideEffect() const override { return true; }
     std::string DumpText() const override;
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION &&
+             static_cast<const IRInstruction*>(v)->inst_type == IRInstructionType::IR_INST_RET;
+    }
   };
 
   // 函数调用指令类
@@ -439,25 +436,22 @@ namespace IR {
   private:
     std::string name;
     std::shared_ptr<IRValue> func;
-    std::vector<std::shared_ptr<IRValue>> args;
     IRType ret_type;
   public:
-    IRCall(std::string name, std::shared_ptr<IRValue> func, std::vector<std::shared_ptr<IRValue>> args, IRType ret_type)
-      : IRInstruction(IRInstructionType::IR_INST_CALL), name(std::move(name)), func(std::move(func)), args(std::move(args)), ret_type(ret_type) {
-      assert(this->func != nullptr);
-    }
+    IRCall(std::string name, std::shared_ptr<IRValue> func, std::vector<std::shared_ptr<IRValue>> args, IRType ret_type);
 
     bool HasReturnValue() const { return !name.empty(); }
     std::shared_ptr<IRValue> GetFunc() const { return func; }
-    const std::vector<std::shared_ptr<IRValue>>& GetArgs() const { return args; }
+    const std::vector<std::shared_ptr<IRValue>>& GetArgs() const { return operands; }
 
-    std::vector<std::shared_ptr<IRValue>> GetUses() const override;
-    bool ReplaceUse(const IRValue* old_value,
-                    std::shared_ptr<IRValue> new_value) override;
     bool HasSideEffect() const override { return true; }
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetType() const override { return ret_type; }
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION &&
+             static_cast<const IRInstruction*>(v)->inst_type == IRInstructionType::IR_INST_CALL;
+    }
   };
 
   // 基本块类
@@ -473,9 +467,13 @@ namespace IR {
     void AddInstruction(std::shared_ptr<IRInstruction> inst);
     void SetNext(std::shared_ptr<IRBasicBlock> next);
     void SetNext(std::shared_ptr<IRBasicBlock> next_1, std::shared_ptr<IRBasicBlock> next_2);
+    std::vector<IRBasicBlock*> GetSuccessors() const;
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetType() const override;
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_BASIC_BLOCK;
+    }
   };
 
   // 库函数声明类
@@ -490,6 +488,9 @@ namespace IR {
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetType() const override { return ret_type; }
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_FUNC_DECL;
+    }
   };
 
   // 函数类
@@ -506,6 +507,9 @@ namespace IR {
     std::string GetOperandName() const override;
     IRType GetRetType() const { return ret_type; }
     IRType GetType() const override { return ret_type; }
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_FUNCTION;
+    }
   };
 
   // 程序根类
@@ -518,17 +522,17 @@ namespace IR {
     std::string DumpText() const;
   };
 
-  // isa implementation for raw pointers
+  // isa implementation for raw pointers (using LLVM classof pattern)
   template <typename Target, typename Source>
   bool isa(const Source* val) {
     if (!val) return false;
-    return dynamic_cast<const Target*>(val) != nullptr;
+    return Target::classof(static_cast<const IRValue*>(val));
   }
 
   // isa implementation for shared_ptr
   template <typename Target, typename Source>
   bool isa(const std::shared_ptr<Source>& val) {
-    return std::dynamic_pointer_cast<Target>(val) != nullptr;
+    return isa<Target>(val.get());
   }
 
   // cast implementation for shared_ptr
@@ -542,18 +546,39 @@ namespace IR {
   template <typename Target, typename Source>
   Target* cast(Source* val) {
     assert(isa<Target>(val) && "Invalid cast!");
-    return const_cast<Target*>(dynamic_cast<const Target*>(val));
+    return const_cast<Target*>(static_cast<const Target*>(static_cast<const IRValue*>(val)));
   }
 
   template <typename Target, typename Source>
   const Target* cast(const Source* val) {
     assert(isa<Target>(val) && "Invalid cast!");
-    return dynamic_cast<const Target*>(val);
+    return static_cast<const Target*>(static_cast<const IRValue*>(val));
   }
 
   // dynamic_cast_ptr implementation for shared_ptr
   template <typename Target, typename Source>
   std::shared_ptr<Target> dynamic_cast_ptr(const std::shared_ptr<Source>& val) {
-    return std::dynamic_pointer_cast<Target>(val);
+    if (isa<Target>(val)) {
+      return std::static_pointer_cast<Target>(val);
+    }
+    return nullptr;
+  }
+
+  // dyn_cast implementation for raw pointers (returns nullptr on failure)
+  template <typename Target, typename Source>
+  const Target* dyn_cast(const Source* val) {
+    if (isa<Target>(val)) {
+      return static_cast<const Target*>(static_cast<const IRValue*>(val));
+    }
+    return nullptr;
+  }
+
+  template <typename Target, typename Source>
+  Target* dyn_cast(Source* val) {
+    if (isa<Target>(val)) {
+      return const_cast<Target*>(static_cast<const Target*>(static_cast<const IRValue*>(val)));
+    }
+    return nullptr;
   }
 }
+
