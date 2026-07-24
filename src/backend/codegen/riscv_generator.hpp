@@ -26,15 +26,11 @@
 
 namespace Back {
 
-enum class OptimizationLevel { O0, O1 };
-
 class RiscvGenerator {
 public:
-  explicit RiscvGenerator(const TargetConfig& cfg,
-                          OptimizationLevel opt = OptimizationLevel::O0)
+  explicit RiscvGenerator(const TargetConfig& cfg)
       : target_(cfg),
-        calling_convention_(cfg.is_64bit),
-        opt_level_(opt) {}
+        calling_convention_(cfg.is_64bit) {}
 
   // generate assembly for the whole program.
   void Generate(const IR::IRProgram& program);
@@ -44,7 +40,6 @@ private:
   RiscvTarget        target_;
   CallingConvention  calling_convention_;
   AsmEmitter         emitter_;
-  OptimizationLevel  opt_level_;
 
   // Liveness analysis result 
   std::unique_ptr<IR::Pass::LiveVarAnalysis> lva_;
@@ -62,6 +57,7 @@ private:
   int  s_reg_start_offset_  = 0;
   bool has_call_            = false;
   int  max_stack_arg_count_ = 0;
+  int  max_call_arg_count_  = 0;
 
   // ----- pipeline -----
   void Visit(const IR::IRProgram&    program);
@@ -86,6 +82,9 @@ private:
   // ----- Helpers -----
   int zero_init_label_counter_ = 0;
   int GetRegSize()  const { return target_.GetRegSize(); }
+  OptimizationLevel GetOptimizationLevel() const {
+    return target_.GetOptimizationLevel();
+  }
   int GetTypeSize(IR::IRType t) const {
     return (t == IR::IRType::IR_POINTER) ? target_.GetRegSize() : 4;
   }

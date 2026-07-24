@@ -23,6 +23,7 @@ public:
   StackLayout Build(const std::vector<std::string>& used_s_regs,
                     const std::unordered_map<std::string, int>& spill_offsets,
                     int max_stack_arg_count,
+                    int max_call_arg_count,
                     bool has_call,
                     int local_alloc_size,
                     int reg_size,
@@ -40,7 +41,9 @@ public:
     layout.param_overflow_size = max_stack_arg_count * reg_size;
 
     // 2. Argument buffer size (for calling other functions)
-    layout.arg_buffer_size = has_call ? 128 : 0;
+    // Register-bound arguments are staged here before being moved to a*/fa*.
+    // Size it for the largest call instead of assuming at most 16 arguments.
+    layout.arg_buffer_size = has_call ? max_call_arg_count * reg_size : 0;
 
     // 3. Saved RA size
     layout.ra_save_size = has_call ? reg_size : 0;

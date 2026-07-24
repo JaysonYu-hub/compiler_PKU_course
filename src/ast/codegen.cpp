@@ -1777,11 +1777,6 @@ std::string CodeGenerator::Visit(const ArrayInitializedVarDefAST& node) {
       context.scope->define(sym);
       return "";
     }
-    std::vector<std::string> init_vals(
-        layout.total_size, (element_type == IR::IRType::IR_FLOAT) ? "0.0" : "0");
-    int fill_index = 0;
-    FillFlatInitVals(*node.init_val_list, layout.dims, layout.sub_sizes, -1, fill_index, init_vals,
-                     [&](const ValueAST& elem) { return Generate(elem); });
 
     std::shared_ptr<IR::IRAlloc> alloc_inst = nullptr;
     if (context.current_block) {
@@ -1792,6 +1787,13 @@ std::string CodeGenerator::Visit(const ArrayInitializedVarDefAST& node) {
           std::make_shared<IR::IRZeroInit>(alloc_inst,
                                           alloc_inst->GetAllocSize()));
     }
+
+    std::vector<std::string> init_vals(
+        layout.total_size, (element_type == IR::IRType::IR_FLOAT) ? "0.0" : "0");
+    int fill_index = 0;
+    FillFlatInitVals(*node.init_val_list, layout.dims, layout.sub_sizes, -1, fill_index, init_vals,
+                     [&](const ValueAST& elem) { return Generate(elem); });
+
     for (int i = 0; i < layout.total_size; i++) {
       if ((init_vals[i] == "0" || init_vals[i] == "0.0") ||
           !context.current_block) {

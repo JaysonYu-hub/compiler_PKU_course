@@ -70,6 +70,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   used_s_regs_.clear();
   has_call_            = false;
   max_stack_arg_count_ = 0;
+  max_call_arg_count_  = 0;
 
   std::unordered_set<std::string> virtual_regs;
   for (const auto& block : func.blocks) {
@@ -177,6 +178,8 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
       if (IR::isa<IR::IRCall>(inst.get())) {
         const auto* ci = IR::cast<IR::IRCall>(inst.get());
         has_call_ = true;
+        max_call_arg_count_ = std::max(max_call_arg_count_,
+                                       static_cast<int>(ci->GetArgs().size()));
         std::vector<IR::IRType> arg_types;
         for (const auto& a : ci->GetArgs()) arg_types.push_back(a->GetType());
         int stack_args = 0;
@@ -210,9 +213,10 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
 
   StackLayoutBuilder builder;
   stack_layout_ = builder.Build(used_s_regs_, spill_offsets_,
-                                max_stack_arg_count_, has_call_,
+                                max_stack_arg_count_, max_call_arg_count_,
+                                has_call_,
                                 local_alloc_size,
-                                GetRegSize(), target_.GetPointerSize() == 8 ? 16 : 8);
+                                GetRegSize(), target_.GetStackAlign());
   current_stack_size_  = stack_layout_.total_size;
   param_overflow_size_ = stack_layout_.param_overflow_size;
   int arg_buf_size     = stack_layout_.arg_buffer_size;
@@ -248,38 +252,63 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   for (const auto& p : func.params) param_types.push_back(p->GetType());
   const auto param_locs = calling_convention_.AssignArgumentLocations(param_types);
 
+  // First preserve every register argument.  Do not initialize allocated
+  // registers yet: an allocated register for an earlier stack argument may be
+  // the physical a*/fa* register holding a later source argument.
   for (size_t i = 0; i < func.params.size(); ++i) {
     std::string pn  = func.params[i]->GetOperandName();
     int         stk = val_stack_map_.at(pn);
     const auto& loc = param_locs[i];
-    auto reg_it     = reg_map_.find(pn);
-    std::string p_reg = (reg_it != reg_map_.end()) ? reg_it->second : "";
 
     if (loc.kind == ArgumentLocation::Kind::FLOAT_REGISTER) {
       std::string src = "fa" + std::to_string(loc.index);
-      if (!p_reg.empty() && p_reg != src)
-        emitter_.EmitInst(p_reg[0] == 'f' ? "fmv.s" : "fmv.x.w", p_reg, src);
       emitter_.EmitFsw(src, stk);
     } else if (loc.kind == ArgumentLocation::Kind::INTEGER_REGISTER) {
       std::string src = "a" + std::to_string(loc.index);
-      if (!p_reg.empty() && p_reg != src)
-        emitter_.EmitInst(p_reg[0] == 'f' ? "fmv.w.x" : "mv", p_reg, src);
       if (GetTypeSize(func.params[i]->GetType()) == 8) emitter_.EmitSd(src, stk);
       else                                              emitter_.EmitSw(src, stk);
-    } else {
+    }
+  }
+
+  // Then copy incoming stack arguments into their local parameter slots.
+  for (size_t i = 0; i < func.params.size(); ++i) {
+    if (param_locs[i].kind != ArgumentLocation::Kind::STACK) continue;
+    int stk = val_stack_map_.at(func.params[i]->GetOperandName());
+    const auto& loc = param_locs[i];
+    {
       int caller_off = current_stack_size_ + GetRegSize() * loc.index;
-      std::string treg = !p_reg.empty() ? p_reg : "t5";
       if (func.params[i]->GetType() == IR::IRType::IR_FLOAT) {
-        std::string freg = treg[0] == 'f' ? treg : "ft5";
-        emitter_.EmitFlw(freg, caller_off);
-        emitter_.EmitFsw(freg, stk);
+        emitter_.EmitFlw("ft5", caller_off);
+        emitter_.EmitFsw("ft5", stk);
       } else if (GetTypeSize(func.params[i]->GetType()) == 8) {
-        emitter_.EmitLd(treg, caller_off);
-        emitter_.EmitSd(treg, stk);
+        emitter_.EmitLd("t5", caller_off);
+        emitter_.EmitSd("t5", stk);
       } else {
-        emitter_.EmitLw(treg, caller_off);
-        emitter_.EmitSw(treg, stk);
+        emitter_.EmitLw("t5", caller_off);
+        emitter_.EmitSw("t5", stk);
       }
+    }
+  }
+
+  // Finally populate parameter registers chosen by the allocator from the
+  // now-stable local copies.
+  for (size_t i = 0; i < func.params.size(); ++i) {
+    const std::string pn = func.params[i]->GetOperandName();
+    auto reg_it = reg_map_.find(pn);
+    if (reg_it == reg_map_.end() || reg_it->second.empty()) continue;
+    const std::string& p_reg = reg_it->second;
+    const int stk = val_stack_map_.at(pn);
+    if (func.params[i]->GetType() == IR::IRType::IR_FLOAT) {
+      if (p_reg[0] == 'f') {
+        emitter_.EmitFlw(p_reg, stk);
+      } else {
+        emitter_.EmitFlw("ft5", stk);
+        emitter_.EmitInst("fmv.x.w", p_reg, "ft5");
+      }
+    } else if (GetTypeSize(func.params[i]->GetType()) == 8) {
+      emitter_.EmitLd(p_reg, stk);
+    } else {
+      emitter_.EmitLw(p_reg, stk);
     }
   }
 
@@ -402,7 +431,7 @@ void Back::RiscvGenerator::Visit(const IR::IRReturn& inst) {
 
 // Mul strength reduction (O1 only)
 bool Back::RiscvGenerator::TryEmitMulStrengthReduction(const IR::IRBinary& inst) {
-  if (opt_level_ != OptimizationLevel::O1 ||
+  if (GetOptimizationLevel() != OptimizationLevel::O1 ||
       inst.GetOp() != IR::IRBinaryOp::MUL ||
       inst.GetOperandType() != IR::IRType::IR_INT32) return false;
 
@@ -638,16 +667,17 @@ void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
   for (const auto& a : args) arg_types.push_back(a->GetType());
   const auto locs = calling_convention_.AssignArgumentLocations(arg_types);
   int arg_buf = param_overflow_size_;
+  const int arg_slot_size = GetRegSize();
 
   for (size_t i = 0; i < args.size(); ++i) {
     const auto& loc = locs[i];
     if (loc.kind == ArgumentLocation::Kind::FLOAT_REGISTER) {
       LoadValueToFReg(args[i].get(), "ft5");
-      emitter_.EmitFsw("ft5", arg_buf + (int)i * 8);
+      emitter_.EmitFsw("ft5", arg_buf + (int)i * arg_slot_size);
     } else if (loc.kind == ArgumentLocation::Kind::INTEGER_REGISTER) {
       LoadValueToReg(args[i].get(), "t5");
-      if (GetTypeSize(args[i]->GetType()) == 8) emitter_.EmitSd("t5", arg_buf + (int)i * 8);
-      else                                      emitter_.EmitSw("t5", arg_buf + (int)i * 8);
+      if (GetTypeSize(args[i]->GetType()) == 8) emitter_.EmitSd("t5", arg_buf + (int)i * arg_slot_size);
+      else                                      emitter_.EmitSw("t5", arg_buf + (int)i * arg_slot_size);
     } else {
       int param_off = GetRegSize() * loc.index;
       if (args[i]->GetType() == IR::IRType::IR_FLOAT) {
@@ -666,12 +696,12 @@ void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
   for (size_t i = 0; i < args.size(); ++i) {
     const auto& loc = locs[i];
     if (loc.kind == ArgumentLocation::Kind::FLOAT_REGISTER)
-      emitter_.EmitFlw("fa" + std::to_string(loc.index), arg_buf + (int)i * 8);
+      emitter_.EmitFlw("fa" + std::to_string(loc.index), arg_buf + (int)i * arg_slot_size);
     else if (loc.kind == ArgumentLocation::Kind::INTEGER_REGISTER) {
       if (GetTypeSize(args[i]->GetType()) == 8)
-        emitter_.EmitLd("a" + std::to_string(loc.index), arg_buf + (int)i * 8);
+        emitter_.EmitLd("a" + std::to_string(loc.index), arg_buf + (int)i * arg_slot_size);
       else
-        emitter_.EmitLw("a" + std::to_string(loc.index), arg_buf + (int)i * 8);
+        emitter_.EmitLw("a" + std::to_string(loc.index), arg_buf + (int)i * arg_slot_size);
     }
   }
 
@@ -686,7 +716,7 @@ void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
 void Back::RiscvGenerator::EmitIndexScale(int elem_size) {
   if (elem_size == 1) return;
   unsigned shift = 0;
-  if (opt_level_ == OptimizationLevel::O1 && elem_size > 0 &&
+  if (GetOptimizationLevel() == OptimizationLevel::O1 && elem_size > 0 &&
       GetPowerOfTwoShift(static_cast<uint64_t>(elem_size), shift))
     emitter_.EmitInst("slli", "t6", "t6", std::to_string(shift));
   else {
@@ -696,16 +726,18 @@ void Back::RiscvGenerator::EmitIndexScale(int elem_size) {
 }
 
 void Back::RiscvGenerator::Visit(const IR::IRGetElemPtr& inst) {
-  LoadAddressToReg(inst.GetArr().get(),   "t5");
   LoadValueToReg  (inst.GetIndex().get(), "t6");
+  // Loading t6 from a large stack offset uses t5 as an address scratch.
+  // Materialize the base afterwards so it cannot be clobbered.
+  LoadAddressToReg(inst.GetArr().get(),   "t5");
   EmitIndexScale(inst.GetElemSize());
   emitter_.EmitInst("add", "t5", "t5", "t6");
   StoreRegToVal(&inst, "t5");
 }
 
 void Back::RiscvGenerator::Visit(const IR::IRGetPtr& inst) {
-  LoadValueToReg(inst.GetPtr().get(),   "t5");
   LoadValueToReg(inst.GetIndex().get(), "t6");
+  LoadValueToReg(inst.GetPtr().get(),   "t5");
   EmitIndexScale(inst.GetElemSize());
   emitter_.EmitInst("add", "t5", "t5", "t6");
   StoreRegToVal(&inst, "t5");

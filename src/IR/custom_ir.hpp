@@ -23,6 +23,7 @@ namespace IR {
     IR_SYMBOL,
     IR_GLOBAL_ALLOC,
     IR_FUNC_PARAM,
+    IR_BLOCK_PARAM,
     IR_INSTRUCTION,
     IR_BASIC_BLOCK,
     IR_FUNC_DECL,
@@ -119,8 +120,7 @@ namespace IR {
              t == IRInstructionType::IR_INST_ALLOC ||
              t == IRInstructionType::IR_INST_LOAD ||
              t == IRInstructionType::IR_INST_GETELEMPTR ||
-             t == IRInstructionType::IR_INST_GETPTR ||
-             t == IRInstructionType::IR_INST_CALL;
+             t == IRInstructionType::IR_INST_GETPTR;
     }
   };
 
@@ -218,6 +218,25 @@ namespace IR {
     IRType GetType() const override { return type; }
     static bool classof(const IRValue* v) {
       return v && v->GetKind() == IRValueKind::IR_FUNC_PARAM;
+    }
+  };
+
+  // A basic-block parameter represents the value supplied by an incoming CFG
+  // edge.  It is the block-argument equivalent of a phi result.
+  class IRBlockParam : public IRValue {
+  private:
+    std::string name;
+    IRType type;
+  public:
+    IRBlockParam(std::string name, IRType type)
+      : IRValue(IRValueKind::IR_BLOCK_PARAM), name(std::move(name)), type(type) {}
+
+    const std::string& GetName() const { return name; }
+    std::string DumpText() const override;
+    std::string GetOperandName() const override { return name; }
+    IRType GetType() const override { return type; }
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_BLOCK_PARAM;
     }
   };
 
@@ -386,9 +405,14 @@ namespace IR {
 
   // jump 指令类
   class IRJump : public IRInstruction {
+  private:
+    std::shared_ptr<IRValue> target;
   public:
-    explicit IRJump(std::shared_ptr<IRValue> target);
-    std::shared_ptr<IRValue> GetTarget() const { return operands[0]; }
+    explicit IRJump(std::shared_ptr<IRValue> target,
+                    std::vector<std::shared_ptr<IRValue>> args = {});
+    std::shared_ptr<IRValue> GetTarget() const { return target; }
+    const std::vector<std::shared_ptr<IRValue>>& GetArgs() const { return operands; }
+    void SetArgs(std::vector<std::shared_ptr<IRValue>> args);
     bool HasSideEffect() const override { return true; }
     std::string DumpText() const override;
     static bool classof(const IRValue* v) {
@@ -402,12 +426,21 @@ namespace IR {
   private:
     std::shared_ptr<IRValue> then_target;
     std::shared_ptr<IRValue> else_target;
+    size_t then_arg_count = 0;
   public:
-    IRBranch(std::shared_ptr<IRValue> cond, std::shared_ptr<IRValue> then_target, std::shared_ptr<IRValue> else_target);
+    IRBranch(std::shared_ptr<IRValue> cond,
+             std::shared_ptr<IRValue> then_target,
+             std::shared_ptr<IRValue> else_target,
+             std::vector<std::shared_ptr<IRValue>> then_args = {},
+             std::vector<std::shared_ptr<IRValue>> else_args = {});
 
     std::shared_ptr<IRValue> GetCond() const { return operands[0]; }
     std::shared_ptr<IRValue> GetThenTarget() const { return then_target; }
     std::shared_ptr<IRValue> GetElseTarget() const { return else_target; }
+    std::vector<std::shared_ptr<IRValue>> GetThenArgs() const;
+    std::vector<std::shared_ptr<IRValue>> GetElseArgs() const;
+    void SetThenArgs(std::vector<std::shared_ptr<IRValue>> args);
+    void SetElseArgs(std::vector<std::shared_ptr<IRValue>> args);
 
     bool HasSideEffect() const override { return true; }
     std::string DumpText() const override;
@@ -458,6 +491,7 @@ namespace IR {
   class IRBasicBlock : public IRValue {
   public:
     std::string name;
+    std::vector<std::shared_ptr<IRBlockParam>> params;
     std::vector<std::shared_ptr<IRInstruction>> insts;
     std::shared_ptr<IRBasicBlock> next_1;
     std::shared_ptr<IRBasicBlock> next_2;
@@ -465,6 +499,11 @@ namespace IR {
     explicit IRBasicBlock(std::string name) : IRValue(IRValueKind::IR_BASIC_BLOCK), name(std::move(name)) {}
 
     void AddInstruction(std::shared_ptr<IRInstruction> inst);
+    std::shared_ptr<IRBlockParam> AddParam(std::string name, IRType type);
+    const std::vector<std::shared_ptr<IRBlockParam>>& GetParams() const {
+      return params;
+    }
+    bool RemoveInstruction(const IRInstruction* inst);
     void SetNext(std::shared_ptr<IRBasicBlock> next);
     void SetNext(std::shared_ptr<IRBasicBlock> next_1, std::shared_ptr<IRBasicBlock> next_2);
     std::vector<IRBasicBlock*> GetSuccessors() const;
@@ -506,6 +545,9 @@ namespace IR {
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetRetType() const { return ret_type; }
+    std::vector<IRBasicBlock*> GetPredecessors(const IRBasicBlock* block) const;
+    bool ReplaceAllUses(const IRValue* old_value,
+                        std::shared_ptr<IRValue> new_value);
     IRType GetType() const override { return ret_type; }
     static bool classof(const IRValue* v) {
       return v && v->GetKind() == IRValueKind::IR_FUNCTION;

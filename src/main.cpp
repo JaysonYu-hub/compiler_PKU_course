@@ -21,14 +21,13 @@ int main(int argc, const char *argv[]) {
   string output;
   Back::TargetConfig target_config;
   target_config.is_64bit = true;
-  Back::OptimizationLevel optimization_level = Back::OptimizationLevel::O0;
 
   for (int i = 1; i < argc; i++) {
     string arg = argv[i];
     if (arg == "-S" || arg == "-riscv" || arg == "-perf") {
       mode = "-riscv";
       if (arg == "-riscv" || arg == "-perf") {
-        target_config.is_64bit = false;
+        target_config.Set64Bit(false);
       }
     } else if (arg == "-koopa") {
       mode = "-koopa";
@@ -36,9 +35,9 @@ int main(int argc, const char *argv[]) {
       assert(i + 1 < argc);
       output = argv[++i];
     } else if (arg == "-O0") {
-      optimization_level = Back::OptimizationLevel::O0;
+      target_config.optimization_level = Back::OptimizationLevel::O0;
     } else if (arg == "-O1") {
-      optimization_level = Back::OptimizationLevel::O1;
+      target_config.optimization_level = Back::OptimizationLevel::O1;
     } else {
       input = arg;
     }
@@ -63,8 +62,7 @@ int main(int argc, const char *argv[]) {
     ofstream file(output);
     file << context.ir_program->DumpText() << endl;
   } else if (mode == "-riscv") {
-    // 使用重构 of RiscvGenerator 直接从内存 IR 生成汇编
-    Back::RiscvGenerator riscv_gen(target_config, optimization_level);
+    Back::RiscvGenerator riscv_gen(target_config);
     ofstream file(output);
     streambuf *coutbuf = cout.rdbuf();
     cout.rdbuf(file.rdbuf());

@@ -1,4 +1,5 @@
 #include "custom_ir.hpp"
+#include <algorithm>
 #include <cassert>
 #include <iomanip>
 #include <limits>
@@ -207,6 +208,10 @@ namespace IR {
     return name;
   }
 
+  std::string IRBlockParam::DumpText() const {
+    return name + ": " + TypeToString(type);
+  }
+
   // IRInstruction
   std::string IRInstruction::GetOperandName() const {
     assert(false && "Void instruction cannot be used as an operand");
@@ -376,25 +381,91 @@ namespace IR {
   }
 
   // IRJump
-  IRJump::IRJump(std::shared_ptr<IRValue> target)
-    : IRInstruction(IRInstructionType::IR_INST_JUMP) {
-    operands = {std::move(target)};
-    assert(operands[0] != nullptr);
+  IRJump::IRJump(std::shared_ptr<IRValue> target,
+                 std::vector<std::shared_ptr<IRValue>> args)
+    : IRInstruction(IRInstructionType::IR_INST_JUMP),
+      target(std::move(target)) {
+    operands = std::move(args);
+    assert(this->target != nullptr);
+  }
+
+  void IRJump::SetArgs(std::vector<std::shared_ptr<IRValue>> args) {
+    operands = std::move(args);
   }
 
   std::string IRJump::DumpText() const {
-    return "jump " + operands[0]->GetOperandName();
+    std::string text = "jump " + target->GetOperandName();
+    if (!operands.empty()) {
+      text += "(";
+      for (size_t i = 0; i < operands.size(); ++i) {
+        if (i != 0) text += ", ";
+        text += operands[i]->GetOperandName();
+      }
+      text += ")";
+    }
+    return text;
   }
 
   // IRBranch
-  IRBranch::IRBranch(std::shared_ptr<IRValue> cond, std::shared_ptr<IRValue> then_target, std::shared_ptr<IRValue> else_target)
-    : IRInstruction(IRInstructionType::IR_INST_BR), then_target(std::move(then_target)), else_target(std::move(else_target)) {
-    operands = {std::move(cond)};
+  IRBranch::IRBranch(std::shared_ptr<IRValue> cond,
+                     std::shared_ptr<IRValue> then_target,
+                     std::shared_ptr<IRValue> else_target,
+                     std::vector<std::shared_ptr<IRValue>> then_args,
+                     std::vector<std::shared_ptr<IRValue>> else_args)
+    : IRInstruction(IRInstructionType::IR_INST_BR),
+      then_target(std::move(then_target)),
+      else_target(std::move(else_target)),
+      then_arg_count(then_args.size()) {
+    operands.reserve(1 + then_args.size() + else_args.size());
+    operands.push_back(std::move(cond));
+    operands.insert(operands.end(), then_args.begin(), then_args.end());
+    operands.insert(operands.end(), else_args.begin(), else_args.end());
     assert(operands[0] != nullptr && this->then_target != nullptr && this->else_target != nullptr);
   }
 
+  std::vector<std::shared_ptr<IRValue>> IRBranch::GetThenArgs() const {
+    return {operands.begin() + 1, operands.begin() + 1 + then_arg_count};
+  }
+
+  std::vector<std::shared_ptr<IRValue>> IRBranch::GetElseArgs() const {
+    return {operands.begin() + 1 + then_arg_count, operands.end()};
+  }
+
+  void IRBranch::SetThenArgs(std::vector<std::shared_ptr<IRValue>> args) {
+    auto else_args = GetElseArgs();
+    auto cond = operands[0];
+    then_arg_count = args.size();
+    operands.clear();
+    operands.reserve(1 + args.size() + else_args.size());
+    operands.push_back(std::move(cond));
+    operands.insert(operands.end(), args.begin(), args.end());
+    operands.insert(operands.end(), else_args.begin(), else_args.end());
+  }
+
+  void IRBranch::SetElseArgs(std::vector<std::shared_ptr<IRValue>> args) {
+    operands.erase(operands.begin() + 1 + then_arg_count, operands.end());
+    operands.insert(operands.end(), args.begin(), args.end());
+  }
+
+  namespace {
+  std::string FormatBlockTarget(
+      const std::shared_ptr<IRValue>& target,
+      const std::vector<std::shared_ptr<IRValue>>& args) {
+    std::string text = target->GetOperandName();
+    if (args.empty()) return text;
+    text += "(";
+    for (size_t i = 0; i < args.size(); ++i) {
+      if (i != 0) text += ", ";
+      text += args[i]->GetOperandName();
+    }
+    return text + ")";
+  }
+  }
+
   std::string IRBranch::DumpText() const {
-    return "br " + operands[0]->GetOperandName() + ", " + then_target->GetOperandName() + ", " + else_target->GetOperandName();
+    return "br " + operands[0]->GetOperandName() + ", " +
+           FormatBlockTarget(then_target, GetThenArgs()) + ", " +
+           FormatBlockTarget(else_target, GetElseArgs());
   }
 
   // IRReturn
@@ -447,6 +518,21 @@ namespace IR {
     insts.push_back(std::move(inst));
   }
 
+  std::shared_ptr<IRBlockParam> IRBasicBlock::AddParam(std::string name,
+                                                       IRType type) {
+    auto param = std::make_shared<IRBlockParam>(std::move(name), type);
+    params.push_back(param);
+    return param;
+  }
+
+  bool IRBasicBlock::RemoveInstruction(const IRInstruction* inst) {
+    auto it = std::find_if(insts.begin(), insts.end(),
+                           [inst](const auto& item) { return item.get() == inst; });
+    if (it == insts.end()) return false;
+    insts.erase(it);
+    return true;
+  }
+
   void IRBasicBlock::SetNext(std::shared_ptr<IRBasicBlock> next) {
     next_1 = std::move(next);
   }
@@ -472,7 +558,16 @@ namespace IR {
   }
 
   std::string IRBasicBlock::DumpText() const {
-    std::string text = name + ":\n";
+    std::string text = name;
+    if (!params.empty()) {
+      text += "(";
+      for (size_t i = 0; i < params.size(); ++i) {
+        if (i != 0) text += ", ";
+        text += params[i]->DumpText();
+      }
+      text += ")";
+    }
+    text += ":\n";
     for (const auto& inst : insts) {
       text += "  " + inst->DumpText() + "\n";
     }
@@ -556,6 +651,33 @@ namespace IR {
 
   std::string IRFunction::GetOperandName() const {
     return "@" + name;
+  }
+
+  std::vector<IRBasicBlock*> IRFunction::GetPredecessors(
+      const IRBasicBlock* block) const {
+    std::vector<IRBasicBlock*> predecessors;
+    if (!block) return predecessors;
+    for (const auto& candidate : blocks) {
+      for (auto* successor : candidate->GetSuccessors()) {
+        if (successor == block) {
+          predecessors.push_back(candidate.get());
+          break;
+        }
+      }
+    }
+    return predecessors;
+  }
+
+  bool IRFunction::ReplaceAllUses(const IRValue* old_value,
+                                  std::shared_ptr<IRValue> new_value) {
+    if (!old_value || !new_value || old_value == new_value.get()) return false;
+    bool changed = false;
+    for (const auto& block : blocks) {
+      for (const auto& inst : block->insts) {
+        changed |= inst->ReplaceUse(old_value, new_value);
+      }
+    }
+    return changed;
   }
 
   // IRProgram

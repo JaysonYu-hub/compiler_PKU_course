@@ -18,14 +18,12 @@ void LiveVarAnalysis::Analyze(IR::IRProgram *program) {
         hard_code_block(*block, var_gen, var_kill);
         
         live_out[unique_block_name].clear();
-        // for S in successors(B): LIVEOUT[B] = LIVEOUT[B].union(LIVEIN[S])
-        if ((*block)->next_1) {
-          std::string succ1_name = func_name + ":" + (*block)->next_1->name;
-          live_out[unique_block_name].insert(live_in[succ1_name].begin(), live_in[succ1_name].end());
-          if ((*block)->next_2) {
-            std::string succ2_name = func_name + ":" + (*block)->next_2->name;
-            live_out[unique_block_name].insert(live_in[succ2_name].begin(), live_in[succ2_name].end());
-          }
+        // Derive CFG edges from the terminator.  Keeping a second, manually
+        // maintained next_1/next_2 graph can silently diverge from jump/br.
+        for (const auto* successor : (*block)->GetSuccessors()) {
+          std::string successor_name = func_name + ":" + successor->name;
+          live_out[unique_block_name].insert(live_in[successor_name].begin(),
+                                             live_in[successor_name].end());
         }
         
         // LIVEOUT[B] - KILL[B]
