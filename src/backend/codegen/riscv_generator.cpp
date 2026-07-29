@@ -120,7 +120,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   for (const auto& [v, off] : spill_offsets_)
     if (off + GetRegSize() > spill_size) spill_size = off + GetRegSize();
 
-  int offset = spill_size;
+  int offset = AlignUp(spill_size, GetRegSize());
   s_reg_start_offset_ = offset;
   offset += (int)used_s_regs_.size() * GetRegSize();
 
@@ -131,10 +131,11 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
         if (IR::isa<IR::IRAlloc>(inst.get())) {
           const auto* al = IR::cast<IR::IRAlloc>(inst.get());
           local_allocs_.insert(ni->GetName());
-          val_stack_map_[ni->GetName()] = offset;
           val_type_map_[ni->GetName()]  = al->GetAllocatedType();
           int sz = al->IsArray() ? al->GetAllocSize() : GetTypeSize(al->GetAllocatedType());
-          offset += sz;
+          int alignment = al->IsArray() ? 4 : GetTypeAlignment(al->GetAllocatedType());
+          val_stack_map_[ni->GetName()] =
+              ReserveStackSlot(offset, sz, alignment);
         }
       }
     }
@@ -146,8 +147,9 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     if (spill_offsets_.count(pn)) {
       val_stack_map_[pn] = spill_offsets_[pn];
     } else {
-      val_stack_map_[pn] = offset;
-      offset += GetTypeSize(func.params[i]->GetType());
+      const IR::IRType type = func.params[i]->GetType();
+      val_stack_map_[pn] =
+          ReserveStackSlot(offset, GetTypeSize(type), GetTypeAlignment(type));
     }
   }
 
@@ -197,15 +199,17 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
         if (ci->HasReturnValue()) { has_retval = true; val_name = ci->GetOperandName(); }
       }
       if (has_retval && !val_stack_map_.count(val_name)) {
-        val_stack_map_[val_name] = offset;
+        IR::IRType value_type;
         if (IR::isa<IR::IRAlloc>(inst.get())) {
           const auto* al = IR::cast<IR::IRAlloc>(inst.get());
-          val_type_map_[val_name] = al->GetAllocatedType();
-          offset += GetTypeSize(al->GetAllocatedType());
+          value_type = al->GetAllocatedType();
         } else {
-          val_type_map_[val_name] = inst->GetType();
-          offset += GetTypeSize(inst->GetType());
+          value_type = inst->GetType();
         }
+        val_type_map_[val_name] = value_type;
+        val_stack_map_[val_name] =
+            ReserveStackSlot(offset, GetTypeSize(value_type),
+                             GetTypeAlignment(value_type));
       }
     }
   }
@@ -214,8 +218,9 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     for (const auto& param : block->params) {
       const std::string name = param->GetOperandName();
       val_type_map_[name] = param->GetType();
-      val_stack_map_[name] = offset;
-      offset += GetTypeSize(param->GetType());
+      val_stack_map_[name] =
+          ReserveStackSlot(offset, GetTypeSize(param->GetType()),
+                           GetTypeAlignment(param->GetType()));
     }
     if (block->insts.empty()) continue;
     if (auto* jump = IR::dyn_cast<IR::IRJump>(block->insts.back().get())) {

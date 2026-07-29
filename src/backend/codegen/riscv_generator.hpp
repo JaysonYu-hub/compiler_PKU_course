@@ -91,6 +91,19 @@ private:
   int GetTypeSize(IR::IRType t) const {
     return (t == IR::IRType::IR_POINTER) ? target_.GetRegSize() : 4;
   }
+  int GetTypeAlignment(IR::IRType t) const {
+    return (t == IR::IRType::IR_POINTER) ? target_.GetRegSize() : 4;
+  }
+  static int AlignUp(int value, int alignment) {
+    assert(alignment > 0);
+    return (value + alignment - 1) / alignment * alignment;
+  }
+  int ReserveStackSlot(int& offset, int size, int alignment) const {
+    offset = AlignUp(offset, alignment);
+    const int slot = offset;
+    offset += size;
+    return slot;
+  }
 
   std::string StripAt(const std::string& name);
   std::string StripPercent(const std::string& name);

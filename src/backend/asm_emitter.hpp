@@ -1,6 +1,7 @@
 #pragma once
 // AsmEmitter: low-level RISC-V assembly output.
 
+#include <cassert>
 #include <iostream>
 #include <string>
 
@@ -33,21 +34,27 @@ public:
 
   // ---------- memory instructions (handle large offsets) ----------
   void EmitLw(const std::string& reg, int offset, const std::string& base = "sp") {
+    assert(base != "sp" || offset % 4 == 0);
     EmitMem32("lw", reg, offset, base);
   }
   void EmitSw(const std::string& reg, int offset, const std::string& base = "sp") {
+    assert(base != "sp" || offset % 4 == 0);
     EmitMemStore32("sw", reg, offset, base);
   }
   void EmitLd(const std::string& reg, int offset, const std::string& base = "sp") {
+    assert(base != "sp" || offset % 8 == 0);
     EmitMem64("ld", reg, offset, base);
   }
   void EmitSd(const std::string& reg, int offset, const std::string& base = "sp") {
+    assert(base != "sp" || offset % 8 == 0);
     EmitMemStore64("sd", reg, offset, base);
   }
   void EmitFlw(const std::string& reg, int offset, const std::string& base = "sp") {
+    assert(base != "sp" || offset % 4 == 0);
     EmitMemFloat("flw", reg, offset, base);
   }
   void EmitFsw(const std::string& reg, int offset, const std::string& base = "sp") {
+    assert(base != "sp" || offset % 4 == 0);
     EmitMemFloatStore("fsw", reg, offset, base);
   }
 
