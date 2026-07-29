@@ -59,6 +59,8 @@ private:
   bool has_call_            = false;
   int  max_stack_arg_count_ = 0;
   int  max_call_arg_count_  = 0;
+  int  max_edge_arg_count_  = 0;
+  int  edge_label_counter_  = 0;
 
   // ----- pipeline -----
   void Visit(const IR::IRProgram&    program);
@@ -98,6 +100,8 @@ private:
   void LoadValueToFReg (const IR::IRValue* val, const std::string& reg);
   void StoreFRegToVal  (const IR::IRValue* val, const std::string& reg);
   void LoadAddressToReg(const IR::IRValue* val, const std::string& reg);
+  void EmitEdgeCopies(const std::vector<std::shared_ptr<IR::IRValue>>& args,
+                      const IR::IRBasicBlock& target);
 
   void StoreRegToValByName (const std::string& name, const std::string& reg, IR::IRType t);
   void LoadValueToRegByName(const std::string& name, const std::string& reg, IR::IRType t);

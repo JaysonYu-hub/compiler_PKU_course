@@ -71,6 +71,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   has_call_            = false;
   max_stack_arg_count_ = 0;
   max_call_arg_count_  = 0;
+  max_edge_arg_count_  = 0;
 
   std::unordered_set<std::string> virtual_regs;
   for (const auto& block : func.blocks) {
@@ -209,9 +210,30 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     }
   }
 
+  for (const auto& block : func.blocks) {
+    for (const auto& param : block->params) {
+      const std::string name = param->GetOperandName();
+      val_type_map_[name] = param->GetType();
+      val_stack_map_[name] = offset;
+      offset += GetTypeSize(param->GetType());
+    }
+    if (block->insts.empty()) continue;
+    if (auto* jump = IR::dyn_cast<IR::IRJump>(block->insts.back().get())) {
+      max_edge_arg_count_ = std::max(max_edge_arg_count_,
+                                      static_cast<int>(jump->GetArgs().size()));
+    } else if (auto* branch = IR::dyn_cast<IR::IRBranch>(block->insts.back().get())) {
+      max_edge_arg_count_ = std::max(
+          max_edge_arg_count_,
+          static_cast<int>(std::max(branch->GetThenArgs().size(),
+                                    branch->GetElseArgs().size())));
+    }
+  }
+
   int local_alloc_size = offset - spill_size - (int)used_s_regs_.size() * GetRegSize();
 
   StackLayoutBuilder builder;
+  // 基本块参数和call的共享空间
+  max_call_arg_count_ = std::max(max_call_arg_count_, max_edge_arg_count_);
   stack_layout_ = builder.Build(used_s_regs_, spill_offsets_,
                                 max_stack_arg_count_, max_call_arg_count_,
                                 has_call_,
@@ -652,13 +674,93 @@ void Back::RiscvGenerator::Visit(const IR::IRLoad& inst) {
 }
 
 void Back::RiscvGenerator::Visit(const IR::IRJump& inst) {
+  auto* target = IR::dyn_cast<IR::IRBasicBlock>(inst.GetTarget().get());
+  assert(target && "jump target is not a basic block");
+  EmitEdgeCopies(inst.GetArgs(), *target);
   emitter_.EmitInst("j", StripPercent(inst.GetTarget()->GetOperandName()));
 }
-
 void Back::RiscvGenerator::Visit(const IR::IRBranch& inst) {
+  auto* then_target = IR::dyn_cast<IR::IRBasicBlock>(inst.GetThenTarget().get());
+  auto* else_target = IR::dyn_cast<IR::IRBasicBlock>(inst.GetElseTarget().get());
+  assert(then_target && else_target && "branch targets must be basic blocks");
   LoadValueToReg(inst.GetCond().get(), "t5");
-  emitter_.EmitInst("bnez", "t5", StripPercent(inst.GetThenTarget()->GetOperandName()));
-  emitter_.EmitInst("j",           StripPercent(inst.GetElseTarget()->GetOperandName()));
+  const auto then_args = inst.GetThenArgs();
+  const auto else_args = inst.GetElseArgs();
+  if (then_args.empty() && else_args.empty()) {
+    emitter_.EmitInst("bnez", "t5", StripPercent(inst.GetThenTarget()->GetOperandName()));
+    emitter_.EmitInst("j", StripPercent(inst.GetElseTarget()->GetOperandName()));
+    return;
+  }
+
+  const std::string then_copy = ".Ledge_then_" + std::to_string(edge_label_counter_++);
+  emitter_.EmitInst("bnez", "t5", then_copy);
+  EmitEdgeCopies(else_args, *else_target);
+  emitter_.EmitInst("j", StripPercent(inst.GetElseTarget()->GetOperandName()));
+  emitter_.EmitLabel(then_copy);
+  EmitEdgeCopies(then_args, *then_target);
+  emitter_.EmitInst("j", StripPercent(inst.GetThenTarget()->GetOperandName()));
+}
+void Back::RiscvGenerator::EmitEdgeCopies(
+    const std::vector<std::shared_ptr<IR::IRValue>>& args,
+    const IR::IRBasicBlock& target) {
+  assert(args.size() == target.params.size() && "block argument arity mismatch");
+  const int buffer = param_overflow_size_;
+  const int slot_size = GetRegSize();
+
+  bool needs_staging = false;
+  for (size_t i = 0; i < args.size(); ++i) {
+    for (size_t j = 0; j < target.params.size(); ++j) {
+      if (i != j && args[i].get() == target.params[j].get()) {
+        needs_staging = true;
+        break;
+      }
+    }
+  }
+
+  if (!needs_staging) {
+    for (size_t i = 0; i < args.size(); ++i) {
+      if (args[i].get() == target.params[i].get()) continue;
+      const int destination = val_stack_map_.at(target.params[i]->GetOperandName());
+      if (target.params[i]->GetType() == IR::IRType::IR_FLOAT) {
+        LoadValueToFReg(args[i].get(), "ft5");
+        emitter_.EmitFsw("ft5", destination);
+      } else {
+        LoadValueToReg(args[i].get(), "t5");
+        if (GetTypeSize(target.params[i]->GetType()) == 8)
+          emitter_.EmitSd("t5", destination);
+        else
+          emitter_.EmitSw("t5", destination);
+      }
+    }
+    return;
+  }
+
+  for (size_t i = 0; i < args.size(); ++i) {
+    if (args[i]->GetType() == IR::IRType::IR_FLOAT) {
+      LoadValueToFReg(args[i].get(), "ft5");
+      emitter_.EmitFsw("ft5", buffer + static_cast<int>(i) * slot_size);
+    } else {
+      LoadValueToReg(args[i].get(), "t5");
+      if (GetTypeSize(args[i]->GetType()) == 8)
+        emitter_.EmitSd("t5", buffer + static_cast<int>(i) * slot_size);
+      else
+        emitter_.EmitSw("t5", buffer + static_cast<int>(i) * slot_size);
+    }
+  }
+  for (size_t i = 0; i < args.size(); ++i) {
+    const auto& param = target.params[i];
+    const int source = buffer + static_cast<int>(i) * slot_size;
+    if (param->GetType() == IR::IRType::IR_FLOAT) {
+      emitter_.EmitFlw("ft5", source);
+      StoreFRegToVal(param.get(), "ft5");
+    } else if (GetTypeSize(param->GetType()) == 8) {
+      emitter_.EmitLd("t5", source);
+      StoreRegToVal(param.get(), "t5");
+    } else {
+      emitter_.EmitLw("t5", source);
+      StoreRegToVal(param.get(), "t5");
+    }
+  }
 }
 
 void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
