@@ -220,9 +220,8 @@ namespace IR {
       return v && v->GetKind() == IRValueKind::IR_FUNC_PARAM;
     }
   };
-
-  // A basic-block parameter represents the value supplied by an incoming CFG
-  // edge.  It is the block-argument equivalent of a phi result.
+ 
+  // 基本块参数
   class IRBlockParam : public IRValue {
   private:
     std::string name;

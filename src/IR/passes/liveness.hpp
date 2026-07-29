@@ -32,7 +32,7 @@ public:
   void Analyze(IR::IRProgram *program);
 
 private:
-  void hard_code_block(std::shared_ptr<IR::IRBasicBlock> block, std::unordered_set<std::string> &var_gen, std::unordered_set<std::string> &var_kill);
+  void CompuateBlockGenKill(std::shared_ptr<IR::IRBasicBlock> block, std::unordered_set<std::string> &var_gen, std::unordered_set<std::string> &var_kill);
 };
 
 }

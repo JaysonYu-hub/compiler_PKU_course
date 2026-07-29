@@ -15,11 +15,9 @@ void LiveVarAnalysis::Analyze(IR::IRProgram *program) {
         auto var_kill = std::unordered_set<std::string>();
         auto var_gen = std::unordered_set<std::string>();
         
-        hard_code_block(*block, var_gen, var_kill);
+        CompuateBlockGenKill(*block, var_gen, var_kill);
         
         live_out[unique_block_name].clear();
-        // Derive CFG edges from the terminator.  Keeping a second, manually
-        // maintained next_1/next_2 graph can silently diverge from jump/br.
         for (const auto* successor : (*block)->GetSuccessors()) {
           std::string successor_name = func_name + ":" + successor->name;
           live_out[unique_block_name].insert(live_in[successor_name].begin(),
@@ -58,6 +56,8 @@ void LiveVarAnalysis::Analyze(IR::IRProgram *program) {
           if (call->HasReturnValue()) {
             current_live.insert(call->GetOperandName());
           }
+        } else if (IR::isa<IR::IRBlockParam>(value)) {
+          current_live.insert(value->GetOperandName());
         }
       };
 
@@ -124,6 +124,13 @@ void LiveVarAnalysis::Analyze(IR::IRProgram *program) {
             case IR::IRInstructionType::IR_INST_BR: {
               auto br = IR::cast<IR::IRBranch>(inst);
               try_add_gen(br->GetCond());
+              for (const auto& arg : br->GetThenArgs()) try_add_gen(arg);
+              for (const auto& arg : br->GetElseArgs()) try_add_gen(arg);
+              break;
+            }
+            case IR::IRInstructionType::IR_INST_JUMP: {
+              auto jump = IR::cast<IR::IRJump>(inst);
+              for (const auto& arg : jump->GetArgs()) try_add_gen(arg);
               break;
             }
             case IR::IRInstructionType::IR_INST_RET: {
@@ -141,6 +148,11 @@ void LiveVarAnalysis::Analyze(IR::IRProgram *program) {
           }
         }
         live_in_inst[inst] = current_live;
+      }
+
+      // 从live里除去 block_param
+      for (const auto& param : (*func)->params) {
+        current_live.erase(param->GetOperandName());
       }
     }
   }
@@ -176,7 +188,7 @@ void LiveVarAnalysis::Analyze(IR::IRProgram *program) {
   }
 }
 
-void LiveVarAnalysis::hard_code_block(std::shared_ptr<IR::IRBasicBlock> block, std::unordered_set<std::string> &var_gen, std::unordered_set<std::string> &var_kill) { 
+void LiveVarAnalysis::CompuateBlockGenKill(std::shared_ptr<IR::IRBasicBlock> block, std::unordered_set<std::string> &var_gen, std::unordered_set<std::string> &var_kill) { 
   auto try_add_gen = [&var_gen](std::shared_ptr<IR::IRValue> value) { 
     if (!value) return;
     if (IR::isa<IR::IRNameInstruction>(value)) {
@@ -186,8 +198,15 @@ void LiveVarAnalysis::hard_code_block(std::shared_ptr<IR::IRBasicBlock> block, s
       if (call->HasReturnValue()) {
         var_gen.insert(call->GetOperandName());
       }
+    } else if (IR::isa<IR::IRBlockParam>(value)) {
+      var_gen.insert(value->GetOperandName());
     }
   };
+
+  for (const auto& param : block->params) {
+    var_kill.insert(param->GetOperandName());
+    var_gen.erase(param->GetOperandName());
+  }
   
   for (auto inst_it = block->insts.rbegin(); inst_it != block->insts.rend(); ++inst_it) {
     auto inst = *inst_it;
@@ -238,6 +257,13 @@ void LiveVarAnalysis::hard_code_block(std::shared_ptr<IR::IRBasicBlock> block, s
         case IR::IRInstructionType::IR_INST_BR: {
           auto br = IR::cast<IR::IRBranch>(inst);
           try_add_gen(br->GetCond());
+          for (const auto& arg : br->GetThenArgs()) try_add_gen(arg);
+          for (const auto& arg : br->GetElseArgs()) try_add_gen(arg);
+          break;
+        }
+        case IR::IRInstructionType::IR_INST_JUMP: {
+          auto jump = IR::cast<IR::IRJump>(inst);
+          for (const auto& arg : jump->GetArgs()) try_add_gen(arg);
           break;
         }
         case IR::IRInstructionType::IR_INST_RET: {
@@ -248,8 +274,7 @@ void LiveVarAnalysis::hard_code_block(std::shared_ptr<IR::IRBasicBlock> block, s
         default:
           break;
       }
-    }
-    else {
+    } else {
       auto call = IR::cast<IR::IRCall>(inst);
       
       if (call->HasReturnValue()) {

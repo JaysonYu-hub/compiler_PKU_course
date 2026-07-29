@@ -8,6 +8,7 @@
 #include "IR/custom_ir.hpp"
 #include "backend/riscv_target.hpp"
 #include "backend/codegen/riscv_generator.hpp"
+#include "IR/passes/mem2reg.hpp"
 
 using namespace std;
 
@@ -56,6 +57,12 @@ int main(int argc, const char *argv[]) {
   if (ret != 0) return ret;
    
   GenerateIR(*ast, context);
+
+  // Mem2Reg
+  if (target_config.optimization_level == Back::OptimizationLevel::O1) {
+    IR::MemToReg mem2reg;
+    mem2reg.Run(context.ir_program.get());
+  }
 
   if (mode == "-koopa") {
     // 输出 Custom IR 文本

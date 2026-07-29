@@ -3,6 +3,7 @@
 // Drives the code-generation pipeline:
 //
 //   IRProgram
+//     ↓  Mem2RegPass    (mem2reg)
 //     ↓  LivenessPass   (liveness analysis)
 //     ↓  RegAllocPass   (per-function linear-scan register allocation)
 //     ↓  StackLayout    (per-function stack-frame computation)

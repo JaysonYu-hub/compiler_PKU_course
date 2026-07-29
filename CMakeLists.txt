@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.13)
 project(compiler)
 
 # settings
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # set to OFF to enable C mode
 set(CPP_MODE ON)
 if(CPP_MODE)
