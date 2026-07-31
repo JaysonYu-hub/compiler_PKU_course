@@ -533,15 +533,6 @@ namespace IR {
     return true;
   }
 
-  void IRBasicBlock::SetNext(std::shared_ptr<IRBasicBlock> next) {
-    next_1 = std::move(next);
-  }
-
-  void IRBasicBlock::SetNext(std::shared_ptr<IRBasicBlock> next_1, std::shared_ptr<IRBasicBlock> next_2) {
-    this->next_1 = std::move(next_1);
-    this->next_2 = std::move(next_2);
-  }
-
   std::vector<IRBasicBlock*> IRBasicBlock::GetSuccessors() const {
     if (insts.empty()) return {};
     auto last = insts.back();

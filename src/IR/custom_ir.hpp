@@ -492,8 +492,6 @@ namespace IR {
     std::string name;
     std::vector<std::shared_ptr<IRBlockParam>> params;
     std::vector<std::shared_ptr<IRInstruction>> insts;
-    std::shared_ptr<IRBasicBlock> next_1;
-    std::shared_ptr<IRBasicBlock> next_2;
 
     explicit IRBasicBlock(std::string name) : IRValue(IRValueKind::IR_BASIC_BLOCK), name(std::move(name)) {}
 
@@ -503,8 +501,6 @@ namespace IR {
       return params;
     }
     bool RemoveInstruction(const IRInstruction* inst);
-    void SetNext(std::shared_ptr<IRBasicBlock> next);
-    void SetNext(std::shared_ptr<IRBasicBlock> next_1, std::shared_ptr<IRBasicBlock> next_2);
     std::vector<IRBasicBlock*> GetSuccessors() const;
     std::string DumpText() const override;
     std::string GetOperandName() const override;

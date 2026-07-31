@@ -11,6 +11,7 @@
 #include <vector>
 
 namespace IR {
+namespace Pass {
 
 class MemToReg {
 private:
@@ -386,4 +387,5 @@ public:
   }
 };
 
+}
 }

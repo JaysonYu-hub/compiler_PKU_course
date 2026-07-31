@@ -480,7 +480,6 @@ std::string CodeGenerator::Visit(const IfUnmatchedStmtAST& node) {
     auto cond_val = BuildCondition(context.GetIRValue(cond_reg));
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, end_bb);
     context.current_block->AddInstruction(br_inst);
-    context.current_block->SetNext(then_bb, end_bb);
   }
 
   context.AddExistingBlock(then_bb);
@@ -491,7 +490,6 @@ std::string CodeGenerator::Visit(const IfUnmatchedStmtAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
-      context.current_block->SetNext(end_bb);
     }
   }
   context.AddExistingBlock(end_bb);
@@ -517,7 +515,6 @@ std::string CodeGenerator::Visit(const IfElseUnmatchedStmtAST& node) {
     auto cond_val = BuildCondition(context.GetIRValue(cond_reg));
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, else_bb);
     context.current_block->AddInstruction(br_inst);
-    context.current_block->SetNext(then_bb, else_bb);
   }
 
   context.AddExistingBlock(then_bb);
@@ -529,7 +526,6 @@ std::string CodeGenerator::Visit(const IfElseUnmatchedStmtAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
-      context.current_block->SetNext(end_bb);
     }
   }
   context.AddExistingBlock(else_bb);
@@ -541,7 +537,6 @@ std::string CodeGenerator::Visit(const IfElseUnmatchedStmtAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
-      context.current_block->SetNext(end_bb);
     }
   }
   if (!then_has_terminator || !else_has_terminator) {
@@ -715,7 +710,6 @@ std::string CodeGenerator::Visit(const IfMatchedStmtAST& node) {
     auto cond_val = BuildCondition(context.GetIRValue(cond_reg));
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, then_bb, else_bb);
     context.current_block->AddInstruction(br_inst);
-    context.current_block->SetNext(then_bb, else_bb);
   }
 
   context.AddExistingBlock(then_bb);
@@ -727,7 +721,6 @@ std::string CodeGenerator::Visit(const IfMatchedStmtAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
-      context.current_block->SetNext(end_bb);
     }
   }
   context.AddExistingBlock(else_bb);
@@ -739,7 +732,6 @@ std::string CodeGenerator::Visit(const IfMatchedStmtAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
-      context.current_block->SetNext(end_bb);
     }
   }
   if (!then_has_terminator || !else_has_terminator) {
@@ -769,7 +761,6 @@ std::string CodeGenerator::Visit(const WhileStmtAST& node) {
   if (context.current_block) {
     auto jump_inst = std::make_shared<IR::IRJump>(loop_bb);
     context.current_block->AddInstruction(jump_inst);
-    context.current_block->SetNext(loop_bb);
   }
   context.AddExistingBlock(loop_bb);
 
@@ -778,7 +769,6 @@ std::string CodeGenerator::Visit(const WhileStmtAST& node) {
     auto cond_val = BuildCondition(context.GetIRValue(cond_reg));
     auto br_inst = std::make_shared<IR::IRBranch>(cond_val, continue_loop_bb, end_bb);
     context.current_block->AddInstruction(br_inst);
-    context.current_block->SetNext(continue_loop_bb, end_bb);
   }
   context.AddExistingBlock(continue_loop_bb);
 
@@ -787,7 +777,6 @@ std::string CodeGenerator::Visit(const WhileStmtAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(loop_bb);
       context.current_block->AddInstruction(jump_inst);
-      context.current_block->SetNext(loop_bb);
     }
   }
   context.AddExistingBlock(end_bb);
@@ -805,7 +794,6 @@ std::string CodeGenerator::Visit(const BreakStmtAST& node) {
   if (context.current_block && end_bb) {
     auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
     context.current_block->AddInstruction(jump_inst);
-    context.current_block->SetNext(end_bb);
   }
 
   std::string tool_label = while_label_context.while_label_continue->name + NumBuilder::GetNum();
@@ -821,7 +809,6 @@ std::string CodeGenerator::Visit(const ContinueStmtAST& node) {
   if (context.current_block && begin_bb) {
     auto jump_inst = std::make_shared<IR::IRJump>(begin_bb);
     context.current_block->AddInstruction(jump_inst);
-    context.current_block->SetNext(begin_bb);
   }
 
   std::string tool_label = while_label_context.while_label_continue->name + NumBuilder::GetNum();
@@ -1135,7 +1122,6 @@ std::string CodeGenerator::Visit(const BinaryLogicalAndExprAST& node) {
       auto lhs_val = BuildCondition(context.GetIRValue(lhs_reg));
       auto br_inst = std::make_shared<IR::IRBranch>(lhs_val, then_bb, end_bb);
       context.current_block->AddInstruction(br_inst);
-      context.current_block->SetNext(then_bb, end_bb);
     }
 
     // then块
@@ -1160,7 +1146,6 @@ std::string CodeGenerator::Visit(const BinaryLogicalAndExprAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
-      context.current_block->SetNext(end_bb);
     }
 
     // end块
@@ -1215,7 +1200,6 @@ std::string CodeGenerator::Visit(const BinaryLogicalOrExprAST& node) {
       auto lhs_val = BuildCondition(context.GetIRValue(lhs_reg));
       auto br_inst = std::make_shared<IR::IRBranch>(lhs_val, end_bb, then_bb);
       context.current_block->AddInstruction(br_inst);
-      context.current_block->SetNext(then_bb, end_bb);
     }
 
     // then块
@@ -1240,7 +1224,6 @@ std::string CodeGenerator::Visit(const BinaryLogicalOrExprAST& node) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
       context.current_block->AddInstruction(jump_inst);
-      context.current_block->SetNext(end_bb);
     }
 
     // end块
