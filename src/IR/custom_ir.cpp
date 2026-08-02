@@ -518,6 +518,10 @@ namespace IR {
     insts.push_back(std::move(inst));
   }
 
+  void IRBasicBlock::AddComment(std::string comment) {
+    insts.push_back(std::make_shared<IRComment>(std::move(comment)));
+  }
+
   std::shared_ptr<IRBlockParam> IRBasicBlock::AddParam(std::string name,
                                                        IRType type) {
     auto param = std::make_shared<IRBlockParam>(std::move(name), type);

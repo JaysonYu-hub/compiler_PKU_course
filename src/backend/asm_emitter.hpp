@@ -18,6 +18,9 @@ public:
   void EmitLabel(const std::string& label) {
     out_ << label << ":\n";
   }
+  void EmitComment(const std::string& comment) {
+    out_ << "  # " << comment << "\n";
+  }
 
   // ---------- generic instruction helpers ----------
   void EmitInst(const std::string& op) {

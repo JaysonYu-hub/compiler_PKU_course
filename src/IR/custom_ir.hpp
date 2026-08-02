@@ -57,6 +57,7 @@ namespace IR {
     IR_INST_GETELEMPTR,
     IR_INST_JUMP,
     IR_INST_GLOBAL_ALLOC,
+    IR_INST_COMMENT,
     IR_INST_UNKNOWN
   };
 
@@ -486,6 +487,22 @@ namespace IR {
     }
   };
 
+  // 调试注释指令类
+  class IRComment : public IRInstruction {
+  public:
+    std::string comment;
+    explicit IRComment(std::string comment)
+      : IRInstruction(IRInstructionType::IR_INST_COMMENT), comment(std::move(comment)) {}
+
+    bool HasSideEffect() const override { return true; }
+    std::string DumpText() const override { return "// " + comment; }
+
+    static bool classof(const IRValue* v) {
+      return v && v->GetKind() == IRValueKind::IR_INSTRUCTION &&
+             static_cast<const IRInstruction*>(v)->inst_type == IRInstructionType::IR_INST_COMMENT;
+    }
+  };
+
   // 基本块类
   class IRBasicBlock : public IRValue {
   public:
@@ -496,6 +513,7 @@ namespace IR {
     explicit IRBasicBlock(std::string name) : IRValue(IRValueKind::IR_BASIC_BLOCK), name(std::move(name)) {}
 
     void AddInstruction(std::shared_ptr<IRInstruction> inst);
+    void AddComment(std::string comment);
     std::shared_ptr<IRBlockParam> AddParam(std::string name, IRType type);
     const std::vector<std::shared_ptr<IRBlockParam>>& GetParams() const {
       return params;

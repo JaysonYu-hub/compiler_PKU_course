@@ -348,6 +348,12 @@ void Back::RiscvGenerator::Visit(const IR::IRBasicBlock& block) {
   if (label != "entry") emitter_.EmitLabel(label);
 
   for (const auto& inst : block.insts) {
+    if (inst->inst_type == IR::IRInstructionType::IR_INST_COMMENT) {
+      if (const auto* c = IR::dyn_cast<IR::IRComment>(inst.get())) {
+        emitter_.EmitComment(c->comment);
+      }
+      continue;
+    }
     bool is_call = (inst->inst_type == IR::IRInstructionType::IR_INST_CALL);
 
     std::vector<std::pair<std::string, std::string>> regs_to_save;

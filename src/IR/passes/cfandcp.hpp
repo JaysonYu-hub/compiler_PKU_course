@@ -144,7 +144,7 @@ public:
   }
 
   void Run(IRProgram *program) {
-    if (!program) return;
+    if (!program) return; 
     for (auto &func : program->funcs) {
       if (func) {
         ConstantFold(*func);

@@ -10,6 +10,7 @@
 #include "backend/codegen/riscv_generator.hpp"
 #include "IR/passes/cfandcp.hpp"
 #include "IR/passes/dce.hpp"
+#include "IR/passes/licm.hpp"
 #include "IR/passes/mem2reg.hpp"
 
 using namespace std;
@@ -60,13 +61,15 @@ int main(int argc, const char *argv[]) {
    
   GenerateIR(*ast, context);
 
-  // Pass 优化流水线: Mem2Reg -> ConstantFold & Propagation -> DCE
   if (target_config.optimization_level == Back::OptimizationLevel::O1) {
     IR::Pass::MemToReg mem2reg;
     mem2reg.Run(context.ir_program.get());
 
     IR::Pass::ConstantFoldAndPropagation cf_cp;
     cf_cp.Run(context.ir_program.get());
+
+    IR::Pass::LICM licm;
+    licm.Run(context.ir_program.get());
 
     IR::Pass::DCE dce;
     dce.Run(context.ir_program.get());
