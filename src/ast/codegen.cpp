@@ -746,10 +746,10 @@ std::string CodeGenerator::Visit(const IfMatchedStmtAST& node) {
 std::string CodeGenerator::Visit(const WhileStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   std::string num = NumBuilder::GetNum();
-  std::string loop_label = "while_entry_" + num;
+  std::string loop_label = "%while_entry_" + num;
   // 这里的while_body是给while开头的br或者break使用的
-  std::string continue_loop_label = "while_body_" + num;
-  std::string end_label = "while_end_" + num;
+  std::string continue_loop_label = "%while_body_" + num;
+  std::string end_label = "%while_end_" + num;
 
   auto loop_bb = std::make_shared<IR::IRBasicBlock>(loop_label);
   auto continue_loop_bb = std::make_shared<IR::IRBasicBlock>(continue_loop_label);
