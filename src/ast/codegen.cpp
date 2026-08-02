@@ -789,7 +789,6 @@ std::string CodeGenerator::Visit(const WhileStmtAST& node) {
 
 std::string CodeGenerator::Visit(const BreakStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
-  WhileLabelContext while_label_context = context.GetWhileLabel();
 
   auto end_bb = context.GetWhileLabel().while_label_end;
   if (context.current_block && end_bb) {
@@ -797,14 +796,16 @@ std::string CodeGenerator::Visit(const BreakStmtAST& node) {
     context.current_block->AddInstruction(jump_inst);
   }
 
-  std::string tool_label = while_label_context.while_label_continue->name + NumBuilder::GetNum();
+  // break 后继续建立一个不可达基本块，供后续 AST 安全生成 IR。
+  // 不能把循环体标签和编号直接拼接，例如 while_body_1 + 7 会与
+  // 后续真实循环的 while_body_17 冲突。
+  std::string tool_label = "after_break_" + NumBuilder::GetNum();
   context.AddNewBlock(tool_label);
   return "";
 }
 
 std::string CodeGenerator::Visit(const ContinueStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
-  WhileLabelContext while_label_context = context.GetWhileLabel();
 
   auto begin_bb = context.GetWhileLabel().while_label_begin;
   if (context.current_block && begin_bb) {
@@ -812,7 +813,8 @@ std::string CodeGenerator::Visit(const ContinueStmtAST& node) {
     context.current_block->AddInstruction(jump_inst);
   }
 
-  std::string tool_label = while_label_context.while_label_continue->name + NumBuilder::GetNum();
+  // continue 后的不可达基本块使用独立命名空间，避免与 while_body_N 冲突。
+  std::string tool_label = "after_continue_" + NumBuilder::GetNum();
   context.AddNewBlock(tool_label);
   return "";
 }
