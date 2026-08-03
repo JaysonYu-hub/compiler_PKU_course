@@ -85,14 +85,29 @@ private:
   }
 
   static bool VisitDominatorSubtree(
-      IRFunction& function, IRBasicBlock* block,
-      const DominatorTree& dom_tree, ValueTable& available) {
+      IRBasicBlock* block, const DominatorTree& dom_tree, ValueTable& available,
+      std::unordered_map<const IRValue*, std::shared_ptr<IRValue>>&
+          replacements) {
     bool changed = false;
     std::vector<std::string> locally_inserted;
     std::vector<std::shared_ptr<IRInstruction>> new_insts;
     new_insts.reserve(block->insts.size());
 
+    auto resolve = [&](std::shared_ptr<IRValue> value) {
+      while (value && replacements.count(value.get()) != 0)
+        value = replacements.at(value.get());
+      return value;
+    };
+
     for (const auto& inst : block->insts) {
+      // 只规范化当前指令的操作数。这样表达式键始终使用代表值，同时避免
+      // 每发现一个公共子表达式就 ReplaceAllUses 扫描整个函数。
+      for (const auto& use : inst->GetUses()) {
+        if (!use) continue;
+        auto canonical = resolve(use);
+        if (canonical.get() != use.get())
+          inst->ReplaceUse(use.get(), std::move(canonical));
+      }
       const std::string key = ExpressionKey(inst);
       if (key.empty()) {
         new_insts.push_back(inst);
@@ -102,7 +117,7 @@ private:
       const auto found = available.find(key);
       if (found != available.end()) {
         // 支配当前块的等价表达式可以安全替代当前 SSA 定义。
-        function.ReplaceAllUses(inst.get(), found->second);
+        replacements[inst.get()] = resolve(found->second);
         changed = true;
         continue;
       }
@@ -116,7 +131,8 @@ private:
     const auto child_it = dom_tree.dom_children.find(block);
     if (child_it != dom_tree.dom_children.end()) {
       for (IRBasicBlock* child : child_it->second) {
-        changed |= VisitDominatorSubtree(function, child, dom_tree, available);
+        changed |= VisitDominatorSubtree(child, dom_tree, available,
+                                         replacements);
       }
     }
 
@@ -136,8 +152,9 @@ public:
     if (function.blocks.empty()) return false;
 
     ValueTable available;
-    return VisitDominatorSubtree(function, function.blocks.front().get(),
-                                 dom_tree, available);
+    std::unordered_map<const IRValue*, std::shared_ptr<IRValue>> replacements;
+    return VisitDominatorSubtree(function.blocks.front().get(), dom_tree,
+                                 available, replacements);
   }
 
   bool Run(IRProgram* program) {

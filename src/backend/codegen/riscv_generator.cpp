@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstring>
 #include <algorithm>
+#include <cstdlib>
 
 // Internal helpers
 namespace {
@@ -25,6 +26,22 @@ bool IsFloatRegister(const std::string& reg) {
   return !reg.empty() && reg[0] == 'f';
 }
 
+bool GetVirtualValueName(const IR::IRValue* value, std::string& name) {
+  if (!value) return false;
+  if (IR::isa<IR::IRNameInstruction>(value) ||
+      IR::isa<IR::IRFuncParam>(value) ||
+      IR::isa<IR::IRBlockParam>(value)) {
+    name = value->GetOperandName();
+    return !name.empty();
+  }
+  if (const auto* call = IR::dyn_cast<IR::IRCall>(value)) {
+    if (!call->HasReturnValue()) return false;
+    name = call->GetOperandName();
+    return !name.empty();
+  }
+  return false;
+}
+
 }
 
 // Generate (top-level entry)
@@ -40,6 +57,179 @@ std::string Back::RiscvGenerator::StripAt(const std::string& name) {
 }
 std::string Back::RiscvGenerator::StripPercent(const std::string& name) {
   return (!name.empty() && name[0] == '%') ? name.substr(1) : name;
+}
+
+void Back::RiscvGenerator::EmitParallelRegisterCopies(
+    std::vector<std::pair<std::string, std::string>> moves,
+    bool is_float) {
+  moves.erase(std::remove_if(moves.begin(), moves.end(),
+                             [](const auto& move) {
+    return move.first == move.second;
+  }), moves.end());
+
+  const std::string scratch = is_float ? "ft5" : "t5";
+  const std::string move_op = is_float ? "fmv.s" : "mv";
+
+  while (!moves.empty()) {
+    // dst 不再作为任何待处理 move 的源时，可以安全覆盖。
+    auto safe = std::find_if(moves.begin(), moves.end(), [&](const auto& move) {
+      return std::none_of(moves.begin(), moves.end(), [&](const auto& other) {
+        return other.second == move.first;
+      });
+    });
+    if (safe != moves.end()) {
+      emitter_.EmitInst(move_op, safe->first, safe->second);
+      moves.erase(safe);
+      continue;
+    }
+
+    // 剩余图中存在环。先保存一个即将被覆盖的 dst，再把所有对该旧值的
+    // 引用改为保留的临时寄存器，环就会转化为可按拓扑顺序执行的链。
+    const std::string saved = moves.front().first;
+    emitter_.EmitInst(move_op, scratch, saved);
+    for (auto& move : moves)
+      if (move.second == saved) move.second = scratch;
+  }
+}
+
+void Back::RiscvGenerator::EmitParallelValueCopies(
+    const std::vector<std::shared_ptr<IR::IRValue>>& sources,
+    const std::vector<CopyDestination>& destinations,
+    int staging_base) {
+  assert(sources.size() == destinations.size() &&
+         "parallel copy source/destination arity mismatch");
+
+  struct PendingCopy {
+    const IR::IRValue* source = nullptr;
+    CopyDestination destination;
+    std::string source_reg;
+    int source_stack = -1;
+    int staged_stack = -1;
+    bool skip = false;
+  };
+
+  std::vector<PendingCopy> copies;
+  copies.reserve(sources.size());
+  std::unordered_set<int> destination_stack_offsets;
+  for (const auto& destination : destinations) {
+    if (destination.kind == CopyDestination::Kind::STACK)
+      destination_stack_offsets.insert(destination.stack_offset);
+  }
+
+  for (size_t i = 0; i < sources.size(); ++i) {
+    PendingCopy copy;
+    copy.source = sources[i].get();
+    copy.destination = destinations[i];
+
+    std::string source_name;
+    if (GetVirtualValueName(copy.source, source_name)) {
+      const auto reg_it = reg_map_.find(source_name);
+      if (reg_it != reg_map_.end() && !reg_it->second.empty()) {
+        copy.source_reg = reg_it->second;
+      } else {
+        const auto stack_it = val_stack_map_.find(source_name);
+        if (stack_it != val_stack_map_.end())
+          copy.source_stack = stack_it->second;
+      }
+
+      // jump %next(%next_arg) 表示该块参数保持原值，不产生真实 copy。
+      if (!copy.destination.value_name.empty() &&
+          copy.destination.value_name == source_name)
+        copy.skip = true;
+    }
+
+    if (copy.destination.kind == CopyDestination::Kind::REGISTER &&
+        !copy.source_reg.empty() &&
+        copy.destination.reg == copy.source_reg)
+      copy.skip = true;
+    if (copy.destination.kind == CopyDestination::Kind::STACK &&
+        copy.source_stack >= 0 &&
+        copy.destination.stack_offset == copy.source_stack)
+      copy.skip = true;
+
+    copies.push_back(std::move(copy));
+  }
+
+  const int slot_size = GetRegSize();
+  auto load_source = [&](const PendingCopy& copy, const std::string& reg) {
+    if (copy.staged_stack >= 0) {
+      if (copy.destination.type == IR::IRType::IR_FLOAT)
+        emitter_.EmitFlw(reg, copy.staged_stack);
+      else if (GetTypeSize(copy.destination.type) == 8)
+        emitter_.EmitLd(reg, copy.staged_stack);
+      else
+        emitter_.EmitLw(reg, copy.staged_stack);
+      return;
+    }
+    if (copy.destination.type == IR::IRType::IR_FLOAT)
+      LoadValueToFReg(copy.source, reg);
+    else
+      LoadValueToReg(copy.source, reg);
+  };
+  auto store_destination = [&](const CopyDestination& destination,
+                               const std::string& reg) {
+    assert(destination.kind == CopyDestination::Kind::STACK);
+    if (destination.type == IR::IRType::IR_FLOAT)
+      emitter_.EmitFsw(reg, destination.stack_offset);
+    else if (GetTypeSize(destination.type) == 8)
+      emitter_.EmitSd(reg, destination.stack_offset);
+    else
+      emitter_.EmitSw(reg, destination.stack_offset);
+  };
+
+  // 只有“某个栈源位置同时会被另一条 copy 覆盖”时才使用共享缓冲区。
+  // 常量、全局值以及互不覆盖的栈源可以在寄存器环处理完成后直接装入，
+  // 不再像旧实现那样让所有参数都经历一次 store/load。
+  for (size_t i = 0; i < copies.size(); ++i) {
+    auto& copy = copies[i];
+    if (copy.skip || copy.source_stack < 0 ||
+        destination_stack_offsets.count(copy.source_stack) == 0)
+      continue;
+    copy.staged_stack = staging_base + static_cast<int>(i) * slot_size;
+    const std::string scratch =
+        copy.destination.type == IR::IRType::IR_FLOAT ? "ft5" : "t5";
+    load_source(copy, scratch);
+    if (copy.destination.type == IR::IRType::IR_FLOAT)
+      emitter_.EmitFsw(scratch, copy.staged_stack);
+    else if (GetTypeSize(copy.destination.type) == 8)
+      emitter_.EmitSd(scratch, copy.staged_stack);
+    else
+      emitter_.EmitSw(scratch, copy.staged_stack);
+  }
+
+  std::vector<std::pair<std::string, std::string>> integer_moves;
+  std::vector<std::pair<std::string, std::string>> float_moves;
+
+  // 先完成所有寄存器源到栈目的的写入，避免后续寄存器并行搬运覆盖源值。
+  // register -> register 则统一收集后交给环安全调度器。
+  for (const auto& copy : copies) {
+    if (copy.skip || copy.source_reg.empty()) continue;
+    if (copy.destination.kind == CopyDestination::Kind::STACK) {
+      store_destination(copy.destination, copy.source_reg);
+    } else {
+      auto& moves = copy.destination.type == IR::IRType::IR_FLOAT
+                        ? float_moves
+                        : integer_moves;
+      moves.push_back({copy.destination.reg, copy.source_reg});
+    }
+  }
+
+  EmitParallelRegisterCopies(std::move(integer_moves), false);
+  EmitParallelRegisterCopies(std::move(float_moves), true);
+
+  // 最后物化常量、全局值及栈源。此时寄存器交换已经完成；可能被栈目的
+  // 覆盖的源在第一阶段也已经保存到缓冲区，因此不会破坏并行语义。
+  for (const auto& copy : copies) {
+    if (copy.skip || !copy.source_reg.empty()) continue;
+    if (copy.destination.kind == CopyDestination::Kind::REGISTER) {
+      load_source(copy, copy.destination.reg);
+    } else {
+      const std::string scratch =
+          copy.destination.type == IR::IRType::IR_FLOAT ? "ft5" : "t5";
+      load_source(copy, scratch);
+      store_destination(copy.destination, scratch);
+    }
+  }
 }
 
 // Program & global alloc
@@ -77,6 +267,9 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   local_allocs_.clear();
   reg_map_.clear();
   spill_offsets_.clear();
+  call_backup_reg_map_.clear();
+  loop_reg_overrides_.clear();
+  loop_preloads_.clear();
   used_s_regs_.clear();
   has_call_            = false;
   max_stack_arg_count_ = 0;
@@ -108,6 +301,23 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     }
   }
 
+  std::unordered_map<std::string, std::string> copy_hints;
+  for (const auto& block : func.blocks) {
+    for (const auto& param : block->params)
+      if (param) virtual_regs.insert(param->GetOperandName());
+    for (const auto& inst : block->insts) {
+      const auto* binary = IR::dyn_cast<IR::IRBinary>(inst.get());
+      if (!binary) continue;
+      std::string lhs_name;
+      if (!GetVirtualValueName(binary->GetLhs().get(), lhs_name)) continue;
+      const bool lhs_float = binary->GetLhs()->GetType() == IR::IRType::IR_FLOAT;
+      const bool result_float = binary->GetType() == IR::IRType::IR_FLOAT;
+      if (lhs_float == result_float)
+        copy_hints[binary->GetOperandName()] = lhs_name;
+    }
+  }
+
+  std::vector<LinearScanAllocator::LiveInterval> allocated_intervals;
   if (lva_) {
     auto it = lva_->func_intervals.find(func.name);
     if (it != lva_->func_intervals.end()) {
@@ -120,16 +330,227 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
       const auto& use_weights = lva_->func_use_weights[func.name];
       const auto& use_counts = lva_->func_use_counts[func.name];
       LinearScanAllocator alloc(filtered, GetRegSize(), crosses_calls,
-                                float_values, use_weights, use_counts);
+                                float_values, use_weights, use_counts,
+                                copy_hints);
       alloc.Allocate();
+      allocated_intervals = alloc.GetIntervals();
       reg_map_ = alloc.GetRegMap();
       for (const auto& s : alloc.GetSpilledIntervals())
         spill_offsets_[s.var] = s.stack_offset;
+
+      const char* stats_mode = std::getenv("COMPILER_REGALLOC_STATS");
+      if (stats_mode && std::string(stats_mode) != "0") {
+        std::unordered_set<int> spill_slots;
+        std::size_t spill_count = 0;
+        for (const auto& interval : alloc.GetIntervals()) {
+          if (!interval.spilled) continue;
+          ++spill_count;
+          spill_slots.insert(interval.stack_offset);
+        }
+        std::cerr << "[regalloc] function=" << func.name
+                  << " intervals=" << alloc.GetIntervals().size()
+                  << " registers=" << reg_map_.size()
+                  << " spills=" << spill_count
+                  << " spill_slots=" << spill_slots.size() << "\n";
+
+        if (std::string(stats_mode) == "detail") {
+          for (const auto& interval : alloc.GetIntervals()) {
+            std::cerr << "  " << interval.var
+                      << " [" << interval.start << "," << interval.end << "]"
+                      << " uses=" << interval.use_count
+                      << " weight=" << interval.use_weight
+                      << " cross_call=" << (interval.crosses_call ? 1 : 0)
+                      << " class=" << (interval.is_float ? "float" : "integer")
+                      << " location=";
+            if (interval.spilled)
+              std::cerr << "stack+" << interval.stack_offset;
+            else
+              std::cerr << interval.reg;
+            auto hint = copy_hints.find(interval.var);
+            if (hint != copy_hints.end()) std::cerr << " hint=" << hint->second;
+            std::cerr << "\n";
+          }
+        }
+      }
     }
+  }
+
+  // ------------------------------------------------------------------
+  // 第五阶段：有限活跃区间切分
+  // ------------------------------------------------------------------
+  if (GetOptimizationLevel() == OptimizationLevel::O1) {
+  // 全局线性扫描已经占用的 callee-saved 寄存器不能再用于短分段。
+  // t5/ft5 仍保留给代码生成和并行 copy 调度器，不参与此处选择。
+  std::unordered_set<std::string> occupied_registers;
+  for (const auto& [var, reg] : reg_map_) occupied_registers.insert(reg);
+  std::vector<std::string> free_integer_callee;
+  std::vector<std::string> free_float_callee;
+  // s0/fs0 未被当前后端用作 frame pointer，也没有放入全局线性扫描池，
+  // 因而天然适合作为第一个分段寄存器；使用时仍会按 ABI 保存和恢复。
+  for (int i = 0; i <= 11; ++i) {
+    const std::string integer_reg = "s" + std::to_string(i);
+    const std::string float_reg = "fs" + std::to_string(i);
+    if (occupied_registers.count(integer_reg) == 0)
+      free_integer_callee.push_back(integer_reg);
+    if (occupied_registers.count(float_reg) == 0)
+      free_float_callee.push_back(float_reg);
+  }
+
+  struct CallSplitCandidate {
+    std::string value;
+    std::string source_reg;
+    bool is_float = false;
+    std::uint64_t call_count = 0;
+    std::uint64_t use_weight = 0;
+  };
+  std::vector<CallSplitCandidate> call_candidates;
+  const auto& call_cross_counts = lva_->func_call_cross_counts[func.name];
+  const auto& value_use_weights = lva_->func_use_weights[func.name];
+  const auto& float_values = lva_->func_float_values[func.name];
+  for (const auto& [value, count] : call_cross_counts) {
+    // 只为跨越至少两个 call 的值保留备份寄存器。单次 call 使用栈式
+    // save/restore 往往与函数序言保存 s*/fs* 的成本相当。
+    if (count < 2) continue;
+    const auto reg_it = reg_map_.find(value);
+    if (reg_it == reg_map_.end() || reg_it->second.empty() ||
+        IsCalleeSavedRegister(reg_it->second))
+      continue;
+    const auto weight_it = value_use_weights.find(value);
+    call_candidates.push_back({
+        value, reg_it->second, float_values.count(value) != 0, count,
+        weight_it == value_use_weights.end() ? 0 : weight_it->second});
+  }
+  std::sort(call_candidates.begin(), call_candidates.end(),
+            [](const CallSplitCandidate& lhs, const CallSplitCandidate& rhs) {
+    if (lhs.call_count != rhs.call_count) return lhs.call_count > rhs.call_count;
+    if (lhs.use_weight != rhs.use_weight) return lhs.use_weight > rhs.use_weight;
+    return lhs.value < rhs.value;
+  });
+  for (const auto& candidate : call_candidates) {
+    auto& pool = candidate.is_float ? free_float_callee : free_integer_callee;
+    if (pool.empty()) continue;
+    call_backup_reg_map_[candidate.value] = pool.back();
+    pool.pop_back();
+  }
+
+  // 循环切分只考虑“全局分配已经 spill、定义位于循环外、在循环内只读
+  // 使用”的 SSA 值。SSA 值不可变，因此在 preheader 加载一次即可，循环
+  // 出口不需要写回。循环携带的 block parameter 和循环内定义全部跳过。
+  std::unordered_map<std::string, std::string> definition_blocks;
+  std::unordered_set<std::string> non_promotable_values;
+  for (const auto& block : func.blocks) {
+    for (const auto& param : block->params)
+      definition_blocks[param->GetOperandName()] = block->name;
+    for (const auto& inst : block->insts) {
+      std::string definition;
+      if (IR::isa<IR::IRNameInstruction>(inst.get())) {
+        definition = inst->GetOperandName();
+        if (IR::isa<IR::IRAlloc>(inst.get()))
+          non_promotable_values.insert(definition);
+      } else if (const auto* call = IR::dyn_cast<IR::IRCall>(inst.get())) {
+        if (call->HasReturnValue()) definition = call->GetOperandName();
+      }
+      if (!definition.empty()) definition_blocks[definition] = block->name;
+    }
+  }
+
+  struct LoopSplitCandidate {
+    std::string value;
+    const IR::Pass::LiveVarAnalysis::NaturalLoopRegion* loop = nullptr;
+    bool is_float = false;
+    std::uint64_t weighted_uses = 0;
+    std::uint64_t static_uses = 0;
+  };
+  std::vector<LoopSplitCandidate> loop_candidates;
+  const auto& loop_depths = lva_->func_loop_depth[func.name];
+  const auto& loop_regions = lva_->func_natural_loops[func.name];
+  for (const auto& interval : allocated_intervals) {
+    if (!interval.spilled || non_promotable_values.count(interval.var) != 0)
+      continue;
+    for (const auto& loop : loop_regions) {
+      if (loop.preheader.empty()) continue;
+      const auto def_it = definition_blocks.find(interval.var);
+      if (def_it != definition_blocks.end() &&
+          loop.blocks.count(def_it->second) != 0)
+        continue;
+
+      std::uint64_t weighted_uses = 0;
+      std::uint64_t static_uses = 0;
+      for (const auto& block : func.blocks) {
+        if (loop.blocks.count(block->name) == 0) continue;
+        const auto depth_it = loop_depths.find(block->name);
+        const int depth = depth_it == loop_depths.end() ? 0 : depth_it->second;
+        const std::uint64_t weight =
+            std::uint64_t{1} << (3 * std::min(depth, 3));
+        for (const auto& inst : block->insts) {
+          for (const auto& use : inst->GetUses()) {
+            std::string use_name;
+            if (GetVirtualValueName(use.get(), use_name) &&
+                use_name == interval.var) {
+              ++static_uses;
+              weighted_uses += weight;
+            }
+          }
+        }
+      }
+      if (static_uses != 0)
+        loop_candidates.push_back({interval.var, &loop, interval.is_float,
+                                   weighted_uses, static_uses});
+    }
+  }
+  std::sort(loop_candidates.begin(), loop_candidates.end(),
+            [](const LoopSplitCandidate& lhs, const LoopSplitCandidate& rhs) {
+    if (lhs.weighted_uses != rhs.weighted_uses)
+      return lhs.weighted_uses > rhs.weighted_uses;
+    if (lhs.static_uses != rhs.static_uses)
+      return lhs.static_uses > rhs.static_uses;
+    if (lhs.loop->depth != rhs.loop->depth)
+      return lhs.loop->depth > rhs.loop->depth;
+    return lhs.value < rhs.value;
+  });
+
+  std::unordered_set<std::string> promoted_loop_values;
+  for (const auto& candidate : loop_candidates) {
+    if (!candidate.loop || promoted_loop_values.count(candidate.value) != 0)
+      continue;
+    auto& pool = candidate.is_float ? free_float_callee : free_integer_callee;
+    if (pool.empty()) continue;
+    const std::string reg = pool.back();
+    pool.pop_back();
+    promoted_loop_values.insert(candidate.value);
+    loop_preloads_[candidate.loop->preheader].push_back({candidate.value, reg});
+    for (const auto& block_name : candidate.loop->blocks)
+      loop_reg_overrides_[block_name][candidate.value] = reg;
+  }
+
+  const char* split_stats_mode = std::getenv("COMPILER_REGALLOC_STATS");
+  if (split_stats_mode && std::string(split_stats_mode) != "0") {
+    std::cerr << "[regalloc-split] function=" << func.name
+              << " call_backups=" << call_backup_reg_map_.size()
+              << " loop_promotions=" << promoted_loop_values.size() << "\n";
+    if (std::string(split_stats_mode) == "detail") {
+      for (const auto& [value, reg] : call_backup_reg_map_)
+        std::cerr << "  call " << value << " -> " << reg << "\n";
+      for (const auto& [preheader, preloads] : loop_preloads_)
+        for (const auto& [value, reg] : preloads)
+          std::cerr << "  loop " << value << " -> " << reg
+                    << " preheader=" << preheader << "\n";
+    }
+  }
   }
 
   for (const auto& [var, reg] : reg_map_) {
     if (IsCalleeSavedRegister(reg)) {
+      if (std::find(used_s_regs_.begin(), used_s_regs_.end(), reg) == used_s_regs_.end())
+        used_s_regs_.push_back(reg);
+    }
+  }
+  for (const auto& [value, reg] : call_backup_reg_map_) {
+    if (std::find(used_s_regs_.begin(), used_s_regs_.end(), reg) == used_s_regs_.end())
+      used_s_regs_.push_back(reg);
+  }
+  for (const auto& [preheader, preloads] : loop_preloads_) {
+    for (const auto& [value, reg] : preloads) {
       if (std::find(used_s_regs_.begin(), used_s_regs_.end(), reg) == used_s_regs_.end())
         used_s_regs_.push_back(reg);
     }
@@ -142,6 +563,15 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   int offset = AlignUp(spill_size, GetRegSize());
   s_reg_start_offset_ = offset;
   offset += (int)used_s_regs_.size() * GetRegSize();
+
+  const auto& values_crossing_calls = lva_->func_crosses_calls[func.name];
+  auto needs_stack_home = [&](const std::string& value) {
+    const auto reg_it = reg_map_.find(value);
+    if (reg_it == reg_map_.end() || reg_it->second.empty()) return true;
+    if (call_backup_reg_map_.count(value) != 0) return false;
+    return !IsCalleeSavedRegister(reg_it->second) &&
+           values_crossing_calls.count(value) != 0;
+  };
 
   for (const auto& block : func.blocks) {
     for (const auto& inst : block->insts) {
@@ -165,7 +595,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     val_type_map_[pn] = func.params[i]->GetType();
     if (spill_offsets_.count(pn)) {
       val_stack_map_[pn] = spill_offsets_[pn];
-    } else {
+    } else if (needs_stack_home(pn)) {
       const IR::IRType type = func.params[i]->GetType();
       val_stack_map_[pn] =
           ReserveStackSlot(offset, GetTypeSize(type), GetTypeAlignment(type));
@@ -194,16 +624,6 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   }
   for (const auto& [v, off] : spill_offsets_)
     if (!val_stack_map_.count(v)) val_stack_map_[v] = off;
-
-  const auto& values_crossing_calls = lva_->func_crosses_calls[func.name];
-  auto needs_stack_home = [&](const std::string& value) {
-    const auto reg_it = reg_map_.find(value);
-    if (reg_it == reg_map_.end() || reg_it->second.empty()) return true;
-    // caller-saved 寄存器中的跨调用值需要一个保存槽；其余已分配值始终
-    // 可以直接从物理寄存器取得，无需为它们预留永远不会访问的栈空间。
-    return !IsCalleeSavedRegister(reg_it->second) &&
-           values_crossing_calls.count(value) != 0;
-  };
 
   for (const auto& block : func.blocks) {
     for (const auto& inst : block->insts) {
@@ -248,9 +668,13 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     for (const auto& param : block->params) {
       const std::string name = param->GetOperandName();
       val_type_map_[name] = param->GetType();
-      val_stack_map_[name] =
-          ReserveStackSlot(offset, GetTypeSize(param->GetType()),
-                           GetTypeAlignment(param->GetType()));
+      if (spill_offsets_.count(name)) {
+        val_stack_map_[name] = spill_offsets_[name];
+      } else if (needs_stack_home(name)) {
+        val_stack_map_[name] =
+            ReserveStackSlot(offset, GetTypeSize(param->GetType()),
+                             GetTypeAlignment(param->GetType()));
+      }
     }
     if (block->insts.empty()) continue;
     if (auto* jump = IR::dyn_cast<IR::IRJump>(block->insts.back().get())) {
@@ -313,72 +737,65 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   for (const auto& p : func.params) param_types.push_back(p->GetType());
   const auto param_locs = calling_convention_.AssignArgumentLocations(param_types);
 
-  // First preserve every register argument.  Do not initialize allocated
-  // registers yet: an allocated register for an earlier stack argument may be
-  // the physical a*/fa* register holding a later source argument.
-  for (size_t i = 0; i < func.params.size(); ++i) {
-    std::string pn  = func.params[i]->GetOperandName();
-    int         stk = val_stack_map_.at(pn);
-    const auto& loc = param_locs[i];
+  std::vector<std::pair<std::string, std::string>> integer_param_moves;
+  std::vector<std::pair<std::string, std::string>> float_param_moves;
 
-    if (loc.kind == ArgumentLocation::Kind::FLOAT_REGISTER) {
-      std::string src = "fa" + std::to_string(loc.index);
-      emitter_.EmitFsw(src, stk);
-    } else if (loc.kind == ArgumentLocation::Kind::INTEGER_REGISTER) {
-      std::string src = "a" + std::to_string(loc.index);
-      if (GetTypeSize(func.params[i]->GetType()) == 8) emitter_.EmitSd(src, stk);
-      else                                              emitter_.EmitSw(src, stk);
-    }
-  }
-
-  // Then copy incoming stack arguments into their local parameter slots.
-  for (size_t i = 0; i < func.params.size(); ++i) {
-    if (param_locs[i].kind != ArgumentLocation::Kind::STACK) continue;
-    int stk = val_stack_map_.at(func.params[i]->GetOperandName());
-    const auto& loc = param_locs[i];
-    {
-      int caller_off = current_stack_size_ + GetRegSize() * loc.index;
-      if (func.params[i]->GetType() == IR::IRType::IR_FLOAT) {
-        emitter_.EmitFlw("ft5", caller_off);
-        emitter_.EmitFsw("ft5", stk);
-      } else if (GetTypeSize(func.params[i]->GetType()) == 8) {
-        emitter_.EmitLd("t5", caller_off);
-        emitter_.EmitSd("t5", stk);
-      } else {
-        emitter_.EmitLw("t5", caller_off);
-        emitter_.EmitSw("t5", stk);
-      }
-    }
-  }
-
-  // Finally populate parameter registers chosen by the allocator from the
-  // now-stable local copies.
+  // 没有分配到寄存器的寄存器形参必须先保存到 home。其余形参构成
+  // “目标寄存器 <- ABI 源寄存器”的并行 copy，交给环安全调度器处理。
   for (size_t i = 0; i < func.params.size(); ++i) {
     const std::string pn = func.params[i]->GetOperandName();
-    auto reg_it = reg_map_.find(pn);
-    if (reg_it == reg_map_.end() || reg_it->second.empty()) continue;
-    const std::string& p_reg = reg_it->second;
-    const int stk = val_stack_map_.at(pn);
     const auto& loc = param_locs[i];
-    if (loc.kind == ArgumentLocation::Kind::FLOAT_REGISTER &&
-        p_reg == "fa" + std::to_string(loc.index)) {
+    if (loc.kind == ArgumentLocation::Kind::STACK) continue;
+
+    const bool is_float = loc.kind == ArgumentLocation::Kind::FLOAT_REGISTER;
+    const std::string source = (is_float ? "fa" : "a") +
+                               std::to_string(loc.index);
+    const auto reg_it = reg_map_.find(pn);
+    if (reg_it != reg_map_.end() && !reg_it->second.empty()) {
+      auto& moves = is_float ? float_param_moves : integer_param_moves;
+      moves.push_back({reg_it->second, source});
       continue;
     }
-    if (loc.kind == ArgumentLocation::Kind::INTEGER_REGISTER &&
-        p_reg == "a" + std::to_string(loc.index)) {
+
+    const int stack_offset = val_stack_map_.at(pn);
+    if (is_float) emitter_.EmitFsw(source, stack_offset);
+    else if (GetTypeSize(func.params[i]->GetType()) == 8)
+      emitter_.EmitSd(source, stack_offset);
+    else
+      emitter_.EmitSw(source, stack_offset);
+  }
+
+  EmitParallelRegisterCopies(std::move(integer_param_moves), false);
+  EmitParallelRegisterCopies(std::move(float_param_moves), true);
+
+  // ABI 栈形参在并行寄存器 copy 完成后处理。若该值有物理寄存器，直接
+  // 从调用者栈加载到最终位置；只有真正 spill 的形参才复制到本地 home。
+  for (size_t i = 0; i < func.params.size(); ++i) {
+    if (param_locs[i].kind != ArgumentLocation::Kind::STACK) continue;
+    const std::string pn = func.params[i]->GetOperandName();
+    const auto& loc = param_locs[i];
+    const int caller_offset = current_stack_size_ + GetRegSize() * loc.index;
+    const auto reg_it = reg_map_.find(pn);
+    if (reg_it != reg_map_.end() && !reg_it->second.empty()) {
+      if (func.params[i]->GetType() == IR::IRType::IR_FLOAT)
+        emitter_.EmitFlw(reg_it->second, caller_offset);
+      else if (GetTypeSize(func.params[i]->GetType()) == 8)
+        emitter_.EmitLd(reg_it->second, caller_offset);
+      else
+        emitter_.EmitLw(reg_it->second, caller_offset);
       continue;
     }
+
+    const int stack_offset = val_stack_map_.at(pn);
     if (func.params[i]->GetType() == IR::IRType::IR_FLOAT) {
-      if (p_reg[0] == 'f') {
-        emitter_.EmitFlw(p_reg, stk);
-      } else {
-        emitter_.EmitFlw("ft5", stk);
-        emitter_.EmitInst("fmv.x.w", p_reg, "ft5");
-      }
+      emitter_.EmitFlw("ft5", caller_offset);
+      emitter_.EmitFsw("ft5", stack_offset);
     } else if (GetTypeSize(func.params[i]->GetType()) == 8) {
-      emitter_.EmitLd(p_reg, stk);
+      emitter_.EmitLd("t5", caller_offset);
+      emitter_.EmitSd("t5", stack_offset);
     } else {
-      emitter_.EmitLw(p_reg, stk);
+      emitter_.EmitLw("t5", caller_offset);
+      emitter_.EmitSw("t5", stack_offset);
     }
   }
 
@@ -390,12 +807,46 @@ void Back::RiscvGenerator::Visit(const IR::IRBasicBlock& block) {
   std::string label = StripPercent(block.name);
   if (label != "entry") emitter_.EmitLabel(label);
 
-  for (const auto& inst : block.insts) {
+  // 循环边界切分只在循环块的生成期间覆盖物理位置。离开该块后恢复
+  // 全函数分配结果，循环外的使用仍然从原 spill slot 读取。
+  std::vector<std::pair<std::string, std::string>> previous_registers;
+  std::vector<std::string> previously_unassigned;
+  const auto override_it = loop_reg_overrides_.find(block.name);
+  if (override_it != loop_reg_overrides_.end()) {
+    for (const auto& [value, reg] : override_it->second) {
+      const auto old = reg_map_.find(value);
+      if (old == reg_map_.end())
+        previously_unassigned.push_back(value);
+      else
+        previous_registers.push_back({value, old->second});
+      reg_map_[value] = reg;
+    }
+  }
+
+  for (size_t instruction_index = 0;
+       instruction_index < block.insts.size(); ++instruction_index) {
+    const auto& inst = block.insts[instruction_index];
     if (inst->inst_type == IR::IRInstructionType::IR_INST_COMMENT) {
       if (const auto* c = IR::dyn_cast<IR::IRComment>(inst.get())) {
         emitter_.EmitComment(c->comment);
       }
       continue;
+    }
+
+    // preheader 的所有普通指令已经生成后、terminator 执行前，把循环外
+    // spilled 值装入专用寄存器。这样定义恰好位于 preheader 的值也已经
+    // 可用，而循环每次迭代不会重复 load。
+    if (instruction_index + 1 == block.insts.size()) {
+      const auto preload_it = loop_preloads_.find(block.name);
+      if (preload_it != loop_preloads_.end()) {
+        for (const auto& [value, reg] : preload_it->second) {
+          const auto type_it = val_type_map_.find(value);
+          const IR::IRType type = type_it == val_type_map_.end()
+                                      ? IR::IRType::IR_INT32
+                                      : type_it->second;
+          LoadValueToRegByName(value, reg, type);
+        }
+      }
     }
     bool is_call = (inst->inst_type == IR::IRInstructionType::IR_INST_CALL);
 
@@ -417,19 +868,34 @@ void Back::RiscvGenerator::Visit(const IR::IRBasicBlock& block) {
     }
 
     for (const auto& [var, reg] : regs_to_save) {
-      auto ti = val_type_map_.find(var);
-      IR::IRType t = (ti != val_type_map_.end()) ? ti->second : IR::IRType::IR_INT32;
-      StoreRegToValByName(var, reg, t);
+      const auto backup_it = call_backup_reg_map_.find(var);
+      if (backup_it != call_backup_reg_map_.end()) {
+        emitter_.EmitInst(IsFloatRegister(reg) ? "fmv.s" : "mv",
+                          backup_it->second, reg);
+      } else {
+        auto ti = val_type_map_.find(var);
+        IR::IRType t = (ti != val_type_map_.end()) ? ti->second : IR::IRType::IR_INT32;
+        StoreRegToValByName(var, reg, t);
+      }
     }
 
     Visit(*inst);
 
     for (const auto& [var, reg] : regs_to_save) {
-      auto ti = val_type_map_.find(var);
-      IR::IRType t = (ti != val_type_map_.end()) ? ti->second : IR::IRType::IR_INT32;
-      LoadValueToRegByName(var, reg, t);
+      const auto backup_it = call_backup_reg_map_.find(var);
+      if (backup_it != call_backup_reg_map_.end()) {
+        emitter_.EmitInst(IsFloatRegister(reg) ? "fmv.s" : "mv",
+                          reg, backup_it->second);
+      } else {
+        auto ti = val_type_map_.find(var);
+        IR::IRType t = (ti != val_type_map_.end()) ? ti->second : IR::IRType::IR_INT32;
+        LoadValueToRegByName(var, reg, t);
+      }
     }
   }
+
+  for (const auto& value : previously_unassigned) reg_map_.erase(value);
+  for (const auto& [value, reg] : previous_registers) reg_map_[value] = reg;
 }
 
 // Instruction dispatch
@@ -541,6 +1007,172 @@ bool Back::RiscvGenerator::TryEmitMulStrengthReduction(const IR::IRBinary& inst)
   return try_const(lhs_c, inst.GetRhs().get());
 }
 
+// 有符号二次幂除法/取模强度削弱（只在 O1 启用）。
+// C/SysY 的有符号除法向 0 取整，负数不能直接使用算术右移：
+//   q = (x + ((x >> 31) & (2^k - 1))) >> k
+// 取模再由 r = x - q * 2^k 得到。除数为负只影响商的符号，不影响余数。
+bool Back::RiscvGenerator::TryEmitSignedPowerOfTwoDivRem(
+    const IR::IRBinary& inst) {
+  if (GetOptimizationLevel() != OptimizationLevel::O1 ||
+      inst.GetOperandType() != IR::IRType::IR_INT32 ||
+      (inst.GetOp() != IR::IRBinaryOp::DIV &&
+       inst.GetOp() != IR::IRBinaryOp::MOD))
+    return false;
+
+  const auto* divisor_value =
+      IR::dyn_cast<IR::IRConstant>(inst.GetRhs().get());
+  if (!divisor_value || divisor_value->GetType() != IR::IRType::IR_INT32)
+    return false;
+  const int64_t divisor = std::get<int32_t>(divisor_value->GetValue());
+  if (divisor == 0) return false;
+
+  const bool negative_divisor = divisor < 0;
+  const uint64_t magnitude = negative_divisor
+                                 ? static_cast<uint64_t>(-divisor)
+                                 : static_cast<uint64_t>(divisor);
+  unsigned shift = 0;
+  if (!GetPowerOfTwoShift(magnitude, shift)) return false;
+
+  LoadValueToReg(inst.GetLhs().get(), "t5");
+  if (inst.GetOp() == IR::IRBinaryOp::MOD && shift == 0) {
+    emitter_.EmitInst("mv", "t5", "x0");
+    StoreRegToVal(&inst, "t5");
+    return true;
+  }
+
+  const char* arithmetic_shift = target_.Is64Bit() ? "sraiw" : "srai";
+  const char* logical_shift = target_.Is64Bit() ? "slliw" : "slli";
+  const char* add = target_.Is64Bit() ? "addw" : "add";
+  const char* subtract = target_.Is64Bit() ? "subw" : "sub";
+
+  // t6 保存“按正二次幂除数计算”的商，t5 始终保留原被除数。
+  if (shift == 0) {
+    emitter_.EmitInst("mv", "t6", "t5");
+  } else {
+    emitter_.EmitInst(arithmetic_shift, "t6", "t5", "31");
+    const uint64_t bias_mask = magnitude - 1;
+    if (bias_mask <= 2047) {
+      emitter_.EmitInst("andi", "t6", "t6", std::to_string(bias_mask));
+    } else {
+      // t4/t5/t6 均不在寄存器分配池中，可以安全作为 lowering 临时寄存器。
+      emitter_.EmitInst("li", "t4", std::to_string(bias_mask));
+      emitter_.EmitInst("and", "t6", "t6", "t4");
+    }
+    emitter_.EmitInst(add, "t6", "t5", "t6");
+    emitter_.EmitInst(arithmetic_shift, "t6", "t6",
+                      std::to_string(shift));
+  }
+
+  if (inst.GetOp() == IR::IRBinaryOp::DIV) {
+    if (negative_divisor)
+      emitter_.EmitInst(subtract, "t6", "x0", "t6");
+    StoreRegToVal(&inst, "t6");
+    return true;
+  }
+
+  // x % (-2^k) 与 x % 2^k 相同，因此余数路径不需要处理除数符号。
+  if (shift != 0)
+    emitter_.EmitInst(logical_shift, "t6", "t6", std::to_string(shift));
+  emitter_.EmitInst(subtract, "t5", "t5", "t6");
+  StoreRegToVal(&inst, "t5");
+  return true;
+}
+
+// 直接选择 RISC-V I-type 指令，避免先 li 常量再执行寄存器运算。
+bool Back::RiscvGenerator::TryEmitIntegerImmediate(
+    const IR::IRBinary& inst) {
+  if (GetOptimizationLevel() != OptimizationLevel::O1 ||
+      inst.GetOperandType() != IR::IRType::IR_INT32)
+    return false;
+
+  auto get_constant = [](const std::shared_ptr<IR::IRValue>& value,
+                         int32_t& result) {
+    const auto* constant = IR::dyn_cast<IR::IRConstant>(value.get());
+    if (!constant || constant->GetType() != IR::IRType::IR_INT32)
+      return false;
+    result = std::get<int32_t>(constant->GetValue());
+    return true;
+  };
+  auto fits_signed_12 = [](int64_t value) {
+    return value >= -2048 && value <= 2047;
+  };
+
+  int32_t lhs_constant = 0;
+  int32_t rhs_constant = 0;
+  const bool lhs_is_constant = get_constant(inst.GetLhs(), lhs_constant);
+  const bool rhs_is_constant = get_constant(inst.GetRhs(), rhs_constant);
+  const IR::IRValue* value = nullptr;
+  std::string opcode;
+  int64_t immediate = 0;
+
+  switch (inst.GetOp()) {
+    case IR::IRBinaryOp::ADD:
+      if (rhs_is_constant && fits_signed_12(rhs_constant)) {
+        value = inst.GetLhs().get();
+        immediate = rhs_constant;
+      } else if (lhs_is_constant && fits_signed_12(lhs_constant)) {
+        value = inst.GetRhs().get();
+        immediate = lhs_constant;
+      } else {
+        return false;
+      }
+      opcode = target_.Is64Bit() ? "addiw" : "addi";
+      break;
+    case IR::IRBinaryOp::SUB:
+      if (!rhs_is_constant || !fits_signed_12(-int64_t{rhs_constant}))
+        return false;
+      value = inst.GetLhs().get();
+      immediate = -int64_t{rhs_constant};
+      opcode = target_.Is64Bit() ? "addiw" : "addi";
+      break;
+    case IR::IRBinaryOp::AND:
+    case IR::IRBinaryOp::OR:
+    case IR::IRBinaryOp::XOR:
+      if (rhs_is_constant && fits_signed_12(rhs_constant)) {
+        value = inst.GetLhs().get();
+        immediate = rhs_constant;
+      } else if (lhs_is_constant && fits_signed_12(lhs_constant)) {
+        value = inst.GetRhs().get();
+        immediate = lhs_constant;
+      } else {
+        return false;
+      }
+      opcode = inst.GetOp() == IR::IRBinaryOp::AND
+                   ? "andi"
+                   : (inst.GetOp() == IR::IRBinaryOp::OR ? "ori" : "xori");
+      break;
+    case IR::IRBinaryOp::SHL:
+    case IR::IRBinaryOp::SHR:
+    case IR::IRBinaryOp::SAR:
+      if (!rhs_is_constant) return false;
+      value = inst.GetLhs().get();
+      immediate = static_cast<uint32_t>(rhs_constant) & 31U;
+      if (inst.GetOp() == IR::IRBinaryOp::SHL)
+        opcode = target_.Is64Bit() ? "slliw" : "slli";
+      else if (inst.GetOp() == IR::IRBinaryOp::SHR)
+        opcode = target_.Is64Bit() ? "srliw" : "srli";
+      else
+        opcode = target_.Is64Bit() ? "sraiw" : "srai";
+      break;
+    default:
+      return false;
+  }
+
+  std::string destination = "t5";
+  bool spilled = true;
+  const auto assigned = reg_map_.find(inst.GetOperandName());
+  if (assigned != reg_map_.end() && !assigned->second.empty() &&
+      assigned->second.front() != 'f') {
+    destination = assigned->second;
+    spilled = false;
+  }
+  LoadValueToReg(value, destination);
+  emitter_.EmitInst(opcode, destination, destination,
+                    std::to_string(immediate));
+  if (spilled) StoreRegToVal(&inst, destination);
+  return true;
+}
+
 // Binary
 void Back::RiscvGenerator::Visit(const IR::IRBinary& inst) {
   if (inst.GetOperandType() == IR::IRType::IR_FLOAT) {
@@ -580,6 +1212,8 @@ void Back::RiscvGenerator::Visit(const IR::IRBinary& inst) {
   }
 
   if (TryEmitMulStrengthReduction(inst)) return;
+  if (TryEmitSignedPowerOfTwoDivRem(inst)) return;
+  if (TryEmitIntegerImmediate(inst)) return;
 
   std::string name = inst.GetOperandName();
   auto ri = reg_map_.find(name);
@@ -626,6 +1260,9 @@ void Back::RiscvGenerator::Visit(const IR::IRBinary& inst) {
     case IR::IRBinaryOp::AND: emitter_.EmitInst("and", dest_reg, dest_reg, rhs_reg); break;
     case IR::IRBinaryOp::OR:  emitter_.EmitInst("or",  dest_reg, dest_reg, rhs_reg); break;
     case IR::IRBinaryOp::XOR: emitter_.EmitInst("xor", dest_reg, dest_reg, rhs_reg); break;
+    case IR::IRBinaryOp::SHL: emitter_.EmitInst(target_.Is64Bit() ? "sllw" : "sll", dest_reg, dest_reg, rhs_reg); break;
+    case IR::IRBinaryOp::SHR: emitter_.EmitInst(target_.Is64Bit() ? "srlw" : "srl", dest_reg, dest_reg, rhs_reg); break;
+    case IR::IRBinaryOp::SAR: emitter_.EmitInst(target_.Is64Bit() ? "sraw" : "sra", dest_reg, dest_reg, rhs_reg); break;
     default: assert(false && "Unsupported binary op");
   }
   if (spilled) StoreRegToVal(&inst, dest_reg);
@@ -763,60 +1400,36 @@ void Back::RiscvGenerator::EmitEdgeCopies(
     const std::vector<std::shared_ptr<IR::IRValue>>& args,
     const IR::IRBasicBlock& target) {
   assert(args.size() == target.params.size() && "block argument arity mismatch");
-  const int buffer = param_overflow_size_;
   const int slot_size = GetRegSize();
 
-  bool needs_staging = false;
+  // 块参数具有真正的并行赋值语义。先把所有源保存到独立缓冲区，再写入
+  // 目标位置，可以同时覆盖寄存器环、栈槽环以及寄存器/栈混合环。
+  // 调用实参仍使用更轻量的并行 copy 调度器；CFG 边先以正确性为硬门槛。
   for (size_t i = 0; i < args.size(); ++i) {
-    for (size_t j = 0; j < target.params.size(); ++j) {
-      if (i != j && args[i].get() == target.params[j].get()) {
-        needs_staging = true;
-        break;
-      }
-    }
-  }
-
-  if (!needs_staging) {
-    for (size_t i = 0; i < args.size(); ++i) {
-      if (args[i].get() == target.params[i].get()) continue;
-      const int destination = val_stack_map_.at(target.params[i]->GetOperandName());
-      if (target.params[i]->GetType() == IR::IRType::IR_FLOAT) {
-        LoadValueToFReg(args[i].get(), "ft5");
-        emitter_.EmitFsw("ft5", destination);
-      } else {
-        LoadValueToReg(args[i].get(), "t5");
-        if (GetTypeSize(target.params[i]->GetType()) == 8)
-          emitter_.EmitSd("t5", destination);
-        else
-          emitter_.EmitSw("t5", destination);
-      }
-    }
-    return;
-  }
-
-  for (size_t i = 0; i < args.size(); ++i) {
+    const int staging = param_overflow_size_ + static_cast<int>(i) * slot_size;
     if (args[i]->GetType() == IR::IRType::IR_FLOAT) {
       LoadValueToFReg(args[i].get(), "ft5");
-      emitter_.EmitFsw("ft5", buffer + static_cast<int>(i) * slot_size);
+      emitter_.EmitFsw("ft5", staging);
     } else {
       LoadValueToReg(args[i].get(), "t5");
       if (GetTypeSize(args[i]->GetType()) == 8)
-        emitter_.EmitSd("t5", buffer + static_cast<int>(i) * slot_size);
+        emitter_.EmitSd("t5", staging);
       else
-        emitter_.EmitSw("t5", buffer + static_cast<int>(i) * slot_size);
+        emitter_.EmitSw("t5", staging);
     }
   }
-  for (size_t i = 0; i < args.size(); ++i) {
+
+  for (size_t i = 0; i < target.params.size(); ++i) {
     const auto& param = target.params[i];
-    const int source = buffer + static_cast<int>(i) * slot_size;
+    const int staging = param_overflow_size_ + static_cast<int>(i) * slot_size;
     if (param->GetType() == IR::IRType::IR_FLOAT) {
-      emitter_.EmitFlw("ft5", source);
+      emitter_.EmitFlw("ft5", staging);
       StoreFRegToVal(param.get(), "ft5");
-    } else if (GetTypeSize(param->GetType()) == 8) {
-      emitter_.EmitLd("t5", source);
-      StoreRegToVal(param.get(), "t5");
     } else {
-      emitter_.EmitLw("t5", source);
+      if (GetTypeSize(param->GetType()) == 8)
+        emitter_.EmitLd("t5", staging);
+      else
+        emitter_.EmitLw("t5", staging);
       StoreRegToVal(param.get(), "t5");
     }
   }
@@ -827,44 +1440,26 @@ void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
   std::vector<IR::IRType> arg_types;
   for (const auto& a : args) arg_types.push_back(a->GetType());
   const auto locs = calling_convention_.AssignArgumentLocations(arg_types);
-  int arg_buf = param_overflow_size_;
-  const int arg_slot_size = GetRegSize();
-
+  std::vector<CopyDestination> destinations;
+  destinations.reserve(args.size());
   for (size_t i = 0; i < args.size(); ++i) {
+    CopyDestination destination;
+    destination.type = args[i]->GetType();
     const auto& loc = locs[i];
     if (loc.kind == ArgumentLocation::Kind::FLOAT_REGISTER) {
-      LoadValueToFReg(args[i].get(), "ft5");
-      emitter_.EmitFsw("ft5", arg_buf + (int)i * arg_slot_size);
+      destination.kind = CopyDestination::Kind::REGISTER;
+      destination.reg = "fa" + std::to_string(loc.index);
     } else if (loc.kind == ArgumentLocation::Kind::INTEGER_REGISTER) {
-      LoadValueToReg(args[i].get(), "t5");
-      if (GetTypeSize(args[i]->GetType()) == 8) emitter_.EmitSd("t5", arg_buf + (int)i * arg_slot_size);
-      else                                      emitter_.EmitSw("t5", arg_buf + (int)i * arg_slot_size);
+      destination.kind = CopyDestination::Kind::REGISTER;
+      destination.reg = "a" + std::to_string(loc.index);
     } else {
-      int param_off = GetRegSize() * loc.index;
-      if (args[i]->GetType() == IR::IRType::IR_FLOAT) {
-        LoadValueToFReg(args[i].get(), "ft5");
-        emitter_.EmitFsw("ft5", param_off);
-      } else if (GetTypeSize(args[i]->GetType()) == 8) {
-        LoadValueToReg(args[i].get(), "t5");
-        emitter_.EmitSd("t5", param_off);
-      } else {
-        LoadValueToReg(args[i].get(), "t5");
-        emitter_.EmitSw("t5", param_off);
-      }
+      destination.kind = CopyDestination::Kind::STACK;
+      destination.stack_offset = GetRegSize() * loc.index;
     }
+    destinations.push_back(std::move(destination));
   }
 
-  for (size_t i = 0; i < args.size(); ++i) {
-    const auto& loc = locs[i];
-    if (loc.kind == ArgumentLocation::Kind::FLOAT_REGISTER)
-      emitter_.EmitFlw("fa" + std::to_string(loc.index), arg_buf + (int)i * arg_slot_size);
-    else if (loc.kind == ArgumentLocation::Kind::INTEGER_REGISTER) {
-      if (GetTypeSize(args[i]->GetType()) == 8)
-        emitter_.EmitLd("a" + std::to_string(loc.index), arg_buf + (int)i * arg_slot_size);
-      else
-        emitter_.EmitLw("a" + std::to_string(loc.index), arg_buf + (int)i * arg_slot_size);
-    }
-  }
+  EmitParallelValueCopies(args, destinations, param_overflow_size_);
 
   emitter_.EmitInst("call", StripAt(inst.GetFunc()->GetOperandName()));
 

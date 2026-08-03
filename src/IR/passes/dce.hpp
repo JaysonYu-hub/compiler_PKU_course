@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace IR {
@@ -108,30 +109,57 @@ private:
 
   static bool RemoveDeadInstructions(IRFunction& function) {
     std::unordered_map<const IRValue*, size_t> use_count;
+    std::unordered_map<const IRValue*, std::shared_ptr<IRInstruction>>
+        instruction_values;
     for (const auto& block : function.blocks) {
       for (const auto& inst : block->insts) {
+        instruction_values.emplace(inst.get(), inst);
         for (const auto& use : inst->GetUses()) {
           if (use) ++use_count[use.get()];
         }
       }
     }
 
-    bool changed = false;
+    // 删除一条死指令时同步递减其操作数的使用次数，一次工作队列遍历即可
+    // 删除整条死链，避免反复全函数扫描产生 O(N^2) 复杂度。
+    std::vector<std::shared_ptr<IRInstruction>> worklist;
+    for (const auto& [value, instruction] : instruction_values) {
+      if (!instruction->HasSideEffect() && use_count[value] == 0)
+        worklist.push_back(instruction);
+    }
+
+    std::unordered_set<const IRInstruction*> dead;
+    while (!worklist.empty()) {
+      auto instruction = worklist.back();
+      worklist.pop_back();
+      if (!instruction || dead.count(instruction.get()) != 0 ||
+          instruction->HasSideEffect() || use_count[instruction.get()] != 0)
+        continue;
+
+      dead.insert(instruction.get());
+      for (const auto& operand : instruction->GetUses()) {
+        if (!operand) continue;
+        auto count = use_count.find(operand.get());
+        if (count == use_count.end() || count->second == 0) continue;
+        --count->second;
+        if (count->second != 0) continue;
+        const auto definition = instruction_values.find(operand.get());
+        if (definition != instruction_values.end() &&
+            !definition->second->HasSideEffect())
+          worklist.push_back(definition->second);
+      }
+    }
+
+    if (dead.empty()) return false;
     for (const auto& block : function.blocks) {
       std::vector<std::shared_ptr<IRInstruction>> kept;
       kept.reserve(block->insts.size());
       for (const auto& inst : block->insts) {
-        // store/call/branch/return/zero_init 等指令通过 HasSideEffect 保留。
-        // 普通 load 在 SysY 中没有 volatile 语义，结果无人使用时可以删除。
-        if (!inst->HasSideEffect() && use_count[inst.get()] == 0) {
-          changed = true;
-          continue;
-        }
-        kept.push_back(inst);
+        if (dead.count(inst.get()) == 0) kept.push_back(inst);
       }
       block->insts = std::move(kept);
     }
-    return changed;
+    return true;
   }
 
 public:

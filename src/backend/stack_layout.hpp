@@ -40,10 +40,12 @@ public:
     // 1. Parameter overflow size
     layout.param_overflow_size = max_stack_arg_count * reg_size;
 
-    // 2. Argument buffer size (for calling other functions)
-    // Register-bound arguments are staged here before being moved to a*/fa*.
-    // Size it for the largest call instead of assuming at most 16 arguments.
-    layout.arg_buffer_size = has_call ? max_call_arg_count * reg_size : 0;
+    // 2. Parallel-copy staging buffer
+    // 函数调用实参和 SSA 块参数共同使用这块空间。即使函数本身没有 call，
+    // 循环回边上的 stack/stack copy 也可能需要先保存被覆盖的旧值，因此
+    // 不能再用 has_call 作为是否分配缓冲区的条件。
+    layout.arg_buffer_size =
+        max_call_arg_count > 0 ? max_call_arg_count * reg_size : 0;
 
     // 3. Saved RA size
     layout.ra_save_size = has_call ? reg_size : 0;

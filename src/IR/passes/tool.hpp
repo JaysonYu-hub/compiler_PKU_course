@@ -3,7 +3,10 @@
 #include "../custom_ir.hpp"
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -193,28 +196,86 @@ enum class AliasResult {
 
 class AliasAnalysis {
 public: 
-  static const IRValue* GetBaseValue(const IRValue* ptr) {
+  struct PointerLocation {
+    const IRValue* base = nullptr;
+    std::int64_t byte_offset = 0;
+    bool offset_known = true;
+  };
+
+  static PointerLocation GetPointerLocation(const IRValue* ptr) {
+    PointerLocation location;
     while (ptr) {
-      if (auto gep = dyn_cast<IRGetElemPtr>(ptr)) {
-        ptr = gep->GetArr().get();
-      } else if (auto gp = dyn_cast<IRGetPtr>(ptr)) {
-        ptr = gp->GetPtr().get();
+      const IRValue* next = nullptr;
+      const IRValue* index = nullptr;
+      int element_size = 0;
+      if (const auto* gep = dyn_cast<IRGetElemPtr>(ptr)) {
+        next = gep->GetArr().get();
+        index = gep->GetIndex().get();
+        element_size = gep->GetElemSize();
+      } else if (const auto* getptr = dyn_cast<IRGetPtr>(ptr)) {
+        next = getptr->GetPtr().get();
+        index = getptr->GetIndex().get();
+        element_size = getptr->GetElemSize();
       } else {
         break;
       }
+
+      const auto* constant = dyn_cast<IRConstant>(index);
+      if (!constant || constant->GetType() != IRType::IR_INT32) {
+        location.offset_known = false;
+      } else if (location.offset_known) {
+        const std::int64_t index_value =
+            std::get<int32_t>(constant->GetValue());
+        const __int128 wide = static_cast<__int128>(index_value) *
+                                  static_cast<__int128>(element_size) +
+                              location.byte_offset;
+        if (wide < std::numeric_limits<std::int64_t>::min() ||
+            wide > std::numeric_limits<std::int64_t>::max())
+          location.offset_known = false;
+        else
+          location.byte_offset = static_cast<std::int64_t>(wide);
+      }
+      ptr = next;
     }
-    return ptr;
+    location.base = ptr;
+    return location;
+  }
+
+  static const IRValue* GetBaseValue(const IRValue* ptr) {
+    return GetPointerLocation(ptr).base;
   }
 
   static AliasResult Alias(const IRValue* ptr_a, const IRValue* ptr_b) { 
+    return AliasMemoryAccess(ptr_a, 0, ptr_b, 0);
+  }
+
+  static AliasResult AliasMemoryAccess(const IRValue* ptr_a,
+                                       std::size_t size_a,
+                                       const IRValue* ptr_b,
+                                       std::size_t size_b) {
     if (ptr_a == ptr_b) return AliasResult::MustAlias;
-    const IRValue* baseA = GetBaseValue(ptr_a);
-    const IRValue* baseB = GetBaseValue(ptr_b);
-    if (baseA == baseB) return AliasResult::MayAlias;
+    const PointerLocation location_a = GetPointerLocation(ptr_a);
+    const PointerLocation location_b = GetPointerLocation(ptr_b);
+    const IRValue* baseA = location_a.base;
+    const IRValue* baseB = location_b.base;
+    if (baseA != baseB) {
     // 两个不同的局部变量/全局变量，绝对不重叠
     if ((isa<IRAlloc>(baseA) || isa<IRGlobalAlloc>(baseA)) &&
         (isa<IRAlloc>(baseB) || isa<IRGlobalAlloc>(baseB))) {
       return AliasResult::NoAlias;
+    }
+      return AliasResult::MayAlias;
+    }
+
+    if (location_a.offset_known && location_b.offset_known && size_a != 0 &&
+        size_b != 0) {
+      if (location_a.byte_offset == location_b.byte_offset)
+        return AliasResult::MustAlias;
+      const __int128 a_begin = location_a.byte_offset;
+      const __int128 a_end = a_begin + size_a;
+      const __int128 b_begin = location_b.byte_offset;
+      const __int128 b_end = b_begin + size_b;
+      if (a_end <= b_begin || b_end <= a_begin) return AliasResult::NoAlias;
     }
     return AliasResult::MayAlias;
   }

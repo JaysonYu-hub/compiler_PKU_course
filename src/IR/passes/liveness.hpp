@@ -16,6 +16,13 @@ namespace Pass {
 
 class LiveVarAnalysis {
 public:
+  struct NaturalLoopRegion {
+    std::string header;
+    std::string preheader;
+    std::unordered_set<std::string> blocks;
+    int depth = 0;
+  };
+
   std::unordered_map<std::string, std::unordered_set<std::string>> live_out;
   std::unordered_map<std::string, std::unordered_set<std::string>> live_in;
   std::unordered_map<std::shared_ptr<IR::IRInstruction>, std::unordered_set<std::string>> live_out_inst;
@@ -26,8 +33,11 @@ public:
   std::unordered_map<std::string, std::unordered_map<std::string, std::uint64_t>> func_use_weights;
   std::unordered_map<std::string, std::unordered_map<std::string, std::uint64_t>> func_use_counts;
   std::unordered_map<std::string, std::unordered_set<std::string>> func_crosses_calls;
+  std::unordered_map<std::string,
+      std::unordered_map<std::string, std::uint64_t>> func_call_cross_counts;
   std::unordered_map<std::string, std::unordered_set<std::string>> func_float_values;
   std::unordered_map<std::string, std::unordered_map<std::string, int>> func_loop_depth;
+  std::unordered_map<std::string, std::vector<NaturalLoopRegion>> func_natural_loops;
   long long int max_inf = std::numeric_limits<long long int>::max();
   long long int min_inf = std::numeric_limits<long long int>::min();
   const std::vector<std::string> caller_saved_registers = {

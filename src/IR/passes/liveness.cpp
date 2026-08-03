@@ -58,8 +58,10 @@ void LiveVarAnalysis::Analyze(IR::IRProgram *program) {
   func_use_weights.clear();
   func_use_counts.clear();
   func_crosses_calls.clear();
+  func_call_cross_counts.clear();
   func_float_values.clear();
   func_loop_depth.clear();
+  func_natural_loops.clear();
 
   bool changed = true;
   while (changed) {
@@ -124,7 +126,11 @@ void LiveVarAnalysis::Analyze(IR::IRProgram *program) {
     std::unordered_set<IRBasicBlock*> reachable(
         dominator_tree.rpo_order.begin(), dominator_tree.rpo_order.end());
 
-    std::vector<std::unordered_set<IRBasicBlock*>> natural_loops;
+    struct LocalLoop {
+      IRBasicBlock* header = nullptr;
+      std::unordered_set<IRBasicBlock*> blocks;
+    };
+    std::vector<LocalLoop> natural_loops;
     for (IRBasicBlock* latch : dominator_tree.rpo_order) {
       for (IRBasicBlock* header : latch->GetSuccessors()) {
         const auto latch_index = dominator_tree.rpo_index.find(latch);
@@ -135,26 +141,52 @@ void LiveVarAnalysis::Analyze(IR::IRProgram *program) {
         // 绝大多数普通控制流边，再进行较贵的支配查询。
         if (header_index->second > latch_index->second ||
             !dominator_tree.Dominates(header, latch)) continue;
-        std::unordered_set<IRBasicBlock*> loop = {header, latch};
+        std::unordered_set<IRBasicBlock*> loop_blocks = {header, latch};
         std::vector<IRBasicBlock*> reverse_worklist;
         if (latch != header) reverse_worklist.push_back(latch);
         for (size_t head = 0; head < reverse_worklist.size(); ++head) {
           for (IRBasicBlock* pred : func->GetPredecessors(reverse_worklist[head])) {
-            if (reachable.count(pred) && loop.insert(pred).second && pred != header)
+            if (reachable.count(pred) && loop_blocks.insert(pred).second && pred != header)
               reverse_worklist.push_back(pred);
           }
         }
-        if (std::find(natural_loops.begin(), natural_loops.end(), loop) == natural_loops.end())
-          natural_loops.push_back(std::move(loop));
+        const bool duplicate = std::any_of(
+            natural_loops.begin(), natural_loops.end(), [&](const LocalLoop& loop) {
+              return loop.header == header && loop.blocks == loop_blocks;
+            });
+        if (!duplicate)
+          natural_loops.push_back({header, std::move(loop_blocks)});
       }
     }
 
     std::unordered_map<IRBasicBlock*, int> block_depth;
     for (IRBasicBlock* block : reachable) block_depth[block] = 0;
     for (const auto& loop : natural_loops)
-      for (IRBasicBlock* block : loop) ++block_depth[block];
+      for (IRBasicBlock* block : loop.blocks) ++block_depth[block];
     for (const auto& block : func->blocks)
       func_loop_depth[func_name][block->name] = block_depth[block.get()];
+
+    // 暴露自然循环的块集合和唯一外部前驱。后端第五阶段只在存在唯一
+    // preheader 时做循环边界切分；多入口循环保持原分配，避免在错误路径
+    // 上使用尚未初始化的寄存器值。
+    for (const auto& loop : natural_loops) {
+      NaturalLoopRegion region;
+      region.header = loop.header ? loop.header->name : "";
+      region.depth = loop.header ? block_depth[loop.header] : 0;
+      for (IRBasicBlock* block : loop.blocks)
+        if (block) region.blocks.insert(block->name);
+
+      std::vector<IRBasicBlock*> outside_predecessors;
+      if (loop.header) {
+        for (IRBasicBlock* pred : func->GetPredecessors(loop.header)) {
+          if (pred && loop.blocks.count(pred) == 0)
+            outside_predecessors.push_back(pred);
+        }
+      }
+      if (outside_predecessors.size() == 1)
+        region.preheader = outside_predecessors.front()->name;
+      func_natural_loops[func_name].push_back(std::move(region));
+    }
 
     auto& weights = func_use_weights[func_name];
     auto& counts = func_use_counts[func_name];
@@ -184,7 +216,10 @@ void LiveVarAnalysis::Analyze(IR::IRProgram *program) {
           std::string def;
           GetDefinition(inst.get(), def);
           for (const auto& var : live_out_inst[inst]) {
-            if (var != def) func_crosses_calls[func_name].insert(var);
+            if (var != def) {
+              func_crosses_calls[func_name].insert(var);
+              ++func_call_cross_counts[func_name][var];
+            }
           }
         }
       }

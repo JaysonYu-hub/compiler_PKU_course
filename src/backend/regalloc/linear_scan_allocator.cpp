@@ -10,8 +10,9 @@ LinearScanAllocator::LinearScanAllocator(
     const std::unordered_set<std::string>& crosses_calls,
     const std::unordered_set<std::string>& float_values,
     const std::unordered_map<std::string, std::uint64_t>& use_weights,
-    const std::unordered_map<std::string, std::uint64_t>& use_counts)
-    : reg_size(reg_size) {
+    const std::unordered_map<std::string, std::uint64_t>& use_counts,
+    const std::unordered_map<std::string, std::string>& copy_hints)
+    : reg_size(reg_size), copy_hints_(copy_hints) {
   for (const auto& [name, range] : intervals) {
     if (!is_virtual_register(name) || range[0] > range[1]) continue;
     const auto weight_it = use_weights.find(name);
@@ -30,6 +31,8 @@ LinearScanAllocator::LinearScanAllocator(
     if (lhs.end != rhs.end) return lhs.end < rhs.end;
     return lhs.var < rhs.var;
   });
+  for (std::size_t i = 0; i < intervals_list.size(); ++i)
+    interval_index_[intervals_list[i].var] = i;
 }
 
 bool LinearScanAllocator::IsCalleeSaved(const std::string& reg) {
@@ -97,16 +100,36 @@ void LinearScanAllocator::Allocate() {
         // 从尾部查找：刚刚过期的区间会被追加到 free_regs 尾部。
         // 二元运算的 lhs 若在当前指令后死亡，新结果就更可能复用其寄存器，
         // 代码生成器因而无需再发出一条 mv/fmv.s。
-        auto preferred = std::find_if(
-            free_regs.rbegin(), free_regs.rend(), [&](const std::string& reg) {
-              return IsCalleeSaved(reg) == current.crosses_call;
-            });
-        if (preferred == free_regs.rend()) {
-          current.reg = free_regs.back();
-          free_regs.pop_back();
-        } else {
-          current.reg = *preferred;
-          free_regs.erase(std::next(preferred).base());
+        bool used_copy_hint = false;
+        const auto hint_it = copy_hints_.find(current.var);
+        if (hint_it != copy_hints_.end()) {
+          const auto source_it = interval_index_.find(hint_it->second);
+          if (source_it != interval_index_.end()) {
+            const LiveInterval& source = intervals_list[source_it->second];
+            auto hinted_reg = std::find(free_regs.begin(), free_regs.end(), source.reg);
+            if (!source.spilled && !source.reg.empty() &&
+                hinted_reg != free_regs.end() &&
+                source.is_float == current.is_float &&
+                IsCalleeSaved(source.reg) == current.crosses_call) {
+              current.reg = source.reg;
+              free_regs.erase(hinted_reg);
+              used_copy_hint = true;
+            }
+          }
+        }
+
+        if (!used_copy_hint) {
+          auto preferred = std::find_if(
+              free_regs.rbegin(), free_regs.rend(), [&](const std::string& reg) {
+                return IsCalleeSaved(reg) == current.crosses_call;
+              });
+          if (preferred == free_regs.rend()) {
+            current.reg = free_regs.back();
+            free_regs.pop_back();
+          } else {
+            current.reg = *preferred;
+            free_regs.erase(std::next(preferred).base());
+          }
         }
         active.push_back(&current);
         sort_active();

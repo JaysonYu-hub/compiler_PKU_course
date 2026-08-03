@@ -4,6 +4,7 @@
 #include "tool.hpp"
 #include <algorithm>
 #include <cstddef>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <unordered_map>
@@ -104,6 +105,97 @@ private:
   // 后端活跃性分析按 blocks 的逆序迭代。CFG 合并或 LICM 插入新块后，
   // 原向量顺序可能与控制流完全相反，使数据流方程需要大量轮次才能收敛。
   // 将可达块恢复为 RPO，既不改变语义，也能稳定后端编译时间。
+  static bool MergeLinearBlocks(IRFunction& function) {
+    if (function.blocks.size() < 2) return false;
+
+    std::unordered_map<IRBasicBlock*, std::unordered_set<IRBasicBlock*>>
+        predecessors;
+    std::unordered_set<IRBasicBlock*> active;
+    for (const auto& block : function.blocks) active.insert(block.get());
+    for (const auto& block : function.blocks) {
+      for (IRBasicBlock* successor : block->GetSuccessors()) {
+        if (successor) predecessors[successor].insert(block.get());
+      }
+    }
+
+    IRBasicBlock* entry = function.blocks.front().get();
+    std::deque<IRBasicBlock*> candidates;
+    for (const auto& block : function.blocks) {
+      if (block.get() != entry && predecessors[block.get()].size() == 1)
+        candidates.push_back(block.get());
+    }
+
+    std::unordered_map<const IRValue*, std::shared_ptr<IRValue>> replacements;
+    bool changed = false;
+    while (!candidates.empty()) {
+      IRBasicBlock* block = candidates.front();
+      candidates.pop_front();
+      if (!block || block == entry || active.count(block) == 0 ||
+          predecessors[block].size() != 1)
+        continue;
+
+      IRBasicBlock* predecessor = *predecessors[block].begin();
+      if (!predecessor || predecessor == block ||
+          active.count(predecessor) == 0 || predecessor->insts.empty())
+        continue;
+      const auto* jump = dyn_cast<IRJump>(predecessor->insts.back().get());
+      if (!jump || jump->GetTarget().get() != block ||
+          jump->GetArgs().size() != block->params.size())
+        continue;
+
+      // 只记录块参数替换，全部合并后统一扫描 use，避免每合并一个块就
+      // ReplaceAllUses 整个函数。
+      for (std::size_t index = 0; index < block->params.size(); ++index)
+        replacements[block->params[index].get()] = jump->GetArgs()[index];
+
+      predecessor->insts.pop_back();
+      predecessor->insts.insert(predecessor->insts.end(), block->insts.begin(),
+                                block->insts.end());
+      active.erase(block);
+      changed = true;
+
+      for (IRBasicBlock* successor : block->GetSuccessors()) {
+        if (!successor || active.count(successor) == 0) continue;
+        auto& preds = predecessors[successor];
+        preds.erase(block);
+        preds.insert(predecessor);
+        if (successor != entry && preds.size() == 1)
+          candidates.push_back(successor);
+      }
+      if (predecessor != entry && predecessors[predecessor].size() == 1)
+        candidates.push_back(predecessor);
+    }
+
+    if (!changed) return false;
+
+    auto resolve = [&](std::shared_ptr<IRValue> value) {
+      std::unordered_set<const IRValue*> visited;
+      while (value && replacements.count(value.get()) != 0 &&
+             visited.insert(value.get()).second)
+        value = replacements.at(value.get());
+      return value;
+    };
+    for (const auto& block : function.blocks) {
+      if (active.count(block.get()) == 0) continue;
+      for (const auto& instruction : block->insts) {
+        for (const auto& use : instruction->GetUses()) {
+          if (!use) continue;
+          auto replacement = resolve(use);
+          if (replacement.get() != use.get())
+            instruction->ReplaceUse(use.get(), std::move(replacement));
+        }
+      }
+    }
+
+    std::vector<std::shared_ptr<IRBasicBlock>> kept;
+    kept.reserve(active.size());
+    for (const auto& block : function.blocks) {
+      if (active.count(block.get()) != 0) kept.push_back(block);
+    }
+    function.blocks = std::move(kept);
+    return true;
+  }
+
   static bool ReorderBlocksRPO(IRFunction& function) {
     if (function.blocks.empty()) return false;
 
@@ -147,7 +239,7 @@ public:
       local_changed |= old_size != function.blocks.size();
 
       // 每次只合并一个块，随后重新计算前驱关系，避免使用失效的 CFG 信息。
-      local_changed |= MergeOneLinearBlock(function);
+      local_changed |= MergeLinearBlocks(function);
       changed |= local_changed;
     }
     changed |= ReorderBlocksRPO(function);

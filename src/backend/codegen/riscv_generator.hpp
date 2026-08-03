@@ -50,6 +50,13 @@ private:
   std::unordered_map<std::string, int>         spill_offsets_;
   std::unordered_map<std::string, int>         val_stack_map_;
   std::unordered_map<std::string, IR::IRType>  val_type_map_;
+  // 第五阶段的有限位置切分：call 前后使用保留的 callee-saved 寄存器
+  // 暂存值；循环块内则可为循环外定义的 spilled SSA 值指定专用寄存器。
+  std::unordered_map<std::string, std::string> call_backup_reg_map_;
+  std::unordered_map<std::string,
+      std::unordered_map<std::string, std::string>> loop_reg_overrides_;
+  std::unordered_map<std::string,
+      std::vector<std::pair<std::string, std::string>>> loop_preloads_;
   std::unordered_set<std::string>              local_allocs_;
   std::vector<std::string>                     used_s_regs_;
   StackLayout  stack_layout_;
@@ -113,14 +120,35 @@ private:
   void LoadValueToFReg (const IR::IRValue* val, const std::string& reg);
   void StoreFRegToVal  (const IR::IRValue* val, const std::string& reg);
   void LoadAddressToReg(const IR::IRValue* val, const std::string& reg);
+
+  // SSA 块参数和函数实参都具有“所有源值先读取、所有目的位置后写入”的
+  // 并行语义。CopyDestination 只描述物理目的位置，统一调度器负责处理
+  // register/register 环、stack/stack 覆盖以及常量和全局值。
+  struct CopyDestination {
+    enum class Kind { REGISTER, STACK } kind = Kind::STACK;
+    std::string reg;
+    int stack_offset = 0;
+    IR::IRType type = IR::IRType::IR_INT32;
+    std::string value_name;
+  };
+
   void EmitEdgeCopies(const std::vector<std::shared_ptr<IR::IRValue>>& args,
                       const IR::IRBasicBlock& target);
+  void EmitParallelValueCopies(
+      const std::vector<std::shared_ptr<IR::IRValue>>& sources,
+      const std::vector<CopyDestination>& destinations,
+      int staging_base);
+  void EmitParallelRegisterCopies(
+      std::vector<std::pair<std::string, std::string>> moves,
+      bool is_float);
 
   void StoreRegToValByName (const std::string& name, const std::string& reg, IR::IRType t);
   void LoadValueToRegByName(const std::string& name, const std::string& reg, IR::IRType t);
 
   void EmitIndexScale(int elem_size);
   bool TryEmitMulStrengthReduction(const IR::IRBinary& inst);
+  bool TryEmitSignedPowerOfTwoDivRem(const IR::IRBinary& inst);
+  bool TryEmitIntegerImmediate(const IR::IRBinary& inst);
 };
 
 }

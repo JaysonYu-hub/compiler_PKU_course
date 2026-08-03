@@ -5,6 +5,7 @@
 #include "tool.hpp"
 #include <cmath>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <memory>
 #include <unordered_map>
@@ -266,6 +267,121 @@ private:
     return std::get<int32_t>(constant.GetValue()) != 0;
   }
 
+  static void SolveWithWorklist(
+      IRFunction& function, StateMap& states, EdgeSet& executable_edges,
+      std::unordered_set<IRBasicBlock*>& executable_blocks) {
+    // value -> 使用它的基本块。值状态变化时只重算真正受影响的块。
+    std::unordered_map<const IRValue*, std::vector<IRBasicBlock*>> user_blocks;
+    for (const auto& block : function.blocks) {
+      for (const auto& instruction : block->insts) {
+        for (const auto& use : instruction->GetUses()) {
+          if (use) user_blocks[use.get()].push_back(block.get());
+        }
+      }
+    }
+
+    std::deque<IRBasicBlock*> worklist;
+    std::unordered_set<IRBasicBlock*> queued;
+    auto enqueue = [&](IRBasicBlock* block) {
+      if (block && queued.insert(block).second) worklist.push_back(block);
+    };
+    auto enqueue_users = [&](const IRValue* value) {
+      const auto found = user_blocks.find(value);
+      if (found == user_blocks.end()) return;
+      for (IRBasicBlock* block : found->second) enqueue(block);
+    };
+
+    IRBasicBlock* entry = function.blocks.front().get();
+    executable_blocks.insert(entry);
+    for (const auto& parameter : entry->params) {
+      if (UpdateState(states, parameter.get(), LatticeValue::Overdefined()))
+        enqueue_users(parameter.get());
+    }
+    enqueue(entry);
+
+    auto propagate_edge = [&](IRBasicBlock* from, IRBasicBlock* to, int arm,
+                              const std::vector<std::shared_ptr<IRValue>>& args) {
+      if (!to) return false;
+      const bool edge_added =
+          MarkEdge(from, to, arm, executable_edges, executable_blocks);
+      if (edge_added) enqueue(to);
+      for (std::size_t index = 0; index < to->params.size(); ++index) {
+        const LatticeValue incoming =
+            args.size() == to->params.size()
+                ? GetState(args[index], states)
+                : LatticeValue::Overdefined();
+        if (UpdateState(states, to->params[index].get(), incoming))
+          enqueue_users(to->params[index].get());
+      }
+      return edge_added;
+    };
+
+    auto process_block = [&](IRBasicBlock* block) {
+      if (!block || executable_blocks.count(block) == 0) return;
+      for (const auto& instruction : block->insts) {
+        if (EvaluateInstruction(instruction, states))
+          enqueue_users(instruction.get());
+      }
+      if (block->insts.empty()) return;
+
+      const auto& terminator = block->insts.back();
+      if (const auto* jump = dyn_cast<IRJump>(terminator.get())) {
+        propagate_edge(block,
+                       dyn_cast<IRBasicBlock>(jump->GetTarget().get()), 0,
+                       jump->GetArgs());
+        return;
+      }
+      const auto* branch = dyn_cast<IRBranch>(terminator.get());
+      if (!branch) return;
+      const LatticeValue condition = GetState(branch->GetCond(), states);
+      if (condition.kind == LatticeKind::Constant) {
+        const bool take_then = ConstantIsTrue(*condition.constant);
+        propagate_edge(
+            block,
+            dyn_cast<IRBasicBlock>((take_then ? branch->GetThenTarget()
+                                              : branch->GetElseTarget()).get()),
+            take_then ? 1 : 2,
+            take_then ? branch->GetThenArgs() : branch->GetElseArgs());
+      } else if (condition.kind == LatticeKind::Overdefined) {
+        propagate_edge(block,
+                       dyn_cast<IRBasicBlock>(branch->GetThenTarget().get()), 1,
+                       branch->GetThenArgs());
+        propagate_edge(block,
+                       dyn_cast<IRBasicBlock>(branch->GetElseTarget().get()), 2,
+                       branch->GetElseArgs());
+      }
+    };
+
+    while (true) {
+      while (!worklist.empty()) {
+        IRBasicBlock* block = worklist.front();
+        worklist.pop_front();
+        queued.erase(block);
+        process_block(block);
+      }
+
+      // Unknown 条件不能证明任一分支不可达；临时不动点后保守激活两边。
+      bool forced_progress = false;
+      for (const auto& block : function.blocks) {
+        if (executable_blocks.count(block.get()) == 0 || block->insts.empty())
+          continue;
+        const auto* branch = dyn_cast<IRBranch>(block->insts.back().get());
+        if (!branch ||
+            GetState(branch->GetCond(), states).kind != LatticeKind::Unknown)
+          continue;
+        forced_progress |= propagate_edge(
+            block.get(),
+            dyn_cast<IRBasicBlock>(branch->GetThenTarget().get()), 1,
+            branch->GetThenArgs());
+        forced_progress |= propagate_edge(
+            block.get(),
+            dyn_cast<IRBasicBlock>(branch->GetElseTarget().get()), 2,
+            branch->GetElseArgs());
+      }
+      if (!forced_progress && worklist.empty()) break;
+    }
+  }
+
 public:
   bool OptimizeFunction(IRFunction& function) {
     if (function.blocks.empty()) return false;
@@ -273,9 +389,9 @@ public:
     StateMap states;
     EdgeSet executable_edges;
     std::unordered_set<IRBasicBlock*> executable_blocks;
-    executable_blocks.insert(function.blocks.front().get());
+    SolveWithWorklist(function, states, executable_edges, executable_blocks);
 
-    while (true) {
+    if (false) while (true) {
       bool progress = false;
 
       for (const auto& block : function.blocks) {
@@ -342,21 +458,30 @@ public:
     bool changed = false;
 
     // 先替换块参数，再替换指令结果；后续 DCE 会删除失去用途的定义和实参。
+    // 批量收集后只扫描一次 use。旧实现每发现一个常量定义就扫描整个函数，
+    // 在长 SSA 链上会退化为 O(N^2)。
+    std::unordered_map<const IRValue*, std::shared_ptr<IRValue>> replacements;
     for (const auto& block : function.blocks) {
       for (const auto& param : block->params) {
         const auto found = states.find(param.get());
         if (found != states.end() &&
-            found->second.kind == LatticeKind::Constant) {
-          changed |= function.ReplaceAllUses(param.get(),
-                                             found->second.constant);
-        }
+            found->second.kind == LatticeKind::Constant)
+          replacements.emplace(param.get(), found->second.constant);
       }
       for (const auto& inst : block->insts) {
         const auto found = states.find(inst.get());
         if (found != states.end() &&
-            found->second.kind == LatticeKind::Constant) {
-          changed |= function.ReplaceAllUses(inst.get(),
-                                             found->second.constant);
+            found->second.kind == LatticeKind::Constant)
+          replacements.emplace(inst.get(), found->second.constant);
+      }
+    }
+    for (const auto& block : function.blocks) {
+      for (const auto& inst : block->insts) {
+        for (const auto& use : inst->GetUses()) {
+          if (!use) continue;
+          const auto replacement = replacements.find(use.get());
+          if (replacement != replacements.end())
+            changed |= inst->ReplaceUse(use.get(), replacement->second);
         }
       }
     }

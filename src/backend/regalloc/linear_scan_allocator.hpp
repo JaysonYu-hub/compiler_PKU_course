@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <array>
 #include <cstdint>
+#include <cstddef>
 
 namespace Back {
 
@@ -42,7 +43,8 @@ public:
                       const std::unordered_set<std::string>& crosses_calls = {},
                       const std::unordered_set<std::string>& float_values = {},
                       const std::unordered_map<std::string, std::uint64_t>& use_weights = {},
-                      const std::unordered_map<std::string, std::uint64_t>& use_counts = {}
+                      const std::unordered_map<std::string, std::uint64_t>& use_counts = {},
+                      const std::unordered_map<std::string, std::string>& copy_hints = {}
                      );
 
   void Allocate();
@@ -51,8 +53,12 @@ public:
 
   std::vector<LiveInterval> GetSpilledIntervals() const;
 
+  const std::vector<LiveInterval>& GetIntervals() const { return intervals_list; }
+
 private:
   std::vector<LiveInterval> intervals_list;
+  std::unordered_map<std::string, std::string> copy_hints_;
+  std::unordered_map<std::string, std::size_t> interval_index_;
 
   bool is_virtual_register(const std::string& var) const;
   static bool IsCalleeSaved(const std::string& reg);
