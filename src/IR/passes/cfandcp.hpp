@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -28,19 +29,33 @@ public:
       int32_t a = std::get<int32_t>(lhs->GetValue());
       int32_t b = std::get<int32_t>(rhs->GetValue());
       int32_t res = 0;
+      const uint32_t ua = static_cast<uint32_t>(a);
+      const uint32_t ub = static_cast<uint32_t>(b);
+      const uint32_t shift = ub & 31U;
 
       switch (op) {
-        case IRBinaryOp::ADD: res = a + b; break;
-        case IRBinaryOp::SUB: res = a - b; break;
-        case IRBinaryOp::MUL: res = a * b; break;
-        case IRBinaryOp::DIV: res = (b != 0) ? (a / b) : 0; break;
-        case IRBinaryOp::MOD: res = (b != 0) ? (a % b) : 0; break;
+        case IRBinaryOp::ADD: res = static_cast<int32_t>(ua + ub); break;
+        case IRBinaryOp::SUB: res = static_cast<int32_t>(ua - ub); break;
+        case IRBinaryOp::MUL: res = static_cast<int32_t>(ua * ub); break;
+        case IRBinaryOp::DIV:
+          // 除零不能被优化成任意常量；INT_MIN / -1 按 RISC-V 结果处理。
+          if (b == 0) return nullptr;
+          res = (a == std::numeric_limits<int32_t>::min() && b == -1)
+                  ? std::numeric_limits<int32_t>::min()
+                  : a / b;
+          break;
+        case IRBinaryOp::MOD:
+          if (b == 0) return nullptr;
+          res = (a == std::numeric_limits<int32_t>::min() && b == -1)
+                  ? 0
+                  : a % b;
+          break;
         case IRBinaryOp::AND: res = a & b; break;
         case IRBinaryOp::OR:  res = a | b; break;
         case IRBinaryOp::XOR: res = a ^ b; break;
-        case IRBinaryOp::SHL: res = a << b; break;
-        case IRBinaryOp::SHR: res = static_cast<int32_t>(static_cast<uint32_t>(a) >> b); break;
-        case IRBinaryOp::SAR: res = a >> b; break;
+        case IRBinaryOp::SHL: res = static_cast<int32_t>(ua << shift); break;
+        case IRBinaryOp::SHR: res = static_cast<int32_t>(ua >> shift); break;
+        case IRBinaryOp::SAR: res = a >> shift; break;
         case IRBinaryOp::EQ:  res = (a == b) ? 1 : 0; break;
         case IRBinaryOp::NE:  res = (a != b) ? 1 : 0; break;
         case IRBinaryOp::LT:  res = (a < b)  ? 1 : 0; break;
@@ -59,7 +74,9 @@ public:
         case IRBinaryOp::ADD: return std::make_shared<IRConstant>(a + b);
         case IRBinaryOp::SUB: return std::make_shared<IRConstant>(a - b);
         case IRBinaryOp::MUL: return std::make_shared<IRConstant>(a * b);
-        case IRBinaryOp::DIV: return std::make_shared<IRConstant>(b != 0.0f ? (a / b) : 0.0f);
+        // 暂不把浮点除零折成 inf/nan 文本，保留原指令交给目标机执行。
+        case IRBinaryOp::DIV:
+          return b != 0.0f ? std::make_shared<IRConstant>(a / b) : nullptr;
         case IRBinaryOp::EQ:  return std::make_shared<IRConstant>(static_cast<int32_t>(a == b ? 1 : 0));
         case IRBinaryOp::NE:  return std::make_shared<IRConstant>(static_cast<int32_t>(a != b ? 1 : 0));
         case IRBinaryOp::LT:  return std::make_shared<IRConstant>(static_cast<int32_t>(a < b ? 1 : 0));
@@ -123,7 +140,13 @@ public:
                 folded = std::make_shared<IRConstant>(static_cast<float>(iv));
               } else if (cast_inst->GetOp() == IRCastOp::FLOAT_TO_INT) {
                 float fv = std::get<float>(val_const->GetValue());
-                folded = std::make_shared<IRConstant>(static_cast<int32_t>(fv));
+                const double wide = static_cast<double>(fv);
+                // 浮点转整数越界在宿主 C++ 中没有可移植结果，不能折叠。
+                if (std::isfinite(fv) &&
+                    wide >= static_cast<double>(std::numeric_limits<int32_t>::min()) &&
+                    wide <= static_cast<double>(std::numeric_limits<int32_t>::max())) {
+                  folded = std::make_shared<IRConstant>(static_cast<int32_t>(fv));
+                }
               }
 
               if (folded) {

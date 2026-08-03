@@ -1,123 +1,164 @@
 #pragma once
 
 #include "../custom_ir.hpp"
+#include "tool.hpp"
 #include <algorithm>
-#include <cassert>
+#include <cstddef>
 #include <memory>
-#include <queue>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace IR {
 namespace Pass {
 
+// Dead Code Elimination（死代码删除）。
+//
+// 这里不只删除不可达基本块，还会删除“结果无人使用且没有副作用”的
+// SSA 指令。删除一条指令后，它的操作数可能随之变成死值，因此需要
+// 反复建立 use-count，直到达到不动点。
 class DCE {
+private:
+  static std::vector<std::shared_ptr<IRValue>> FilterArgs(
+      const std::vector<std::shared_ptr<IRValue>>& args,
+      const std::vector<bool>& remove) {
+    std::vector<std::shared_ptr<IRValue>> result;
+    result.reserve(args.size());
+    for (size_t i = 0; i < args.size(); ++i) {
+      if (i >= remove.size() || !remove[i]) result.push_back(args[i]);
+    }
+    return result;
+  }
+
+  // 块参数相当于 Phi。若参数没有任何使用，需要同时删除所有入边上
+  // 对应位置的实参，否则块参数个数与跳转实参个数会不一致。
+  static bool RemoveUnusedBlockParams(IRFunction& function) {
+    std::unordered_map<const IRValue*, size_t> use_count;
+    for (const auto& block : function.blocks) {
+      for (const auto& inst : block->insts) {
+        for (const auto& use : inst->GetUses()) {
+          if (use) ++use_count[use.get()];
+        }
+      }
+    }
+
+    bool changed = false;
+    for (const auto& target : function.blocks) {
+      if (target->params.empty()) continue;
+
+      std::vector<bool> remove(target->params.size(), false);
+      bool has_dead_param = false;
+      for (size_t i = 0; i < target->params.size(); ++i) {
+        if (use_count[target->params[i].get()] == 0) {
+          remove[i] = true;
+          has_dead_param = true;
+        }
+      }
+      if (!has_dead_param) continue;
+
+      // 先验证每条入边的实参数量。遇到不完整 IR 时保持保守，不进行修改。
+      bool all_edges_valid = true;
+      for (const auto& pred : function.blocks) {
+        if (pred->insts.empty()) continue;
+        const auto& term = pred->insts.back();
+        if (auto jump = dyn_cast<IRJump>(term.get())) {
+          if (jump->GetTarget().get() == target.get() &&
+              jump->GetArgs().size() != target->params.size()) {
+            all_edges_valid = false;
+          }
+        } else if (auto branch = dyn_cast<IRBranch>(term.get())) {
+          if (branch->GetThenTarget().get() == target.get() &&
+              branch->GetThenArgs().size() != target->params.size()) {
+            all_edges_valid = false;
+          }
+          if (branch->GetElseTarget().get() == target.get() &&
+              branch->GetElseArgs().size() != target->params.size()) {
+            all_edges_valid = false;
+          }
+        }
+      }
+      if (!all_edges_valid) continue;
+
+      for (const auto& pred : function.blocks) {
+        if (pred->insts.empty()) continue;
+        const auto& term = pred->insts.back();
+        if (auto jump = dyn_cast<IRJump>(term.get())) {
+          if (jump->GetTarget().get() == target.get()) {
+            jump->SetArgs(FilterArgs(jump->GetArgs(), remove));
+          }
+        } else if (auto branch = dyn_cast<IRBranch>(term.get())) {
+          if (branch->GetThenTarget().get() == target.get()) {
+            branch->SetThenArgs(FilterArgs(branch->GetThenArgs(), remove));
+          }
+          if (branch->GetElseTarget().get() == target.get()) {
+            branch->SetElseArgs(FilterArgs(branch->GetElseArgs(), remove));
+          }
+        }
+      }
+
+      std::vector<std::shared_ptr<IRBlockParam>> kept;
+      kept.reserve(target->params.size());
+      for (size_t i = 0; i < target->params.size(); ++i) {
+        if (!remove[i]) kept.push_back(target->params[i]);
+      }
+      target->params = std::move(kept);
+      changed = true;
+    }
+    return changed;
+  }
+
+  static bool RemoveDeadInstructions(IRFunction& function) {
+    std::unordered_map<const IRValue*, size_t> use_count;
+    for (const auto& block : function.blocks) {
+      for (const auto& inst : block->insts) {
+        for (const auto& use : inst->GetUses()) {
+          if (use) ++use_count[use.get()];
+        }
+      }
+    }
+
+    bool changed = false;
+    for (const auto& block : function.blocks) {
+      std::vector<std::shared_ptr<IRInstruction>> kept;
+      kept.reserve(block->insts.size());
+      for (const auto& inst : block->insts) {
+        // store/call/branch/return/zero_init 等指令通过 HasSideEffect 保留。
+        // 普通 load 在 SysY 中没有 volatile 语义，结果无人使用时可以删除。
+        if (!inst->HasSideEffect() && use_count[inst.get()] == 0) {
+          changed = true;
+          continue;
+        }
+        kept.push_back(inst);
+      }
+      block->insts = std::move(kept);
+    }
+    return changed;
+  }
+
 public:
-  // 清理不可达基本块
-  void RemoveUnreachableBlocks(IRFunction& function) {
-    if (function.blocks.empty()) return;
+  bool OptimizeFunction(IRFunction& function) {
+    const size_t old_block_count = function.blocks.size();
+    DominatorTree::RemoveUnreachableBlocks(function);
+    bool changed = function.blocks.size() != old_block_count;
 
-    IRBasicBlock* entry = function.blocks[0].get();
-    std::unordered_set<IRBasicBlock*> reachable;
-    std::vector<IRBasicBlock*> worklist = {entry};
-    reachable.insert(entry);
-
-    size_t head = 0;
-    while (head < worklist.size()) {
-      IRBasicBlock* curr = worklist[head++];
-      for (IRBasicBlock* succ : curr->GetSuccessors()) {
-        if (succ && reachable.insert(succ).second) {
-          worklist.push_back(succ);
-        }
-      }
+    bool local_changed = true;
+    while (local_changed) {
+      local_changed = false;
+      local_changed |= RemoveUnusedBlockParams(function);
+      local_changed |= RemoveDeadInstructions(function);
+      changed |= local_changed;
     }
-
-    if (reachable.size() == function.blocks.size()) return;
-
-    std::vector<std::shared_ptr<IRBasicBlock>> new_blocks;
-    new_blocks.reserve(reachable.size());
-    for (auto& block : function.blocks) {
-      if (reachable.count(block.get())) {
-        new_blocks.push_back(block);
-      }
-    }
-    function.blocks = std::move(new_blocks);
+    return changed;
   }
 
-  // 消除唯一前驱基本块的参数
-  void RemoveSinglePreParams(IRFunction& func) {
-    bool changed = true;
-    while (changed) {
-      changed = false;
-      for (auto& block : func.blocks) {
-        auto preds = func.GetPredecessors(block.get());
-        if (preds.size() != 1) continue;
-
-        IRBasicBlock* P = preds[0];
-        if (block->params.empty()) continue;
-        if (P->insts.empty()) continue;
-
-        auto jmp = dyn_cast<IRJump>(P->insts.back().get());
-        if (!jmp || jmp->GetTarget().get() != block.get()) continue;
-
-        auto args = jmp->GetArgs();
-        if (args.size() != block->params.size()) continue;
-
-        // 将形参在整个函数内的 Use 替换为前驱传入的实参
-        for (size_t i = 0; i < block->params.size(); ++i) {
-          func.ReplaceAllUses(block->params[i].get(), args[i]);
-        }
-
-        block->params.clear();
-        jmp->SetArgs({});
-        changed = true;
-      }
+  bool Run(IRProgram* program) {
+    if (!program) return false;
+    bool changed = false;
+    for (auto& function : program->funcs) {
+      if (function) changed |= OptimizeFunction(*function);
     }
-  }
-  void OptimizeFunction(IRFunction& func) {
-    for (auto& block : func.blocks) {
-      if (block->insts.empty()) continue;
-      auto& end_inst = block->insts.back();
-      if (isa<IRBranch>(end_inst)) {
-        auto bran = cast<IRBranch>(end_inst);
-        if (isa<IRConstant>(bran->GetCond())) {
-          auto cond = cast<IRConstant>(bran->GetCond());
-          bool is_float = (cond->GetType() == IRType::IR_FLOAT);
-          bool is_true = true;
-
-          if (is_float) {
-            is_true = (std::get<float>(cond->GetValue()) != 0.0f);
-          } else {
-            is_true = (std::get<int32_t>(cond->GetValue()) != 0);
-          }
-
-          block->insts.pop_back();
-          if (is_true) {
-            auto jump = std::make_shared<IRJump>(bran->GetThenTarget(), bran->GetThenArgs());
-            block->AddInstruction(jump);
-          } else {
-            auto jump = std::make_shared<IRJump>(bran->GetElseTarget(), bran->GetElseArgs());
-            block->AddInstruction(jump);
-          }
-        }
-      }
-    }
-
-    RemoveUnreachableBlocks(func);
-
-    RemoveSinglePreParams(func);
-  }
-
-  void Run(IRProgram* program) {
-    if (!program) return;
-    for (auto& func : program->funcs) {
-      if (func) {
-        OptimizeFunction(*func);
-      }
-    }
+    return changed;
   }
 };
 
-}
-}
+}  // namespace Pass
+}  // namespace IR

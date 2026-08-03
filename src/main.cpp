@@ -8,10 +8,13 @@
 #include "IR/custom_ir.hpp"
 #include "backend/riscv_target.hpp"
 #include "backend/codegen/riscv_generator.hpp"
-#include "IR/passes/cfandcp.hpp"
+#include "IR/passes/cfg_simplify.hpp"
 #include "IR/passes/dce.hpp"
+#include "IR/passes/gvn.hpp"
+#include "IR/passes/instcombine.hpp"
 #include "IR/passes/licm.hpp"
 #include "IR/passes/mem2reg.hpp"
+#include "IR/passes/sccp.hpp"
 
 using namespace std;
 
@@ -62,16 +65,33 @@ int main(int argc, const char *argv[]) {
   GenerateIR(*ast, context);
 
   if (target_config.optimization_level == Back::OptimizationLevel::O1) {
+    // 第一阶段 O1 流水线：先把局部变量提升为 SSA，再依次进行稀疏常量
+    // 传播、局部化简、CFG 清理、公共子表达式消除和真正的死代码删除。
+    // 后半段 LICM 可能暴露新的重复式与死值，因此再做一轮轻量清理。
     IR::Pass::MemToReg mem2reg;
     mem2reg.Run(context.ir_program.get());
 
-    IR::Pass::ConstantFoldAndPropagation cf_cp;
-    cf_cp.Run(context.ir_program.get());
+    IR::Pass::SCCP sccp;
+    sccp.Run(context.ir_program.get());
+
+    IR::Pass::InstCombine inst_combine;
+    inst_combine.Run(context.ir_program.get());
+
+    IR::Pass::CFGSimplify cfg_simplify;
+    cfg_simplify.Run(context.ir_program.get());
+
+    IR::Pass::GVN gvn;
+    gvn.Run(context.ir_program.get());
+
+    IR::Pass::DCE dce;
+    dce.Run(context.ir_program.get());
 
     IR::Pass::LICM licm;
     licm.Run(context.ir_program.get());
 
-    IR::Pass::DCE dce;
+    inst_combine.Run(context.ir_program.get());
+    gvn.Run(context.ir_program.get());
+    cfg_simplify.Run(context.ir_program.get());
     dce.Run(context.ir_program.get());
   }
 
