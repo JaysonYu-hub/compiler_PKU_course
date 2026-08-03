@@ -15,6 +15,16 @@ bool GetPowerOfTwoShift(uint64_t value, unsigned& shift) {
   return true;
 }
 
+bool IsCalleeSavedRegister(const std::string& reg) {
+  if (reg.empty()) return false;
+  if (reg[0] == 's') return true;
+  return reg.size() >= 2 && reg[0] == 'f' && reg[1] == 's';
+}
+
+bool IsFloatRegister(const std::string& reg) {
+  return !reg.empty() && reg[0] == 'f';
+}
+
 }
 
 // Generate (top-level entry)
@@ -74,6 +84,10 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   max_edge_arg_count_  = 0;
 
   std::unordered_set<std::string> virtual_regs;
+  // 形参同样是 SSA 值。旧实现遗漏了它们，导致函数入口无条件落栈，
+  // 后续每次使用都只能从内存重新加载。
+  for (const auto& param : func.params)
+    if (param) virtual_regs.insert(param->GetOperandName());
   for (const auto& block : func.blocks) {
     for (const auto& inst : block->insts) {
       bool has_retval = false;
@@ -101,7 +115,12 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
       for (const auto& [var, range] : it->second)
         if (virtual_regs.count(var)) filtered[var] = range;
 
-      LinearScanAllocator alloc(filtered, GetRegSize());
+      const auto& crosses_calls = lva_->func_crosses_calls[func.name];
+      const auto& float_values = lva_->func_float_values[func.name];
+      const auto& use_weights = lva_->func_use_weights[func.name];
+      const auto& use_counts = lva_->func_use_counts[func.name];
+      LinearScanAllocator alloc(filtered, GetRegSize(), crosses_calls,
+                                float_values, use_weights, use_counts);
       alloc.Allocate();
       reg_map_ = alloc.GetRegMap();
       for (const auto& s : alloc.GetSpilledIntervals())
@@ -110,7 +129,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   }
 
   for (const auto& [var, reg] : reg_map_) {
-    if (!reg.empty() && reg[0] == 's') {
+    if (IsCalleeSavedRegister(reg)) {
       if (std::find(used_s_regs_.begin(), used_s_regs_.end(), reg) == used_s_regs_.end())
         used_s_regs_.push_back(reg);
     }
@@ -176,6 +195,16 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   for (const auto& [v, off] : spill_offsets_)
     if (!val_stack_map_.count(v)) val_stack_map_[v] = off;
 
+  const auto& values_crossing_calls = lva_->func_crosses_calls[func.name];
+  auto needs_stack_home = [&](const std::string& value) {
+    const auto reg_it = reg_map_.find(value);
+    if (reg_it == reg_map_.end() || reg_it->second.empty()) return true;
+    // caller-saved 寄存器中的跨调用值需要一个保存槽；其余已分配值始终
+    // 可以直接从物理寄存器取得，无需为它们预留永远不会访问的栈空间。
+    return !IsCalleeSavedRegister(reg_it->second) &&
+           values_crossing_calls.count(value) != 0;
+  };
+
   for (const auto& block : func.blocks) {
     for (const auto& inst : block->insts) {
       if (IR::isa<IR::IRCall>(inst.get())) {
@@ -198,7 +227,8 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
         const auto* ci = IR::cast<IR::IRCall>(inst.get());
         if (ci->HasReturnValue()) { has_retval = true; val_name = ci->GetOperandName(); }
       }
-      if (has_retval && !val_stack_map_.count(val_name)) {
+      if (has_retval && !val_stack_map_.count(val_name) &&
+          needs_stack_home(val_name)) {
         IR::IRType value_type;
         if (IR::isa<IR::IRAlloc>(inst.get())) {
           const auto* al = IR::cast<IR::IRAlloc>(inst.get());
@@ -271,8 +301,12 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
 
   for (size_t i = 0; i < used_s_regs_.size(); ++i) {
     int s_off = s_reg_start_offset_ + (int)i * GetRegSize();
-    if (target_.Is64Bit()) emitter_.EmitSd(used_s_regs_[i], s_off);
-    else           emitter_.EmitSw(used_s_regs_[i], s_off);
+    if (IsFloatRegister(used_s_regs_[i])) {
+      if (target_.Is64Bit()) emitter_.EmitFsd(used_s_regs_[i], s_off);
+      else                   emitter_.EmitFsw(used_s_regs_[i], s_off);
+    }
+    else if (target_.Is64Bit()) emitter_.EmitSd(used_s_regs_[i], s_off);
+    else                        emitter_.EmitSw(used_s_regs_[i], s_off);
   }
 
   std::vector<IR::IRType> param_types;
@@ -325,6 +359,15 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
     if (reg_it == reg_map_.end() || reg_it->second.empty()) continue;
     const std::string& p_reg = reg_it->second;
     const int stk = val_stack_map_.at(pn);
+    const auto& loc = param_locs[i];
+    if (loc.kind == ArgumentLocation::Kind::FLOAT_REGISTER &&
+        p_reg == "fa" + std::to_string(loc.index)) {
+      continue;
+    }
+    if (loc.kind == ArgumentLocation::Kind::INTEGER_REGISTER &&
+        p_reg == "a" + std::to_string(loc.index)) {
+      continue;
+    }
     if (func.params[i]->GetType() == IR::IRType::IR_FLOAT) {
       if (p_reg[0] == 'f') {
         emitter_.EmitFlw(p_reg, stk);
@@ -366,7 +409,8 @@ void Back::RiscvGenerator::Visit(const IR::IRBasicBlock& block) {
         for (const auto& var : live_it->second) {
           if (var == def_name) continue;
           auto ri = reg_map_.find(var);
-          if (ri != reg_map_.end() && !ri->second.empty() && ri->second[0] != 's')
+          if (ri != reg_map_.end() && !ri->second.empty() &&
+              !IsCalleeSavedRegister(ri->second))
             regs_to_save.push_back({var, ri->second});
         }
       }
@@ -443,8 +487,12 @@ void Back::RiscvGenerator::Visit(const IR::IRReturn& inst) {
 
   for (size_t i = 0; i < used_s_regs_.size(); ++i) {
     int off = s_reg_start_offset_ + (int)i * GetRegSize();
-    if (target_.Is64Bit()) emitter_.EmitLd(used_s_regs_[i], off);
-    else           emitter_.EmitLw(used_s_regs_[i], off);
+    if (IsFloatRegister(used_s_regs_[i])) {
+      if (target_.Is64Bit()) emitter_.EmitFld(used_s_regs_[i], off);
+      else                   emitter_.EmitFlw(used_s_regs_[i], off);
+    }
+    else if (target_.Is64Bit()) emitter_.EmitLd(used_s_regs_[i], off);
+    else                        emitter_.EmitLw(used_s_regs_[i], off);
   }
   if (has_call_) {
     int ra_off = current_stack_size_ - GetRegSize();

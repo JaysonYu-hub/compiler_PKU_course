@@ -68,8 +68,8 @@ public:
   }
 
   // 建立支配树与支配边界
-  void Analyze(IRFunction& function) {
-    RemoveUnreachableBlocks(function);
+  void Analyze(IRFunction& function, bool remove_unreachable = true) {
+    if (remove_unreachable) RemoveUnreachableBlocks(function);
 
     rpo_order.clear();
     rpo_index.clear();

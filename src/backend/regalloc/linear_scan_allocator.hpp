@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <array>
+#include <cstdint>
 
 namespace Back {
 
@@ -19,6 +20,8 @@ public:
     int stack_offset = 0;
     bool crosses_call = false;
     bool is_float = false;
+    std::uint64_t use_weight = 1;
+    std::uint64_t use_count = 0;
   };
 
   const std::vector<std::string> reg_pool = {
@@ -37,7 +40,9 @@ public:
                       std::array<long long int, 2>>& intervals, 
                       int reg_size = 8,
                       const std::unordered_set<std::string>& crosses_calls = {},
-                      const std::unordered_set<std::string>& float_values = {}
+                      const std::unordered_set<std::string>& float_values = {},
+                      const std::unordered_map<std::string, std::uint64_t>& use_weights = {},
+                      const std::unordered_map<std::string, std::uint64_t>& use_counts = {}
                      );
 
   void Allocate();
@@ -50,6 +55,11 @@ private:
   std::vector<LiveInterval> intervals_list;
 
   bool is_virtual_register(const std::string& var) const;
+  static bool IsCalleeSaved(const std::string& reg);
+  static long double SpillPriority(const LiveInterval& interval);
+  static bool LowerSpillPriority(const LiveInterval& lhs,
+                                 const LiveInterval& rhs);
+  void AssignSpillSlots();
 };
 
 }

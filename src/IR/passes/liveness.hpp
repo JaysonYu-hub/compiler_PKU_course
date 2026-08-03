@@ -9,6 +9,7 @@
 #include <limits>
 #include <array>
 #include <algorithm>
+#include <cstdint>
 
 namespace IR {
 namespace Pass {
@@ -20,6 +21,13 @@ public:
   std::unordered_map<std::shared_ptr<IR::IRInstruction>, std::unordered_set<std::string>> live_out_inst;
   std::unordered_map<std::shared_ptr<IR::IRInstruction>, std::unordered_set<std::string>> live_in_inst;
   std::unordered_map<std::string, std::unordered_map<std::string, std::array<long long int, 2>>> func_intervals;
+
+  // 第二阶段寄存器分配提示。和活跃区间由同一次分析产生，避免信息不一致。
+  std::unordered_map<std::string, std::unordered_map<std::string, std::uint64_t>> func_use_weights;
+  std::unordered_map<std::string, std::unordered_map<std::string, std::uint64_t>> func_use_counts;
+  std::unordered_map<std::string, std::unordered_set<std::string>> func_crosses_calls;
+  std::unordered_map<std::string, std::unordered_set<std::string>> func_float_values;
+  std::unordered_map<std::string, std::unordered_map<std::string, int>> func_loop_depth;
   long long int max_inf = std::numeric_limits<long long int>::max();
   long long int min_inf = std::numeric_limits<long long int>::min();
   const std::vector<std::string> caller_saved_registers = {

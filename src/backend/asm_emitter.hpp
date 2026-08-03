@@ -60,6 +60,14 @@ public:
     assert(base != "sp" || offset % 4 == 0);
     EmitMemFloatStore("fsw", reg, offset, base);
   }
+  void EmitFld(const std::string& reg, int offset, const std::string& base = "sp") {
+    assert(base != "sp" || offset % 8 == 0);
+    EmitMemFloat("fld", reg, offset, base);
+  }
+  void EmitFsd(const std::string& reg, int offset, const std::string& base = "sp") {
+    assert(base != "sp" || offset % 8 == 0);
+    EmitMemFloatStore("fsd", reg, offset, base);
+  }
 
   // ---------- raw ostream access (for legacy callers) ----------
   std::ostream& Out() { return out_; }
