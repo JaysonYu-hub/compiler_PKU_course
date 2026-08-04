@@ -146,6 +146,11 @@ private:
   void LoadValueToRegByName(const std::string& name, const std::string& reg, IR::IRType t);
 
   void EmitIndexScale(int elem_size);
+  bool TryEmitConstantPointerOffset(const IR::IRValue* base,
+                                    const IR::IRValue* index,
+                                    int element_size,
+                                    const IR::IRValue* result,
+                                    bool base_is_address);
   bool TryEmitMulStrengthReduction(const IR::IRBinary& inst);
   bool TryEmitSignedPowerOfTwoDivRem(const IR::IRBinary& inst);
   bool TryEmitIntegerImmediate(const IR::IRBinary& inst);

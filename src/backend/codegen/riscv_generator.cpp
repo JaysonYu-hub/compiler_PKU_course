@@ -185,10 +185,14 @@ void Back::RiscvGenerator::EmitParallelValueCopies(
     if (copy.skip || copy.source_stack < 0 ||
         destination_stack_offsets.count(copy.source_stack) == 0)
       continue;
-    copy.staged_stack = staging_base + static_cast<int>(i) * slot_size;
+    const int staged_stack =
+        staging_base + static_cast<int>(i) * slot_size;
     const std::string scratch =
         copy.destination.type == IR::IRType::IR_FLOAT ? "ft5" : "t5";
+    // 此时必须仍从 original source_stack 读取。若先设置 staged_stack，
+    // load_source 会误以为暂存已经完成，并从尚未初始化的缓冲槽加载。
     load_source(copy, scratch);
+    copy.staged_stack = staged_stack;
     if (copy.destination.type == IR::IRType::IR_FLOAT)
       emitter_.EmitFsw(scratch, copy.staged_stack);
     else if (GetTypeSize(copy.destination.type) == 8)
@@ -1400,39 +1404,33 @@ void Back::RiscvGenerator::EmitEdgeCopies(
     const std::vector<std::shared_ptr<IR::IRValue>>& args,
     const IR::IRBasicBlock& target) {
   assert(args.size() == target.params.size() && "block argument arity mismatch");
-  const int slot_size = GetRegSize();
-
-  // 块参数具有真正的并行赋值语义。先把所有源保存到独立缓冲区，再写入
-  // 目标位置，可以同时覆盖寄存器环、栈槽环以及寄存器/栈混合环。
-  // 调用实参仍使用更轻量的并行 copy 调度器；CFG 边先以正确性为硬门槛。
-  for (size_t i = 0; i < args.size(); ++i) {
-    const int staging = param_overflow_size_ + static_cast<int>(i) * slot_size;
-    if (args[i]->GetType() == IR::IRType::IR_FLOAT) {
-      LoadValueToFReg(args[i].get(), "ft5");
-      emitter_.EmitFsw("ft5", staging);
+  std::vector<CopyDestination> destinations;
+  destinations.reserve(target.params.size());
+  for (const auto& parameter : target.params) {
+    CopyDestination destination;
+    destination.type = parameter->GetType();
+    destination.value_name = parameter->GetOperandName();
+    const auto register_location = reg_map_.find(destination.value_name);
+    if (register_location != reg_map_.end() &&
+        !register_location->second.empty()) {
+      destination.kind = CopyDestination::Kind::REGISTER;
+      destination.reg = register_location->second;
     } else {
-      LoadValueToReg(args[i].get(), "t5");
-      if (GetTypeSize(args[i]->GetType()) == 8)
-        emitter_.EmitSd("t5", staging);
-      else
-        emitter_.EmitSw("t5", staging);
+      const auto stack_location = val_stack_map_.find(destination.value_name);
+      assert(stack_location != val_stack_map_.end() &&
+             "block parameter has no physical destination");
+      destination.kind = CopyDestination::Kind::STACK;
+      destination.stack_offset = stack_location->second;
     }
+    destinations.push_back(std::move(destination));
   }
 
-  for (size_t i = 0; i < target.params.size(); ++i) {
-    const auto& param = target.params[i];
-    const int staging = param_overflow_size_ + static_cast<int>(i) * slot_size;
-    if (param->GetType() == IR::IRType::IR_FLOAT) {
-      emitter_.EmitFlw("ft5", staging);
-      StoreFRegToVal(param.get(), "ft5");
-    } else {
-      if (GetTypeSize(param->GetType()) == 8)
-        emitter_.EmitLd("t5", staging);
-      else
-        emitter_.EmitLw("t5", staging);
-      StoreRegToVal(param.get(), "t5");
-    }
-  }
+  // 块参数与调用实参具有相同的并行赋值语义。统一调度器只在真正存在
+  // 栈槽覆盖环时才使用 staging buffer；寄存器同位置、栈槽同位置和
+  // param <- param 自保持边都可以直接省略。旧实现无条件两阶段落栈，
+  // 每个循环回边参数都会产生一次 store + load，是地址递推收益被吞掉
+  // 的主要原因。
+  EmitParallelValueCopies(args, destinations, param_overflow_size_);
 }
 
 void Back::RiscvGenerator::Visit(const IR::IRCall& inst) {
@@ -1481,7 +1479,39 @@ void Back::RiscvGenerator::EmitIndexScale(int elem_size) {
   }
 }
 
+bool Back::RiscvGenerator::TryEmitConstantPointerOffset(
+    const IR::IRValue* base, const IR::IRValue* index, int element_size,
+    const IR::IRValue* result, bool base_is_address) {
+  if (GetOptimizationLevel() != OptimizationLevel::O1 || !base || !index ||
+      !result || element_size <= 0)
+    return false;
+  const auto* constant = IR::dyn_cast<IR::IRConstant>(index);
+  if (!constant || constant->GetType() != IR::IRType::IR_INT32)
+    return false;
+
+  const std::int64_t offset =
+      static_cast<std::int64_t>(std::get<std::int32_t>(constant->GetValue())) *
+      static_cast<std::int64_t>(element_size);
+  if (base_is_address)
+    LoadAddressToReg(base, "t5");
+  else
+    LoadValueToReg(base, "t5");
+
+  if (offset >= -2048 && offset <= 2047) {
+    if (offset != 0)
+      emitter_.EmitInst("addi", "t5", "t5", std::to_string(offset));
+  } else {
+    emitter_.EmitInst("li", "t6", std::to_string(offset));
+    emitter_.EmitInst("add", "t5", "t5", "t6");
+  }
+  StoreRegToVal(result, "t5");
+  return true;
+}
+
 void Back::RiscvGenerator::Visit(const IR::IRGetElemPtr& inst) {
+  if (TryEmitConstantPointerOffset(inst.GetArr().get(), inst.GetIndex().get(),
+                                   inst.GetElemSize(), &inst, true))
+    return;
   LoadValueToReg  (inst.GetIndex().get(), "t6");
   // Loading t6 from a large stack offset uses t5 as an address scratch.
   // Materialize the base afterwards so it cannot be clobbered.
@@ -1492,6 +1522,9 @@ void Back::RiscvGenerator::Visit(const IR::IRGetElemPtr& inst) {
 }
 
 void Back::RiscvGenerator::Visit(const IR::IRGetPtr& inst) {
+  if (TryEmitConstantPointerOffset(inst.GetPtr().get(), inst.GetIndex().get(),
+                                   inst.GetElemSize(), &inst, false))
+    return;
   LoadValueToReg(inst.GetIndex().get(), "t6");
   LoadValueToReg(inst.GetPtr().get(),   "t5");
   EmitIndexScale(inst.GetElemSize());

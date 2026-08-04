@@ -16,6 +16,7 @@
 #include "IR/passes/instcombine.hpp"
 #include "IR/passes/ir_verifier.hpp"
 #include "IR/passes/licm.hpp"
+#include "IR/passes/loop_strength_reduce.hpp"
 #include "IR/passes/local_memory_opt.hpp"
 #include "IR/passes/mem2reg.hpp"
 #include "IR/passes/sccp.hpp"
@@ -130,6 +131,28 @@ int main(int argc, const char *argv[]) {
 
     IR::Pass::DCE dce;
     run_timed("dce-1", [&] { dce.Run(context.ir_program.get()); });
+
+    // 将自然循环整理为唯一 preheader，再识别 header 块参数形式的基本
+    // 归纳变量。数组地址由 base + iv * stride 改成沿回边递增的指针，
+    // 使后端把动态索引移位/乘法降为常量步长地址更新。
+    IR::Pass::LoopStrengthReduction loop_strength_reduction;
+    run_timed("loop-strength-reduce", [&] {
+      loop_strength_reduction.Run(context.ir_program.get());
+    });
+    if (pass_timing) {
+      const auto& stats = loop_strength_reduction.GetStats();
+      std::cerr << "[loop-strength-reduce] loops=" << stats.loops_seen
+                << " preheaders=" << stats.preheaders_created
+                << " ivs=" << stats.induction_variables
+                << " addresses=" << stats.addresses_rewritten << '\n';
+    }
+
+    verify_error.clear();
+    if (!verifier.Verify(*context.ir_program, &verify_error)) {
+      std::cerr << "IR verification failed after loop strength reduction: "
+                << verify_error << '\n';
+      return 1;
+    }
 
     IR::Pass::LICM licm;
     run_timed("licm", [&] { licm.Run(context.ir_program.get()); });
