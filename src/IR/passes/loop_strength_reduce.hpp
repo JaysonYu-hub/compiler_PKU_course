@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -46,9 +48,13 @@ class LoopStrengthReduction {
   struct AddressCandidate {
     std::shared_ptr<IRInstruction> instruction;
     std::shared_ptr<IRValue> base;
+    std::shared_ptr<IRValue> index;
+    std::int64_t induction_coefficient = 0;
     int element_size = 0;
     bool is_element_pointer = false;
   };
+
+  static constexpr std::size_t kMaxAddressesPerInduction = 8;
 
   static void InsertBeforeTerminator(
       IRBasicBlock& block, std::shared_ptr<IRInstruction> instruction) {
@@ -69,15 +75,29 @@ class LoopStrengthReduction {
     return definitions;
   }
 
+  static bool ContainsBlockParameter(
+      const std::shared_ptr<IRValue>& value,
+      std::unordered_set<const IRValue*>& visited) {
+    if (!value || !visited.insert(value.get()).second) return false;
+    if (isa<IRBlockParam>(value)) return true;
+    const auto* binary = dyn_cast<IRBinary>(value.get());
+    return binary &&
+           (ContainsBlockParameter(binary->GetLhs(), visited) ||
+            ContainsBlockParameter(binary->GetRhs(), visited));
+  }
+
   static bool HasPotentialAddressCandidate(const IRFunction& function) {
     for (const auto& block : function.blocks) {
       for (const auto& instruction : block->insts) {
+        std::shared_ptr<IRValue> index;
         if (const auto* pointer = dyn_cast<IRGetElemPtr>(instruction.get())) {
-          if (isa<IRBlockParam>(pointer->GetIndex())) return true;
+          index = pointer->GetIndex();
         } else if (const auto* pointer =
                        dyn_cast<IRGetPtr>(instruction.get())) {
-          if (isa<IRBlockParam>(pointer->GetIndex())) return true;
+          index = pointer->GetIndex();
         }
+        std::unordered_set<const IRValue*> visited;
+        if (ContainsBlockParameter(index, visited)) return true;
       }
     }
     return false;
@@ -95,6 +115,86 @@ class LoopStrengthReduction {
            loop.blocks.count(definition->second) == 0;
   }
 
+  static std::optional<std::int64_t> GetIntegerConstant(
+      const std::shared_ptr<IRValue>& value) {
+    const auto* constant = dyn_cast<IRConstant>(value.get());
+    if (!constant || constant->GetType() != IRType::IR_INT32)
+      return std::nullopt;
+    return std::get<std::int32_t>(constant->GetValue());
+  }
+
+  static std::optional<std::int64_t> CheckedAdd(std::int64_t lhs,
+                                                 std::int64_t rhs) {
+    if ((rhs > 0 && lhs > std::numeric_limits<std::int64_t>::max() - rhs) ||
+        (rhs < 0 && lhs < std::numeric_limits<std::int64_t>::min() - rhs))
+      return std::nullopt;
+    return lhs + rhs;
+  }
+
+  static std::optional<std::int64_t> CheckedMultiply(std::int64_t lhs,
+                                                      std::int64_t rhs) {
+    if (lhs == 0 || rhs == 0) return 0;
+    const auto minimum = std::numeric_limits<std::int64_t>::min();
+    const auto maximum = std::numeric_limits<std::int64_t>::max();
+    if (lhs > 0) {
+      if ((rhs > 0 && lhs > maximum / rhs) ||
+          (rhs < 0 && rhs < minimum / lhs))
+        return std::nullopt;
+    } else {
+      if ((rhs > 0 && lhs < minimum / rhs) ||
+          (rhs < 0 && lhs < maximum / rhs))
+        return std::nullopt;
+    }
+    return lhs * rhs;
+  }
+
+  // 返回表达式中基本归纳变量的常量系数。nullopt 表示表达式不是
+  // 可安全移到 preheader 的仿射表达式；循环外定义相对当前循环是常量。
+  static std::optional<std::int64_t> AnalyzeAffineCoefficient(
+      const std::shared_ptr<IRValue>& value,
+      const BasicInductionVariable& induction, const CanonicalLoopInfo& loop,
+      const std::unordered_map<const IRValue*, IRBasicBlock*>& definitions,
+      std::unordered_set<const IRValue*>& visiting) {
+    if (!value) return std::nullopt;
+    if (value.get() == induction.parameter.get()) return 1;
+    if (IsLoopInvariant(value, loop, definitions)) return 0;
+    if (!visiting.insert(value.get()).second) return std::nullopt;
+
+    const auto* binary = dyn_cast<IRBinary>(value.get());
+    if (!binary || binary->GetOperandType() != IRType::IR_INT32) {
+      visiting.erase(value.get());
+      return std::nullopt;
+    }
+    const auto lhs = AnalyzeAffineCoefficient(
+        binary->GetLhs(), induction, loop, definitions, visiting);
+    const auto rhs = AnalyzeAffineCoefficient(
+        binary->GetRhs(), induction, loop, definitions, visiting);
+    visiting.erase(value.get());
+    if (!lhs || !rhs) return std::nullopt;
+
+    switch (binary->GetOp()) {
+      case IRBinaryOp::ADD:
+        return CheckedAdd(*lhs, *rhs);
+      case IRBinaryOp::SUB:
+        if (*rhs == std::numeric_limits<std::int64_t>::min())
+          return std::nullopt;
+        return CheckedAdd(*lhs, -*rhs);
+      case IRBinaryOp::MUL: {
+        // 完全不含当前 iv 的纯整数乘法仍是循环不变量。含 iv 时，另一侧
+        // 必须是整数常量，避免把 iv * runtime_value 错当成固定步长。
+        if (*lhs == 0 && *rhs == 0) return 0;
+        if (*lhs != 0) {
+          const auto constant = GetIntegerConstant(binary->GetRhs());
+          return constant ? CheckedMultiply(*lhs, *constant) : std::nullopt;
+        }
+        const auto constant = GetIntegerConstant(binary->GetLhs());
+        return constant ? CheckedMultiply(*rhs, *constant) : std::nullopt;
+      }
+      default:
+        return std::nullopt;
+    }
+  }
+
   static std::vector<AddressCandidate> FindCandidates(
       const CanonicalLoopInfo& loop, const BasicInductionVariable& induction,
       const std::unordered_map<const IRValue*, IRBasicBlock*>& definitions) {
@@ -102,41 +202,88 @@ class LoopStrengthReduction {
     for (IRBasicBlock* block : loop.blocks) {
       if (!block) continue;
       for (const auto& instruction : block->insts) {
+        std::shared_ptr<IRValue> base;
+        std::shared_ptr<IRValue> index;
+        int element_size = 0;
+        bool is_element_pointer = false;
         if (const auto* pointer = dyn_cast<IRGetElemPtr>(instruction.get())) {
-          if (pointer->GetIndex().get() != induction.parameter.get() ||
-              pointer->GetElemSize() <= 0 ||
-              !IsLoopInvariant(pointer->GetArr(), loop, definitions))
-            continue;
-          candidates.push_back({instruction, pointer->GetArr(),
-                                pointer->GetElemSize(), true});
+          base = pointer->GetArr();
+          index = pointer->GetIndex();
+          element_size = pointer->GetElemSize();
+          is_element_pointer = true;
         } else if (const auto* pointer =
                        dyn_cast<IRGetPtr>(instruction.get())) {
-          if (pointer->GetIndex().get() != induction.parameter.get() ||
-              pointer->GetElemSize() <= 0 ||
-              !IsLoopInvariant(pointer->GetPtr(), loop, definitions))
-            continue;
-          candidates.push_back({instruction, pointer->GetPtr(),
-                                pointer->GetElemSize(), false});
+          base = pointer->GetPtr();
+          index = pointer->GetIndex();
+          element_size = pointer->GetElemSize();
         }
+        if (!base || !index || element_size <= 0 ||
+            !IsLoopInvariant(base, loop, definitions))
+          continue;
+
+        std::unordered_set<const IRValue*> visiting;
+        const auto coefficient = AnalyzeAffineCoefficient(
+            index, induction, loop, definitions, visiting);
+        if (!coefficient || *coefficient == 0) continue;
+        const auto address_step =
+            CheckedMultiply(*coefficient, induction.step);
+        if (!address_step ||
+            *address_step < std::numeric_limits<std::int32_t>::min() ||
+            *address_step > std::numeric_limits<std::int32_t>::max())
+          continue;
+        candidates.push_back({instruction, base, index, *coefficient,
+                              element_size, is_element_pointer});
+        if (candidates.size() == kMaxAddressesPerInduction)
+          return candidates;
       }
     }
     return candidates;
   }
 
+  static std::shared_ptr<IRValue> BuildInitialIndex(
+      const std::shared_ptr<IRValue>& value,
+      const BasicInductionVariable& induction, const CanonicalLoopInfo& loop,
+      const std::unordered_map<const IRValue*, IRBasicBlock*>& definitions,
+      IRBasicBlock& preheader, LoopValueNameGenerator& names,
+      std::unordered_map<const IRValue*, std::shared_ptr<IRValue>>& memo) {
+    if (!value) return nullptr;
+    if (value.get() == induction.parameter.get()) return induction.initial;
+    if (IsLoopInvariant(value, loop, definitions)) return value;
+    const auto found = memo.find(value.get());
+    if (found != memo.end()) return found->second;
+
+    const auto* binary = dyn_cast<IRBinary>(value.get());
+    if (!binary) return nullptr;
+    auto lhs = BuildInitialIndex(binary->GetLhs(), induction, loop,
+                                 definitions, preheader, names, memo);
+    auto rhs = BuildInitialIndex(binary->GetRhs(), induction, loop,
+                                 definitions, preheader, names, memo);
+    if (!lhs || !rhs) return nullptr;
+    auto clone = std::make_shared<IRBinary>(
+        names.Next("%ivindex_init"), binary->GetOp(), std::move(lhs),
+        std::move(rhs), binary->GetOperandType(), binary->GetType());
+    InsertBeforeTerminator(preheader, clone);
+    memo[value.get()] = clone;
+    return clone;
+  }
+
   static std::shared_ptr<IRInstruction> MakeInitialAddress(
       const AddressCandidate& candidate,
-      const BasicInductionVariable& induction, const std::string& name) {
+      const std::shared_ptr<IRValue>& initial_index,
+      const std::string& name) {
     if (candidate.is_element_pointer)
       return std::make_shared<IRGetElemPtr>(
-          name, candidate.base, induction.initial, candidate.element_size);
+          name, candidate.base, initial_index, candidate.element_size);
     return std::make_shared<IRGetPtr>(name, candidate.base,
-                                      induction.initial,
+                                      initial_index,
                                       candidate.element_size);
   }
 
   bool RewriteCandidate(IRFunction& function, CanonicalLoopInfo& loop,
                         const BasicInductionVariable& induction,
                         const AddressCandidate& candidate,
+                        const std::unordered_map<const IRValue*,
+                                                 IRBasicBlock*>& definitions,
                         LoopValueNameGenerator& names) {
     if (!loop.preheader || loop.latches.size() != 1 ||
         !candidate.instruction)
@@ -146,10 +293,15 @@ class LoopStrengthReduction {
         !GetJumpEdgeArguments(*latch, loop.header))
       return false;
 
-    // 初值只在 preheader 计算一次。即使循环零次执行，纯指针运算也不会
-    // 访问内存，因此可以安全提前计算。
+    // 将仿射索引中的 iv 替换为初值，其余纯整数表达式只在 preheader
+    // 计算一次。这里只构造指针，不访问内存，所以零次循环同样安全。
+    std::unordered_map<const IRValue*, std::shared_ptr<IRValue>> memo;
+    auto initial_index = BuildInitialIndex(
+        candidate.index, induction, loop, definitions, *loop.preheader, names,
+        memo);
+    if (!initial_index) return false;
     auto initial_address = MakeInitialAddress(
-        candidate, induction, names.Next("%ivaddr_init"));
+        candidate, initial_index, names.Next("%ivaddr_init"));
     InsertBeforeTerminator(*loop.preheader, initial_address);
 
     auto pointer_parameter =
@@ -157,7 +309,9 @@ class LoopStrengthReduction {
     if (!AppendEdgeArgument(*loop.preheader, loop.header, initial_address))
       return false;
 
-    auto step = std::make_shared<IRConstant>(induction.step);
+    const auto address_step = static_cast<std::int32_t>(
+        candidate.induction_coefficient * induction.step);
+    auto step = std::make_shared<IRConstant>(address_step);
     auto next_address = std::make_shared<IRGetPtr>(
         names.Next("%ivaddr_next"), pointer_parameter, step,
         candidate.element_size);
@@ -213,7 +367,7 @@ class LoopStrengthReduction {
             FindCandidates(loop, induction, definitions);
         for (const auto& candidate : candidates)
           changed |= RewriteCandidate(function, loop, induction, candidate,
-                                      names);
+                                      definitions, names);
       }
     }
     return changed;
