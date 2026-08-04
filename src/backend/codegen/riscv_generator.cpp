@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstring>
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 
 // Internal helpers
@@ -1082,6 +1083,122 @@ bool Back::RiscvGenerator::TryEmitSignedPowerOfTwoDivRem(
   return true;
 }
 
+// Hacker's Delight 风格的 32 位有符号除法 magic number。multiplier 是
+// 有符号高半乘法使用的常量，shift 是乘积高 32 位后的附加右移量。
+namespace {
+struct SignedDivisionMagic {
+  std::int32_t multiplier = 0;
+  unsigned shift = 0;
+};
+
+SignedDivisionMagic ComputeSignedDivisionMagic(std::int32_t divisor) {
+  assert(divisor != 0 && divisor != 1 && divisor != -1);
+  const std::uint64_t two31 = std::uint64_t{1} << 31U;
+  const std::uint64_t absolute_divisor =
+      divisor < 0 ? static_cast<std::uint64_t>(-
+                        static_cast<std::int64_t>(divisor))
+                  : static_cast<std::uint64_t>(divisor);
+  const std::uint64_t sign =
+      static_cast<std::uint32_t>(divisor) >> 31U;
+  const std::uint64_t t = two31 + sign;
+  const std::uint64_t anc = t - 1U - t % absolute_divisor;
+
+  unsigned p = 31;
+  std::uint64_t q1 = two31 / anc;
+  std::uint64_t r1 = two31 - q1 * anc;
+  std::uint64_t q2 = two31 / absolute_divisor;
+  std::uint64_t r2 = two31 - q2 * absolute_divisor;
+  std::uint64_t delta = 0;
+  do {
+    ++p;
+    q1 *= 2U;
+    r1 *= 2U;
+    if (r1 >= anc) {
+      ++q1;
+      r1 -= anc;
+    }
+    q2 *= 2U;
+    r2 *= 2U;
+    if (r2 >= absolute_divisor) {
+      ++q2;
+      r2 -= absolute_divisor;
+    }
+    delta = absolute_divisor - r2;
+  } while (q1 < delta || (q1 == delta && r1 == 0));
+
+  std::uint32_t multiplier_bits =
+      static_cast<std::uint32_t>(q2 + 1U);
+  if (divisor < 0) multiplier_bits = 0U - multiplier_bits;
+  return {static_cast<std::int32_t>(multiplier_bits), p - 32U};
+}
+}  // namespace
+
+// 非二次幂有符号常量除法/取模。RISC-V 硬件 div/rem 延迟较高，使用
+// 预计算乘数的高半乘法、移位和修正得到向 0 取整的商：
+//   q = trunc(x / C)
+// 余数继续使用 r = x - q * C，确保符号与被除数一致。
+bool Back::RiscvGenerator::TryEmitSignedConstantDivRem(
+    const IR::IRBinary& inst) {
+  if (GetOptimizationLevel() != OptimizationLevel::O1 ||
+      inst.GetOperandType() != IR::IRType::IR_INT32 ||
+      (inst.GetOp() != IR::IRBinaryOp::DIV &&
+       inst.GetOp() != IR::IRBinaryOp::MOD))
+    return false;
+
+  const auto* constant = IR::dyn_cast<IR::IRConstant>(inst.GetRhs().get());
+  if (!constant || constant->GetType() != IR::IRType::IR_INT32)
+    return false;
+  const std::int32_t divisor =
+      std::get<std::int32_t>(constant->GetValue());
+  if (divisor == 0 || divisor == 1 || divisor == -1) return false;
+  const std::uint64_t magnitude =
+      divisor < 0 ? static_cast<std::uint64_t>(-
+                        static_cast<std::int64_t>(divisor))
+                  : static_cast<std::uint64_t>(divisor);
+  unsigned power_of_two_shift = 0;
+  if (GetPowerOfTwoShift(magnitude, power_of_two_shift)) return false;
+
+  const SignedDivisionMagic magic = ComputeSignedDivisionMagic(divisor);
+  LoadValueToReg(inst.GetLhs().get(), "t5");
+  emitter_.EmitInst("li", "t4", std::to_string(magic.multiplier));
+  if (target_.Is64Bit()) {
+    // 两个操作数均为符号扩展的 i32，64 位低乘积包含完整的 32x32
+    // 结果；算术右移 32 位即可得到有符号高半部分。
+    emitter_.EmitInst("mul", "t6", "t5", "t4");
+    emitter_.EmitInst("srai", "t6", "t6", "32");
+  } else {
+    emitter_.EmitInst("mulh", "t6", "t5", "t4");
+  }
+
+  const char* add = target_.Is64Bit() ? "addw" : "add";
+  const char* subtract = target_.Is64Bit() ? "subw" : "sub";
+  const char* arithmetic_shift = target_.Is64Bit() ? "sraiw" : "srai";
+  const char* logical_shift = target_.Is64Bit() ? "srliw" : "srli";
+  if (divisor > 0 && magic.multiplier < 0)
+    emitter_.EmitInst(add, "t6", "t6", "t5");
+  else if (divisor < 0 && magic.multiplier > 0)
+    emitter_.EmitInst(subtract, "t6", "t6", "t5");
+  if (magic.shift != 0)
+    emitter_.EmitInst(arithmetic_shift, "t6", "t6",
+                      std::to_string(magic.shift));
+
+  // 将向负无穷取整的算术右移修正为 C/SysY 的向 0 取整。
+  emitter_.EmitInst(logical_shift, "t4", "t6", "31");
+  emitter_.EmitInst(add, "t6", "t6", "t4");
+
+  if (inst.GetOp() == IR::IRBinaryOp::DIV) {
+    StoreRegToVal(&inst, "t6");
+    return true;
+  }
+
+  emitter_.EmitInst("li", "t4", std::to_string(divisor));
+  emitter_.EmitInst(target_.Is64Bit() ? "mulw" : "mul", "t4", "t6",
+                    "t4");
+  emitter_.EmitInst(subtract, "t5", "t5", "t4");
+  StoreRegToVal(&inst, "t5");
+  return true;
+}
+
 // 直接选择 RISC-V I-type 指令，避免先 li 常量再执行寄存器运算。
 bool Back::RiscvGenerator::TryEmitIntegerImmediate(
     const IR::IRBinary& inst) {
@@ -1217,6 +1334,7 @@ void Back::RiscvGenerator::Visit(const IR::IRBinary& inst) {
 
   if (TryEmitMulStrengthReduction(inst)) return;
   if (TryEmitSignedPowerOfTwoDivRem(inst)) return;
+  if (TryEmitSignedConstantDivRem(inst)) return;
   if (TryEmitIntegerImmediate(inst)) return;
 
   std::string name = inst.GetOperandName();

@@ -153,6 +153,7 @@ private:
                                     bool base_is_address);
   bool TryEmitMulStrengthReduction(const IR::IRBinary& inst);
   bool TryEmitSignedPowerOfTwoDivRem(const IR::IRBinary& inst);
+  bool TryEmitSignedConstantDivRem(const IR::IRBinary& inst);
   bool TryEmitIntegerImmediate(const IR::IRBinary& inst);
 };
 
