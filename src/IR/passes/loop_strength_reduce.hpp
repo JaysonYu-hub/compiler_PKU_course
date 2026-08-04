@@ -20,6 +20,8 @@ struct LoopStrengthReduceStats {
   std::size_t loops_seen = 0;
   std::size_t preheaders_created = 0;
   std::size_t induction_variables = 0;
+  std::size_t affine_candidates = 0;
+  std::size_t rejected_by_cost = 0;
   std::size_t addresses_rewritten = 0;
 };
 
@@ -50,11 +52,14 @@ class LoopStrengthReduction {
     std::shared_ptr<IRValue> base;
     std::shared_ptr<IRValue> index;
     std::int64_t induction_coefficient = 0;
+    int removable_cost = 0;
+    bool is_direct_induction = false;
     int element_size = 0;
     bool is_element_pointer = false;
   };
 
   static constexpr std::size_t kMaxAddressesPerInduction = 8;
+  static constexpr std::size_t kMaxAffineAddressesPerFunction = 6;
 
   static void InsertBeforeTerminator(
       IRBasicBlock& block, std::shared_ptr<IRInstruction> instruction) {
@@ -73,6 +78,26 @@ class LoopStrengthReduction {
         definitions[instruction.get()] = block.get();
     }
     return definitions;
+  }
+
+  static std::unordered_map<const IRValue*, std::size_t> BuildUseCounts(
+      const IRFunction& function) {
+    std::unordered_map<const IRValue*, std::size_t> use_counts;
+    for (const auto& block : function.blocks) {
+      for (const auto& instruction : block->insts) {
+        for (const auto& operand : instruction->GetUses()) {
+          if (operand) ++use_counts[operand.get()];
+        }
+      }
+    }
+    return use_counts;
+  }
+
+  static std::size_t MaxBlockParameterCount(const IRFunction& function) {
+    std::size_t maximum = 0;
+    for (const auto& block : function.blocks)
+      maximum = std::max(maximum, block->params.size());
+    return maximum;
   }
 
   static bool ContainsBlockParameter(
@@ -195,9 +220,86 @@ class LoopStrengthReduction {
     }
   }
 
+  static bool IsPowerOfTwoMagnitude(std::int64_t value) {
+    if (value == 0) return false;
+    const std::uint64_t magnitude =
+        value < 0 ? static_cast<std::uint64_t>(-(value + 1)) + 1
+                  : static_cast<std::uint64_t>(value);
+    return (magnitude & (magnitude - 1)) == 0;
+  }
+
+  static int BinaryRemovalCost(const IRBinary& binary) {
+    switch (binary.GetOp()) {
+      case IRBinaryOp::ADD:
+      case IRBinaryOp::SUB:
+        return 1;
+      case IRBinaryOp::MUL: {
+        auto constant = GetIntegerConstant(binary.GetLhs());
+        if (!constant) constant = GetIntegerConstant(binary.GetRhs());
+        // 2 的幂常量乘法通常会降为移位；其他乘法在目标机上更昂贵。
+        return constant && IsPowerOfTwoMagnitude(*constant) ? 2 : 4;
+      }
+      default:
+        return 0;
+    }
+  }
+
+  // 只统计改写当前 GEP 后会真正成为死代码的、依赖 iv 的算术链。
+  // use 次数大于 1 时，表达式仍被其他 GEP/指令使用，不能把它算作收益。
+  static int EstimateRemovableCost(
+      const std::shared_ptr<IRValue>& value,
+      const BasicInductionVariable& induction, const CanonicalLoopInfo& loop,
+      const std::unordered_map<const IRValue*, IRBasicBlock*>& definitions,
+      const std::unordered_map<const IRValue*, std::size_t>& use_counts,
+      std::unordered_set<const IRValue*>& visiting) {
+    if (!value || value.get() == induction.parameter.get() ||
+        IsLoopInvariant(value, loop, definitions))
+      return 0;
+    const auto use = use_counts.find(value.get());
+    if (use == use_counts.end() || use->second != 1 ||
+        !visiting.insert(value.get()).second)
+      return 0;
+
+    const auto* binary = dyn_cast<IRBinary>(value.get());
+    if (!binary) {
+      visiting.erase(value.get());
+      return 0;
+    }
+    std::unordered_set<const IRValue*> coefficient_visiting;
+    const auto coefficient = AnalyzeAffineCoefficient(
+        value, induction, loop, definitions, coefficient_visiting);
+    if (!coefficient || *coefficient == 0) {
+      visiting.erase(value.get());
+      return 0;
+    }
+
+    const int cost = BinaryRemovalCost(*binary) +
+                     EstimateRemovableCost(binary->GetLhs(), induction, loop,
+                                           definitions, use_counts, visiting) +
+                     EstimateRemovableCost(binary->GetRhs(), induction, loop,
+                                           definitions, use_counts, visiting);
+    visiting.erase(value.get());
+    return cost;
+  }
+
+  static int RegisterPressurePenalty(std::size_t header_parameters) {
+    if (header_parameters <= 6) return 1;
+    if (header_parameters <= 9) return 3;
+    if (header_parameters <= 12) return 8;
+    return 12;
+  }
+
+  static int DynamicAddressScaleCost(int element_size) {
+    if (element_size <= 1) return 0;
+    // 动态 GEP 原本需要 scale + add；递推地址只需常量步长 add。
+    // 2 的幂比例对应移位，其他比例通常对应 li + mul。
+    return IsPowerOfTwoMagnitude(element_size) ? 2 : 4;
+  }
+
   static std::vector<AddressCandidate> FindCandidates(
       const CanonicalLoopInfo& loop, const BasicInductionVariable& induction,
-      const std::unordered_map<const IRValue*, IRBasicBlock*>& definitions) {
+      const std::unordered_map<const IRValue*, IRBasicBlock*>& definitions,
+      const std::unordered_map<const IRValue*, std::size_t>& use_counts) {
     std::vector<AddressCandidate> candidates;
     for (IRBasicBlock* block : loop.blocks) {
       if (!block) continue;
@@ -231,13 +333,68 @@ class LoopStrengthReduction {
             *address_step < std::numeric_limits<std::int32_t>::min() ||
             *address_step > std::numeric_limits<std::int32_t>::max())
           continue;
+        const bool is_direct = index.get() == induction.parameter.get();
+        std::unordered_set<const IRValue*> cost_visiting;
+        const int removable_cost =
+            is_direct
+                ? 0
+                : DynamicAddressScaleCost(element_size) +
+                      EstimateRemovableCost(index, induction, loop,
+                                            definitions, use_counts,
+                                            cost_visiting);
         candidates.push_back({instruction, base, index, *coefficient,
-                              element_size, is_element_pointer});
-        if (candidates.size() == kMaxAddressesPerInduction)
-          return candidates;
+                              removable_cost, is_direct, element_size,
+                              is_element_pointer});
       }
     }
+    // 基本归纳地址保持原有优先级；派生地址按可删除算术收益排序。
+    std::stable_sort(candidates.begin(), candidates.end(),
+                     [](const AddressCandidate& lhs,
+                        const AddressCandidate& rhs) {
+                       if (lhs.is_direct_induction != rhs.is_direct_induction)
+                         return lhs.is_direct_induction;
+                       if (lhs.removable_cost != rhs.removable_cost)
+                         return lhs.removable_cost > rhs.removable_cost;
+                       return lhs.instruction->GetOperandName() <
+                              rhs.instruction->GetOperandName();
+                     });
     return candidates;
+  }
+
+  std::vector<AddressCandidate> SelectProfitableCandidates(
+      const CanonicalLoopInfo& loop,
+      const std::vector<AddressCandidate>& candidates,
+      std::size_t function_parameter_pressure,
+      std::size_t& affine_selected_in_function) {
+    std::vector<AddressCandidate> selected;
+    std::size_t current_header_parameters =
+        loop.header ? loop.header->params.size() : 0;
+    for (const auto& candidate : candidates) {
+      if (selected.size() == kMaxAddressesPerInduction) break;
+      if (!candidate.is_direct_induction) {
+        ++stats_.affine_candidates;
+        if (affine_selected_in_function >=
+            kMaxAffineAddressesPerFunction) {
+          ++stats_.rejected_by_cost;
+          continue;
+        }
+        const std::size_t pressure_after_rewrite = std::max(
+            function_parameter_pressure, current_header_parameters + 1);
+        const int pressure_penalty =
+            RegisterPressurePenalty(pressure_after_rewrite);
+        // 相等时也拒绝：只有收益明确大于长存活指针成本才执行派生改写。
+        if (candidate.removable_cost <= pressure_penalty) {
+          ++stats_.rejected_by_cost;
+          continue;
+        }
+      }
+      selected.push_back(candidate);
+      if (!candidate.is_direct_induction) ++affine_selected_in_function;
+      ++current_header_parameters;
+      function_parameter_pressure =
+          std::max(function_parameter_pressure, current_header_parameters);
+    }
+    return selected;
   }
 
   static std::shared_ptr<IRValue> BuildInitialIndex(
@@ -341,6 +498,7 @@ class LoopStrengthReduction {
     LoopValueNameGenerator names(function);
     InductionVariableAnalysis induction_analysis;
     bool changed = false;
+    std::size_t affine_selected_in_function = 0;
 
     for (auto& loop : loops) {
       ++stats_.loops_seen;
@@ -363,9 +521,13 @@ class LoopStrengthReduction {
         // 每次改写后重新建立定义表；前一个候选可能已经把内层循环的
         // base 替换成新块参数。
         const auto definitions = BuildDefinitions(function);
-        const auto candidates =
-            FindCandidates(loop, induction, definitions);
-        for (const auto& candidate : candidates)
+        const auto use_counts = BuildUseCounts(function);
+        const auto candidates = FindCandidates(loop, induction, definitions,
+                                               use_counts);
+        const auto selected = SelectProfitableCandidates(
+            loop, candidates, MaxBlockParameterCount(function),
+            affine_selected_in_function);
+        for (const auto& candidate : selected)
           changed |= RewriteCandidate(function, loop, induction, candidate,
                                       definitions, names);
       }

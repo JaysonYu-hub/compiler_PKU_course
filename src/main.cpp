@@ -144,6 +144,8 @@ int main(int argc, const char *argv[]) {
       std::cerr << "[loop-strength-reduce] loops=" << stats.loops_seen
                 << " preheaders=" << stats.preheaders_created
                 << " ivs=" << stats.induction_variables
+                << " affine=" << stats.affine_candidates
+                << " cost-rejected=" << stats.rejected_by_cost
                 << " addresses=" << stats.addresses_rewritten << '\n';
     }
 
