@@ -25,7 +25,7 @@ public:
     dominator_tree.Analyze(function);
 
     // 第一次扫描只收集标量 alloc；第二次扫描统一验证所有 use。
-    // 旧实现对每个 alloc 单独扫描整个函数，局部变量多时为 O(A * I)。
+    // 所有 alloc 共享扫描结果，避免局部变量较多时出现 O(A * I) 复杂度。
     std::vector<std::shared_ptr<IRAlloc>> candidates;
     std::unordered_map<const IRValue*, std::shared_ptr<IRAlloc>> candidate_owner;
     for (const auto& block : function.blocks) {

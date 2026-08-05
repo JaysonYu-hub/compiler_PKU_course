@@ -1,58 +1,69 @@
-# SysY Compiler
+# SysY 编译器项目说明
 
-一个以 C++17 实现的 SysY 编译器。前端使用 Flex/Bison，内部采用自定义、接近 Koopa
-文本语法的 IR，后端直接从内存 IR 生成 RV32/RV64 汇编。
+## 1. 系统架构
 
-## 编译流水线
+本项目由 PKU 编译原理课程项目扩充而来，使用 C++17 实现 SysY2022/SysY2026 编译器。课程阶段的实现以掌握词法分析、语法分析、AST 构造和基础代码生成为主；在此基础上，项目进一步补充了浮点与多维数组支持，并对中间表示、优化流水线、寄存器分配和 RISC-V 后端进行了重构，使其能够承担较完整的编译与优化任务。
+
+整体流程为“SysY 源程序—Flex/Bison—AST—自定义 IR—SSA 优化—RISC-V 汇编”。前端在生成 IR 时完成短路控制流、数组初始化及整数与浮点类型转换；优化器和后端直接操作内存 IR，不经过 Koopa 文本的重复输出与解析。
+
+系统参考 Koopa IR 的结构和表示习惯，采用 Program、Function、BasicBlock、Value 等层次，并提供内存、寻址、调用和控制流指令。项目不直接依赖 Koopa 库，而是维护自行实现的 C++ 内存 IR。这样既保留了 Koopa IR 结构清晰、便于教学和调试的特点，也可以根据 SSA 优化、循环分析和目标代码生成的需要扩展类型、指令属性及分析接口。
+
+## 2. IR 与模块划分
+
+SSA 的 phi 使用“基本块参数＋控制流边实参”表示：基本块参数描述汇合后的值，各前驱边负责传入相应实参。该形式统一支持变量提升、循环归纳变量和后端并行复制。任何 CFG 变换都必须同步维护块参数及全部前驱边实参，否则会破坏 SSA 的结构一致性。
+
+- `src/sysy.*`、`src/ast`：前端、符号表及 IR 生成；
+- `src/IR`：IR 数据结构、分析与优化 Pass；
+- `src/backend/regalloc`：活跃分析和线性扫描分配；
+- `src/backend/codegen`：栈帧、指令选择和汇编生成；
+- `src/main.cpp`：命令行处理及优化流水线调度。
+
+各模块通过 AST 和 IR 衔接。优化 Pass 只操作 IR，使前端语法扩展与中后端优化保持相对独立。
+
+## 3. 优化策略
+
+`-O1` 的主要流水线为：
 
 ```text
-SysY source
-  -> lexer / parser
-  -> AST + symbol scopes
-  -> custom IR + CFG
-  -> liveness + linear-scan allocation
-  -> stack layout + calling convention
-  -> RISC-V assembly
+MemToReg → 小型叶函数内联 → CFG Simplify → SCCP
+→ InstCombine → GVN → 内存优化 → DCE
+→ 循环强度削弱 → LICM → 局部清理
 ```
 
-主要目录：
+MemToReg 基于支配树和支配边界提升无逃逸标量；SCCP、GVN、DCE分别处理常量传播、冗余表达式和死代码。内存优化以 `base + byte offset` 描述位置，支持 store-to-load forwarding、重复 load 和无效 store 消除；未知指针和调用保持保守。
 
-- `src/ast`：AST、作用域、常量求值和 IR 生成。
-- `src/IR`：IR 数据模型、文本输出和分析/变换 pass。
-- `src/backend`：目标配置、调用约定、寄存器分配、栈布局和汇编生成。
-- `debug/2026`：功能与高阶功能测试。
+循环分析根据支配关系识别回边和自然循环，并在条件允许时建立唯一 preheader。LICM 只外提操作数循环不变、无副作用且能够证明安全的纯计算；强度削弱识别循环头块参数形式的归纳变量，将部分动态数组索引改写为沿回边递增的指针。由于这类改写会增加长生命周期值，系统通过成本模型限制候选数量，避免寄存器压力和 spill 抵消优化收益。
 
-## 构建与使用
+Pass 顺序遵循“先规范 IR，再暴露优化机会，最后清理”的原则。结构性变换之后重新运行局部化简和死代码删除，以消除新产生的冗余；涉及控制流、内存或浮点语义的变换只有在前提能够证明时才执行。
+
+## 4. 后端设计
+
+后端按 RISC-V 调用约定处理整数寄存器、浮点寄存器和栈参数。栈帧统一管理局部对象、传出参数区、保存寄存器、spill 槽及并行复制临时区。寄存器分配采用线性扫描，活跃区间记录使用次数、循环权重和跨调用信息，并据此选择保留或溢出。
+
+指令选择区分 32 位整数运算与指针地址运算，并实现立即数形式、二次幂乘法移位、有符号常量除法、常量 GEP 偏移和动态地址缩放等优化。SSA 边实参通过并行复制调度，在控制流边完成块参数赋值，并处理寄存器交换和栈到栈复制问题。
+
+## 5. 构建与使用
 
 ```bash
 cmake -B build -S .
 cmake --build build --parallel
 ```
 
+输出自定义 IR：
+
 ```bash
-./build/compiler -koopa input.sy -o output.koopa
-./build/compiler -S input.sy -o output.s
-./build/compiler -S -O1 input.sy -o output.s
+./build/compiler -koopa -O1 -o output.koopa input.sy
 ```
 
-Windows 环境下可使用 VM 测试脚本：
+输出 RISC-V 汇编：
 
-```bat
-sync_and_test.bat debug/2026/functional/02_var_defn3.sy 64
-sync_and_test.bat debug/2026/h_functional 64
+```bash
+./build/compiler -S -o output.s input.sy
+./build/compiler -S -O1 -o output.s input.sy
 ```
 
-测试入口既接受目录，也接受单个 `.sy` 文件。
+## 6. AI 辅助使用说明
 
-## 文档
+本项目在后端重构和部分优化实现过程中使用了生成式 AI 辅助，主要用于梳理已有代码、讨论重构方案、补充局部实现与注释，以及协助定位编译和运行问题。中间表示、优化前提、RISC-V ABI 处理和各模块接口仍由项目成员结合课程知识与技术资料进行确认，AI 生成内容在合入前均需经过人工阅读、调试和修改。
 
-- [总体架构](docs/ARCHITECTURE.md)
-- [IR 规范与基本块参数](docs/IR.md)
-- [开发、调试与测试](docs/DEVELOPMENT.md)
-- [代码库审计报告](docs/AUDIT.md)
-
-## 当前状态
-
-- `h_functional` RV64：40/40 通过。
-- IR 已支持基本块参数和控制流边实参，可用于实现 block-argument 形式的 mem2reg。
-- `mem2reg.hpp` 目前只是入口骨架，尚未实现支配树、支配边界和变量重命名。
+项目不使用 AI 针对特定用例生成固定结果，也不将 AI 输出直接作为实现正确性的依据。仓库中部分较详细的后端和优化 Pass 注释形成于 AI 辅助重构阶段，用于记录变换条件、旧实现问题和保守处理边界。

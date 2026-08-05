@@ -118,9 +118,9 @@ void LiveVarAnalysis::Analyze(IR::IRProgram *program) {
   for (const auto& func : program->funcs) {
     const std::string& func_name = func->name;
 
-    // 使用 Cooper 风格的即时支配树，避免为每个基本块维护一个完整的
-    // 支配集合。29_long_line 这类上千基本块用例会因此从平方级内存下降
-    // 到近似线性规模。false 表示分析不可达块时不修改原 IR。
+    // 使用 Cooper 风格的即时支配树，避免为每个基本块维护完整支配集合，
+    // 将大规模 CFG 的支配信息存储量控制在近似线性规模。
+    // false 表示分析不可达块时不修改原 IR。
     DominatorTree dominator_tree;
     dominator_tree.Analyze(*func, false);
     std::unordered_set<IRBasicBlock*> reachable(
@@ -166,7 +166,7 @@ void LiveVarAnalysis::Analyze(IR::IRProgram *program) {
     for (const auto& block : func->blocks)
       func_loop_depth[func_name][block->name] = block_depth[block.get()];
 
-    // 暴露自然循环的块集合和唯一外部前驱。后端第五阶段只在存在唯一
+    // 暴露自然循环的块集合和唯一外部前驱。后端循环边界切分只在存在唯一
     // preheader 时做循环边界切分；多入口循环保持原分配，避免在错误路径
     // 上使用尚未初始化的寄存器值。
     for (const auto& loop : natural_loops) {

@@ -29,7 +29,7 @@ public:
   std::unordered_map<std::shared_ptr<IR::IRInstruction>, std::unordered_set<std::string>> live_in_inst;
   std::unordered_map<std::string, std::unordered_map<std::string, std::array<long long int, 2>>> func_intervals;
 
-  // 第二阶段寄存器分配提示。和活跃区间由同一次分析产生，避免信息不一致。
+  // 寄存器分配提示，与活跃区间由同一次分析产生，避免信息不一致。
   std::unordered_map<std::string, std::unordered_map<std::string, std::uint64_t>> func_use_weights;
   std::unordered_map<std::string, std::unordered_map<std::string, std::uint64_t>> func_use_counts;
   std::unordered_map<std::string, std::unordered_set<std::string>> func_crosses_calls;

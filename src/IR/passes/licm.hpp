@@ -158,7 +158,7 @@ public:
   }
 
   bool IsSafeToSpeculate(const IRInstruction& instruction) const {
-    // 当前阶段只外提不访问内存、不会改变控制流的纯计算。load 即使没有
+    // 只外提不访问内存、不会改变控制流的纯计算。load 即使没有
     // 别名写，也可能来自条件路径上的无效地址；等指针来源和 must-execute
     // 分析完善后再单独开放 load 外提。
     switch (instruction.inst_type) {

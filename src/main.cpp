@@ -83,7 +83,7 @@ int main(int argc, const char *argv[]) {
   };
 
   if (target_config.optimization_level == Back::OptimizationLevel::O1) {
-    // 第一阶段 O1 流水线：先把局部变量提升为 SSA，再依次进行稀疏常量
+    // O1 流水线先把局部变量提升为 SSA，再依次进行稀疏常量
     // 传播、局部化简、CFG 清理、公共子表达式消除和真正的死代码删除。
     // 后半段 LICM 可能暴露新的重复式与死值，因此再做一轮轻量清理。
     IR::Pass::MemToReg mem2reg;

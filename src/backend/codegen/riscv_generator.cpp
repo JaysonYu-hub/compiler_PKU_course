@@ -179,8 +179,7 @@ void Back::RiscvGenerator::EmitParallelValueCopies(
   };
 
   // 只有“某个栈源位置同时会被另一条 copy 覆盖”时才使用共享缓冲区。
-  // 常量、全局值以及互不覆盖的栈源可以在寄存器环处理完成后直接装入，
-  // 不再像旧实现那样让所有参数都经历一次 store/load。
+  // 常量、全局值以及互不覆盖的栈源可在寄存器环处理完成后直接装入。
   for (size_t i = 0; i < copies.size(); ++i) {
     auto& copy = copies[i];
     if (copy.skip || copy.source_stack < 0 ||
@@ -223,7 +222,7 @@ void Back::RiscvGenerator::EmitParallelValueCopies(
   EmitParallelRegisterCopies(std::move(float_moves), true);
 
   // 最后物化常量、全局值及栈源。此时寄存器交换已经完成；可能被栈目的
-  // 覆盖的源在第一阶段也已经保存到缓冲区，因此不会破坏并行语义。
+  // 覆盖的源已经提前保存到缓冲区，因此不会破坏并行语义。
   for (const auto& copy : copies) {
     if (copy.skip || !copy.source_reg.empty()) continue;
     if (copy.destination.kind == CopyDestination::Kind::REGISTER) {
@@ -282,8 +281,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   max_edge_arg_count_  = 0;
 
   std::unordered_set<std::string> virtual_regs;
-  // 形参同样是 SSA 值。旧实现遗漏了它们，导致函数入口无条件落栈，
-  // 后续每次使用都只能从内存重新加载。
+  // 形参同样是 SSA 值，必须参与活跃分析和寄存器分配。
   for (const auto& param : func.params)
     if (param) virtual_regs.insert(param->GetOperandName());
   for (const auto& block : func.blocks) {
@@ -381,7 +379,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
   }
 
   // ------------------------------------------------------------------
-  // 第五阶段：有限活跃区间切分
+  // 有限活跃区间切分
   // ------------------------------------------------------------------
   if (GetOptimizationLevel() == OptimizationLevel::O1) {
   // 全局线性扫描已经占用的 callee-saved 寄存器不能再用于短分段。
@@ -1545,9 +1543,7 @@ void Back::RiscvGenerator::EmitEdgeCopies(
 
   // 块参数与调用实参具有相同的并行赋值语义。统一调度器只在真正存在
   // 栈槽覆盖环时才使用 staging buffer；寄存器同位置、栈槽同位置和
-  // param <- param 自保持边都可以直接省略。旧实现无条件两阶段落栈，
-  // 每个循环回边参数都会产生一次 store + load，是地址递推收益被吞掉
-  // 的主要原因。
+  // param <- param 自保持边都可以直接省略，避免回边产生多余访存。
   EmitParallelValueCopies(args, destinations, param_overflow_size_);
 }
 

@@ -16,7 +16,7 @@ namespace Pass {
 
 // Global Value Numbering / Common Subexpression Elimination。
 //
-// 当前阶段只对无内存副作用的表达式编号：binary、cast、getptr 和
+// 只对无内存副作用的表达式编号：binary、cast、getptr 和
 // getelemptr。load/call 不进入值编号，避免在尚无完整 MemorySSA 和
 // 别名分析时错误地跨 store 复用旧值。
 class GVN {

@@ -176,7 +176,7 @@ private:
                                       GetState(cast_inst->GetValue(), states)));
     }
 
-    // 地址、内存读取和有返回值的调用在第一阶段均视为运行时值。
+    // 地址、内存读取和有返回值的调用均保守地视为运行时值。
     if (isa<IRAlloc>(inst) || isa<IRLoad>(inst) ||
         isa<IRGetElemPtr>(inst) || isa<IRGetPtr>(inst)) {
       return UpdateState(states, inst.get(), LatticeValue::Overdefined());
@@ -458,8 +458,7 @@ public:
     bool changed = false;
 
     // 先替换块参数，再替换指令结果；后续 DCE 会删除失去用途的定义和实参。
-    // 批量收集后只扫描一次 use。旧实现每发现一个常量定义就扫描整个函数，
-    // 在长 SSA 链上会退化为 O(N^2)。
+    // 批量收集替换关系后只扫描一次 use，避免长 SSA 链上的 O(N^2) 退化。
     std::unordered_map<const IRValue*, std::shared_ptr<IRValue>> replacements;
     for (const auto& block : function.blocks) {
       for (const auto& param : block->params) {

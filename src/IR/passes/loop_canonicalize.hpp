@@ -12,7 +12,7 @@ struct LoopCanonicalizeStats {
   std::size_t preheaders_created = 0;
 };
 
-// 第一阶段循环规范化只建立唯一 dedicated preheader。它是 LICM、归纳
+// 循环规范化只建立唯一 dedicated preheader。它是 LICM、归纳
 // 变量转换和后续循环展开共同依赖的最小规范形态。
 class LoopCanonicalize {
  public:

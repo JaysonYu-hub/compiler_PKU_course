@@ -3,7 +3,6 @@
 // Drives the code-generation pipeline:
 //
 //   IRProgram
-//     ↓  Mem2RegPass    (mem2reg)
 //     ↓  LivenessPass   (liveness analysis)
 //     ↓  RegAllocPass   (per-function linear-scan register allocation)
 //     ↓  StackLayout    (per-function stack-frame computation)
@@ -50,8 +49,8 @@ private:
   std::unordered_map<std::string, int>         spill_offsets_;
   std::unordered_map<std::string, int>         val_stack_map_;
   std::unordered_map<std::string, IR::IRType>  val_type_map_;
-  // 第五阶段的有限位置切分：call 前后使用保留的 callee-saved 寄存器
-  // 暂存值；循环块内则可为循环外定义的 spilled SSA 值指定专用寄存器。
+  // 有限活跃区间切分：call 前后使用 callee-saved 寄存器保留值；
+  // 循环块内可为循环外定义的 spilled SSA 值指定专用寄存器。
   std::unordered_map<std::string, std::string> call_backup_reg_map_;
   std::unordered_map<std::string,
       std::unordered_map<std::string, std::string>> loop_reg_overrides_;

@@ -244,7 +244,7 @@ private:
         } else {
           facts[location] = instruction;
         }
-        // 当前 DSE 第一版在任意 load 后结束所有候选链，避免未知别名读取。
+        // 任意 load 都可能观察候选 store，因此保守地结束全部 DSE 候选链。
         last_unobserved_store.clear();
         continue;
       }

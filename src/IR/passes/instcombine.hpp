@@ -39,7 +39,7 @@ private:
       if (folded) return folded;
     }
 
-    // 浮点数需要保留 NaN、正负零等 IEEE 语义，第一阶段不使用整数式
+    // 浮点数需要保留 NaN、正负零等 IEEE 语义，不使用整数式
     // 代数恒等式处理浮点表达式。
     if (binary->GetOperandType() != IRType::IR_INT32) return nullptr;
 

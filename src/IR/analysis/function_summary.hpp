@@ -14,7 +14,7 @@ namespace Analysis {
 
 // 函数摘要只记录“事实”，不直接修改 IR。
 //
-// 后续内联、LICM 和内存优化都可以复用这些信息。当前阶段采用保守策略：
+// 内联、LICM 和内存优化可以复用这些信息。分析采用保守策略：
 // 只要调用目标未知或是外部函数，就认为它可能读写内存并产生可观察行为。
 struct FunctionSummary {
   const IRFunction* function = nullptr;

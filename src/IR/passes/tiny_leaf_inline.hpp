@@ -21,8 +21,8 @@ struct TinyLeafInlineStats {
   std::size_t cloned_instructions = 0;
 };
 
-// 第一版内联器有意保持很窄：只内联单基本块、唯一 return、无递归、
-// 无内存访问、无嵌套调用的小函数。复杂 CFG 内联和内存语义留到后续阶段。
+// 该内联器有意保持保守：只处理单基本块、唯一 return、无递归、
+// 无内存访问且无嵌套调用的小函数。
 class TinyLeafInline {
  public:
   explicit TinyLeafInline(std::size_t instruction_limit = 12)
