@@ -59,6 +59,12 @@ std::string Back::RiscvGenerator::StripAt(const std::string& name) {
 std::string Back::RiscvGenerator::StripPercent(const std::string& name) {
   return (!name.empty() && name[0] == '%') ? name.substr(1) : name;
 }
+std::string Back::RiscvGenerator::GetBlockAsmLabel(const std::string& raw_name) {
+  std::string label = StripPercent(raw_name);
+  if (label == "entry") return label;
+  if (current_func_) return current_func_->name + "_" + label;
+  return label;
+}
 
 void Back::RiscvGenerator::EmitParallelRegisterCopies(
     std::vector<std::pair<std::string, std::string>> moves,
@@ -266,6 +272,7 @@ void Back::RiscvGenerator::Visit(const IR::IRGlobalAlloc& global) {
 
 // Function
 void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
+  current_func_ = &func;
   val_stack_map_.clear();
   val_type_map_.clear();
   local_allocs_.clear();
@@ -292,9 +299,9 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
         const auto* ni = IR::cast<IR::IRNameInstruction>(inst.get());
         if (IR::isa<IR::IRAlloc>(inst.get())) {
           const auto* al = IR::cast<IR::IRAlloc>(inst.get());
-          if (!al->IsArray()) { has_retval = true; val_name = ni->GetName(); }
+          if (!al->IsArray()) { has_retval = true; val_name = ni->GetOperandName(); }
         } else {
-          has_retval = true; val_name = ni->GetName();
+          has_retval = true; val_name = ni->GetOperandName();
         }
       } else if (IR::isa<IR::IRCall>(inst.get())) {
         const auto* ci = IR::cast<IR::IRCall>(inst.get());
@@ -582,11 +589,11 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
         const auto* ni = IR::cast<IR::IRNameInstruction>(inst.get());
         if (IR::isa<IR::IRAlloc>(inst.get())) {
           const auto* al = IR::cast<IR::IRAlloc>(inst.get());
-          local_allocs_.insert(ni->GetName());
-          val_type_map_[ni->GetName()]  = al->GetAllocatedType();
+          local_allocs_.insert(ni->GetOperandName());
+          val_type_map_[ni->GetOperandName()]  = al->GetAllocatedType();
           int sz = al->IsArray() ? al->GetAllocSize() : GetTypeSize(al->GetAllocatedType());
           int alignment = al->IsArray() ? 4 : GetTypeAlignment(al->GetAllocatedType());
-          val_stack_map_[ni->GetName()] =
+          val_stack_map_[ni->GetOperandName()] =
               ReserveStackSlot(offset, sz, alignment);
         }
       }
@@ -610,7 +617,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
       bool has_retval = false; std::string val_name;
       if (IR::isa<IR::IRNameInstruction>(inst.get())) {
         const auto* ni = IR::cast<IR::IRNameInstruction>(inst.get());
-        has_retval = true; val_name = ni->GetName();
+        has_retval = true; val_name = ni->GetOperandName();
       } else if (IR::isa<IR::IRCall>(inst.get())) {
         const auto* ci = IR::cast<IR::IRCall>(inst.get());
         if (ci->HasReturnValue()) { has_retval = true; val_name = ci->GetOperandName(); }
@@ -645,7 +652,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
       bool has_retval = false; std::string val_name;
       if (IR::isa<IR::IRNameInstruction>(inst.get())) {
         const auto* ni = IR::cast<IR::IRNameInstruction>(inst.get());
-        has_retval = true; val_name = ni->GetName();
+        has_retval = true; val_name = ni->GetOperandName();
       } else if (IR::isa<IR::IRCall>(inst.get())) {
         const auto* ci = IR::cast<IR::IRCall>(inst.get());
         if (ci->HasReturnValue()) { has_retval = true; val_name = ci->GetOperandName(); }
@@ -807,7 +814,7 @@ void Back::RiscvGenerator::Visit(const IR::IRFunction& func) {
 
 // Basic block
 void Back::RiscvGenerator::Visit(const IR::IRBasicBlock& block) {
-  std::string label = StripPercent(block.name);
+  std::string label = GetBlockAsmLabel(block.name);
   if (label != "entry") emitter_.EmitLabel(label);
 
   // 循环边界切分只在循环块的生成期间覆盖物理位置。离开该块后恢复
@@ -1493,7 +1500,7 @@ void Back::RiscvGenerator::Visit(const IR::IRJump& inst) {
   auto* target = IR::dyn_cast<IR::IRBasicBlock>(inst.GetTarget().get());
   assert(target && "jump target is not a basic block");
   EmitEdgeCopies(inst.GetArgs(), *target);
-  emitter_.EmitInst("j", StripPercent(inst.GetTarget()->GetOperandName()));
+  emitter_.EmitInst("j", GetBlockAsmLabel(inst.GetTarget()->GetOperandName()));
 }
 void Back::RiscvGenerator::Visit(const IR::IRBranch& inst) {
   auto* then_target = IR::dyn_cast<IR::IRBasicBlock>(inst.GetThenTarget().get());
@@ -1503,18 +1510,19 @@ void Back::RiscvGenerator::Visit(const IR::IRBranch& inst) {
   const auto then_args = inst.GetThenArgs();
   const auto else_args = inst.GetElseArgs();
   if (then_args.empty() && else_args.empty()) {
-    emitter_.EmitInst("bnez", "t5", StripPercent(inst.GetThenTarget()->GetOperandName()));
-    emitter_.EmitInst("j", StripPercent(inst.GetElseTarget()->GetOperandName()));
+    emitter_.EmitInst("bnez", "t5", GetBlockAsmLabel(inst.GetThenTarget()->GetOperandName()));
+    emitter_.EmitInst("j", GetBlockAsmLabel(inst.GetElseTarget()->GetOperandName()));
     return;
   }
 
-  const std::string then_copy = ".Ledge_then_" + std::to_string(edge_label_counter_++);
+  const std::string then_copy = current_func_->name + "_edge_then_" +
+                                std::to_string(edge_label_counter_++);
   emitter_.EmitInst("bnez", "t5", then_copy);
   EmitEdgeCopies(else_args, *else_target);
-  emitter_.EmitInst("j", StripPercent(inst.GetElseTarget()->GetOperandName()));
+  emitter_.EmitInst("j", GetBlockAsmLabel(inst.GetElseTarget()->GetOperandName()));
   emitter_.EmitLabel(then_copy);
   EmitEdgeCopies(then_args, *then_target);
-  emitter_.EmitInst("j", StripPercent(inst.GetThenTarget()->GetOperandName()));
+  emitter_.EmitInst("j", GetBlockAsmLabel(inst.GetThenTarget()->GetOperandName()));
 }
 void Back::RiscvGenerator::EmitEdgeCopies(
     const std::vector<std::shared_ptr<IR::IRValue>>& args,
@@ -1778,7 +1786,7 @@ void Back::RiscvGenerator::StoreFRegToVal(const IR::IRValue* val, const std::str
 void Back::RiscvGenerator::LoadAddressToReg(const IR::IRValue* val, const std::string& reg) {
   if (IR::isa<IR::IRAlloc>(val)) {
     const auto* al = IR::cast<IR::IRAlloc>(val);
-    auto it = val_stack_map_.find(al->GetName());
+    auto it = val_stack_map_.find(al->GetOperandName());
     assert(it != val_stack_map_.end());
     int off = it->second;
     if (off >= -2048 && off <= 2047) emitter_.EmitInst("addi", reg, "sp", std::to_string(off));

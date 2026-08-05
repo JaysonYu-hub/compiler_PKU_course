@@ -45,6 +45,7 @@ private:
   std::unique_ptr<IR::Pass::LiveVarAnalysis> lva_;
 
   // ----- Per-function state (reset in Visit(IRFunction)) -----
+  const IR::IRFunction* current_func_ = nullptr;
   std::unordered_map<std::string, std::string> reg_map_;
   std::unordered_map<std::string, int>         spill_offsets_;
   std::unordered_map<std::string, int>         val_stack_map_;
@@ -113,6 +114,7 @@ private:
 
   std::string StripAt(const std::string& name);
   std::string StripPercent(const std::string& name);
+  std::string GetBlockAsmLabel(const std::string& raw_name);
 
   void LoadValueToReg  (const IR::IRValue* val, const std::string& reg);
   void StoreRegToVal   (const IR::IRValue* val, const std::string& reg);

@@ -283,6 +283,8 @@ std::string CodeGenerator::Visit(const DeclarationUnitAST& node) {
 
 std::string CodeGenerator::Visit(const FuncDefAST& node) {
   context.ResetRegBuilder();
+  context.root_if_counter = 0;
+  context.branch_stack.clear();
   std::vector<IR::IRType> param_types;
   if (node.func_f_params) {
     for (const auto& param : node.func_f_params->func_f_params) {
@@ -468,8 +470,10 @@ std::string CodeGenerator::Visit(const UnmatchedStmtWrapperAST& node) {
 
 std::string CodeGenerator::Visit(const IfUnmatchedStmtAST& node) {
   std::string cond_reg = Generate(*node.if_exp);
-  std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
-  std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
+  std::string num = std::to_string(context.GetNextIfNumberInCurrentScope());
+  std::string parent_prefix = context.GetCurrentBranchPrefix();
+  std::string if_label = "%" + parent_prefix + "then_" + num;
+  std::string end_label = "%" + parent_prefix + "end_" + num;
 
   auto then_bb = std::make_shared<IR::IRBasicBlock>(if_label);
   auto end_bb = std::make_shared<IR::IRBasicBlock>(end_label);
@@ -485,7 +489,9 @@ std::string CodeGenerator::Visit(const IfUnmatchedStmtAST& node) {
   context.AddExistingBlock(then_bb);
 
   context.cur_block_has_terminator = false;
+  context.EnterBranchScope("then_" + num);
   Generate(*node.if_stmt);
+  context.ExitBranchScope();
   if (!context.cur_block_has_terminator) {
     if (context.current_block) {
       auto jump_inst = std::make_shared<IR::IRJump>(end_bb);
@@ -500,9 +506,11 @@ std::string CodeGenerator::Visit(const IfUnmatchedStmtAST& node) {
 
 std::string CodeGenerator::Visit(const IfElseUnmatchedStmtAST& node) {
   std::string cond_reg = Generate(*node.if_exp);
-  std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
-  std::string else_label = LabelBuilder::GetLabel("else", cond_reg);
-  std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
+  std::string num = std::to_string(context.GetNextIfNumberInCurrentScope());
+  std::string parent_prefix = context.GetCurrentBranchPrefix();
+  std::string if_label = "%" + parent_prefix + "then_" + num;
+  std::string else_label = "%" + parent_prefix + "else_" + num;
+  std::string end_label = "%" + parent_prefix + "end_" + num;
 
   auto then_bb = std::make_shared<IR::IRBasicBlock>(if_label);
   auto else_bb = std::make_shared<IR::IRBasicBlock>(else_label);
@@ -520,7 +528,9 @@ std::string CodeGenerator::Visit(const IfElseUnmatchedStmtAST& node) {
   context.AddExistingBlock(then_bb);
 
   context.cur_block_has_terminator = false;
+  context.EnterBranchScope("then_" + num);
   Generate(*node.if_stmt);
+  context.ExitBranchScope();
   bool then_has_terminator = context.cur_block_has_terminator;
   if (!then_has_terminator) {
     if (context.current_block) {
@@ -531,7 +541,9 @@ std::string CodeGenerator::Visit(const IfElseUnmatchedStmtAST& node) {
   context.AddExistingBlock(else_bb);
 
   context.cur_block_has_terminator = false;
+  context.EnterBranchScope("else_" + num);
   Generate(*node.else_stmt);
+  context.ExitBranchScope();
   bool else_has_terminator = context.cur_block_has_terminator;
   if (!else_has_terminator) {
     if (context.current_block) {
@@ -695,9 +707,11 @@ std::string CodeGenerator::Visit(const BlockStmtAST& node) {
 std::string CodeGenerator::Visit(const IfMatchedStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
   std::string cond_reg = Generate(*node.if_exp);
-  std::string if_label = LabelBuilder::GetLabel("then", cond_reg);
-  std::string else_label = LabelBuilder::GetLabel("else", cond_reg);
-  std::string end_label = LabelBuilder::GetLabel("end", cond_reg);
+  std::string num = std::to_string(context.GetNextIfNumberInCurrentScope());
+  std::string parent_prefix = context.GetCurrentBranchPrefix();
+  std::string if_label = "%" + parent_prefix + "then_" + num;
+  std::string else_label = "%" + parent_prefix + "else_" + num;
+  std::string end_label = "%" + parent_prefix + "end_" + num;
 
   auto then_bb = std::make_shared<IR::IRBasicBlock>(if_label);
   auto else_bb = std::make_shared<IR::IRBasicBlock>(else_label);
@@ -715,7 +729,9 @@ std::string CodeGenerator::Visit(const IfMatchedStmtAST& node) {
   context.AddExistingBlock(then_bb);
 
   context.cur_block_has_terminator = false;
+  context.EnterBranchScope("then_" + num);
   Generate(*node.if_stmt);
+  context.ExitBranchScope();
   bool then_has_terminator = context.cur_block_has_terminator;
   if (!then_has_terminator) {
     if (context.current_block) {
@@ -726,7 +742,9 @@ std::string CodeGenerator::Visit(const IfMatchedStmtAST& node) {
   context.AddExistingBlock(else_bb);
 
   context.cur_block_has_terminator = false;
+  context.EnterBranchScope("else_" + num);
   Generate(*node.else_stmt);
+  context.ExitBranchScope();
   bool else_has_terminator = context.cur_block_has_terminator;
   if (!else_has_terminator) {
     if (context.current_block) {
@@ -745,9 +763,9 @@ std::string CodeGenerator::Visit(const IfMatchedStmtAST& node) {
 
 std::string CodeGenerator::Visit(const WhileStmtAST& node) {
   if (context.cur_block_has_terminator) return "";
-  std::string num = NumBuilder::GetNum();
+  std::string num = WhileNumBuilder::GetNum();
   std::string loop_label = "%while_entry_" + num;
-  // 这里的while_body是给while开头的br或者break使用的
+  // 条件为真进入 body；continue 回到 entry 重新判断，break 跳到 end。
   std::string continue_loop_label = "%while_body_" + num;
   std::string end_label = "%while_end_" + num;
 

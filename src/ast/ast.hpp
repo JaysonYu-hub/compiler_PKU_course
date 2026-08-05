@@ -45,6 +45,22 @@ public:
   }
 };
 
+// while 使用独立的全局编号，避免短路表达式和辅助基本块改变循环编号。
+class WhileNumBuilder {
+private:
+  inline static int while_counter = 0;
+public:
+  static void Reset() {
+    while_counter = 0;
+  }
+  static std::string CurrentNum() {
+    return std::to_string(while_counter);
+  }
+  static std::string GetNum() {
+    return std::to_string(++while_counter);
+  }
+};
+
 /**
  * 标签生成工具
  * 支持
@@ -248,6 +264,11 @@ public:
   WhileLabelContext() = default;
 };
 
+struct BranchScopeFrame {
+  std::string name;
+  int if_counter = 0;
+};
+
 // 上下文：用于提供RegBuilder接口和作用域符号表
 class Context {
 public:
@@ -264,6 +285,28 @@ public:
   IR::IRBasicBlock* current_block = nullptr;
   std::unordered_map<std::string, std::shared_ptr<IR::IRValue>> ir_values;
   std::vector<std::vector<std::shared_ptr<IR::IRValue>>> arg_stack;
+  int root_if_counter = 0;
+  std::vector<BranchScopeFrame> branch_stack;
+
+  int GetNextIfNumberInCurrentScope() {
+    if (branch_stack.empty()) return ++root_if_counter;
+    return ++branch_stack.back().if_counter;
+  }
+
+  std::string GetCurrentBranchPrefix() const {
+    std::string prefix;
+    for (const auto& frame : branch_stack) prefix += frame.name + "_";
+    return prefix;
+  }
+
+  void EnterBranchScope(const std::string& scope_name) {
+    branch_stack.push_back({scope_name, 0});
+  }
+
+  void ExitBranchScope() {
+    assert(!branch_stack.empty());
+    branch_stack.pop_back();
+  }
 
   void SetIRValue(const std::string& name, std::shared_ptr<IR::IRValue> val) {
     ir_values[name] = val;

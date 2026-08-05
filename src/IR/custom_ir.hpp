@@ -67,6 +67,15 @@ namespace IR {
   IRType StringToType(const std::string &type);
   std::string FloatToString(float value);
 
+  // IR 对象内部统一保存不带 Koopa sigil 的名称；只有作为操作数或输出
+  // 文本 IR 时才根据对象类别补上 '%' 或 '@'。
+  inline std::string StripIRNameSigil(std::string name) {
+    if (!name.empty() && (name.front() == '%' || name.front() == '@')) {
+      name.erase(name.begin());
+    }
+    return name;
+  }
+
 
   // 基础 Value 类
   class IRValue : public std::enable_shared_from_this<IRValue> {
@@ -108,10 +117,10 @@ namespace IR {
     std::string name;
   public:
     IRNameInstruction(IRValueKind kind, IRInstructionType inst_type, std::string name)
-      : IRInstruction(kind, inst_type), name(std::move(name)) {}
+      : IRInstruction(kind, inst_type), name(StripIRNameSigil(std::move(name))) {}
     IRNameInstruction(IRInstructionType inst_type, std::string name)
-      : IRInstruction(IRValueKind::IR_INSTRUCTION, inst_type), name(std::move(name)) {}
-    std::string GetName() const { return name; }
+      : IRInstruction(IRValueKind::IR_INSTRUCTION, inst_type), name(StripIRNameSigil(std::move(name))) {}
+    const std::string& GetName() const { return name; }
     std::string GetOperandName() const override;
     static bool classof(const IRValue* v) {
       if (!v || v->GetKind() != IRValueKind::IR_INSTRUCTION) return false;
@@ -148,9 +157,14 @@ namespace IR {
   class IRSymbol : public IRValue {
   private:
     std::string name;
+    char sigil;
   public:
-    explicit IRSymbol(std::string name) : IRValue(IRValueKind::IR_SYMBOL), name(std::move(name)) {}
+    explicit IRSymbol(std::string raw_name)
+      : IRValue(IRValueKind::IR_SYMBOL),
+        name(StripIRNameSigil(raw_name)),
+        sigil(!raw_name.empty() && raw_name.front() == '%' ? '%' : '@') {}
 
+    const std::string& GetName() const { return name; }
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetType() const override { return IRType::IR_POINTER; }
@@ -179,10 +193,12 @@ namespace IR {
                                                     size_t& val_idx);
   public:
     IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<int32_t> init_vals, std::vector<int> array_dims = {})
-      : IRValue(IRValueKind::IR_GLOBAL_ALLOC), name(std::move(name)), type(std::move(type)), is_zeroinit(is_zeroinit), init_vals(std::move(init_vals)), array_dims(std::move(array_dims)) {}
+      : IRValue(IRValueKind::IR_GLOBAL_ALLOC), name(StripIRNameSigil(std::move(name))), type(std::move(type)), is_zeroinit(is_zeroinit), init_vals(std::move(init_vals)), array_dims(std::move(array_dims)) {}
 
     IRGlobalAlloc(std::string name, std::string type, bool is_zeroinit, std::vector<float> init_float_vals, std::vector<int> array_dims = {})
-      : IRValue(IRValueKind::IR_GLOBAL_ALLOC), name(std::move(name)), type(std::move(type)), is_zeroinit(is_zeroinit), init_float_vals(std::move(init_float_vals)), array_dims(std::move(array_dims)) {}
+      : IRValue(IRValueKind::IR_GLOBAL_ALLOC), name(StripIRNameSigil(std::move(name))), type(std::move(type)), is_zeroinit(is_zeroinit), init_float_vals(std::move(init_float_vals)), array_dims(std::move(array_dims)) {}
+
+    const std::string& GetName() const { return name; }
 
     bool IsZeroInit() const { return is_zeroinit; }
     const std::vector<int32_t>& GetInitVals() const { return init_vals; }
@@ -211,9 +227,10 @@ namespace IR {
     IRType type;
     std::string type_str;
   public:
-    IRFuncParam(std::string name, IRType type, std::string type_str) 
-      : IRValue(IRValueKind::IR_FUNC_PARAM), name(std::move(name)), type(type), type_str(std::move(type_str)) {}
+    IRFuncParam(std::string name, IRType type, std::string type_str)
+      : IRValue(IRValueKind::IR_FUNC_PARAM), name(StripIRNameSigil(std::move(name))), type(type), type_str(std::move(type_str)) {}
 
+    const std::string& GetName() const { return name; }
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetType() const override { return type; }
@@ -229,11 +246,11 @@ namespace IR {
     IRType type;
   public:
     IRBlockParam(std::string name, IRType type)
-      : IRValue(IRValueKind::IR_BLOCK_PARAM), name(std::move(name)), type(type) {}
+      : IRValue(IRValueKind::IR_BLOCK_PARAM), name(StripIRNameSigil(std::move(name))), type(type) {}
 
     const std::string& GetName() const { return name; }
     std::string DumpText() const override;
-    std::string GetOperandName() const override { return name; }
+    std::string GetOperandName() const override { return "%" + name; }
     IRType GetType() const override { return type; }
     static bool classof(const IRValue* v) {
       return v && v->GetKind() == IRValueKind::IR_BLOCK_PARAM;
@@ -474,6 +491,7 @@ namespace IR {
     IRCall(std::string name, std::shared_ptr<IRValue> func, std::vector<std::shared_ptr<IRValue>> args, IRType ret_type);
 
     bool HasReturnValue() const { return !name.empty(); }
+    const std::string& GetName() const { return name; }
     std::shared_ptr<IRValue> GetFunc() const { return func; }
     const std::vector<std::shared_ptr<IRValue>>& GetArgs() const { return operands; }
 
@@ -510,8 +528,9 @@ namespace IR {
     std::vector<std::shared_ptr<IRBlockParam>> params;
     std::vector<std::shared_ptr<IRInstruction>> insts;
 
-    explicit IRBasicBlock(std::string name) : IRValue(IRValueKind::IR_BASIC_BLOCK), name(std::move(name)) {}
+    explicit IRBasicBlock(std::string name) : IRValue(IRValueKind::IR_BASIC_BLOCK), name(StripIRNameSigil(std::move(name))) {}
 
+    const std::string& GetName() const { return name; }
     void AddInstruction(std::shared_ptr<IRInstruction> inst);
     void AddComment(std::string comment);
     std::shared_ptr<IRBlockParam> AddParam(std::string name, IRType type);
@@ -537,6 +556,7 @@ namespace IR {
   public:
     IRFuncDecl(std::string name, IRType ret_type, std::vector<IRType> param_types);
 
+    const std::string& GetName() const { return name; }
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetType() const override { return ret_type; }
@@ -553,8 +573,9 @@ namespace IR {
     std::vector<std::shared_ptr<IRFuncParam>> params;
     std::vector<std::shared_ptr<IRBasicBlock>> blocks;
 
-    IRFunction(std::string name, IRType ret_type) : IRValue(IRValueKind::IR_FUNCTION), name(std::move(name)), ret_type(ret_type) {}
+    IRFunction(std::string name, IRType ret_type) : IRValue(IRValueKind::IR_FUNCTION), name(StripIRNameSigil(std::move(name))), ret_type(ret_type) {}
 
+    const std::string& GetName() const { return name; }
     std::string DumpText() const override;
     std::string GetOperandName() const override;
     IRType GetRetType() const { return ret_type; }

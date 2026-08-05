@@ -98,10 +98,10 @@ namespace IR {
 
   // IRSymbol
   std::string IRSymbol::DumpText() const {
-    return name;
+    return GetOperandName();
   }
   std::string IRSymbol::GetOperandName() const {
-    return name;
+    return std::string(1, sigil) + name;
   }
 
   // IRGlobalAlloc
@@ -152,11 +152,11 @@ namespace IR {
 
   std::string IRGlobalAlloc::DumpText() const {
     if (is_zeroinit) {
-      return "global " + name + " = alloc " + type + ", zeroinit";
+      return "global " + GetOperandName() + " = alloc " + type + ", zeroinit";
     }
     if (!init_float_vals.empty()) {
       if (init_float_vals.size() == 1 && array_dims.empty()) {
-        return "global " + name + " = alloc " + type + ", " + FloatToString(init_float_vals[0]);
+        return "global " + GetOperandName() + " = alloc " + type + ", " + FloatToString(init_float_vals[0]);
       }
       std::string str;
       if (!array_dims.empty()) {
@@ -172,10 +172,10 @@ namespace IR {
         }
         str += "}";
       }
-      return "global " + name + " = alloc " + type + ", " + str;
+      return "global " + GetOperandName() + " = alloc " + type + ", " + str;
     } else {
       if (init_vals.size() == 1 && array_dims.empty()) {
-        return "global " + name + " = alloc " + type + ", " + std::to_string(init_vals[0]);
+        return "global " + GetOperandName() + " = alloc " + type + ", " + std::to_string(init_vals[0]);
       }
       std::string str;
       if (!array_dims.empty()) {
@@ -191,25 +191,25 @@ namespace IR {
         }
         str += "}";
       }
-      return "global " + name + " = alloc " + type + ", " + str;
+      return "global " + GetOperandName() + " = alloc " + type + ", " + str;
     }
   }
 
   std::string IRGlobalAlloc::GetOperandName() const {
-    return name;
+    return "@" + name;
   }
 
   // IRFuncParam
   std::string IRFuncParam::DumpText() const {
-    return name + ": " + type_str;
+    return GetOperandName() + ": " + type_str;
   }
 
   std::string IRFuncParam::GetOperandName() const {
-    return name;
+    return "@" + name;
   }
 
   std::string IRBlockParam::DumpText() const {
-    return name + ": " + TypeToString(type);
+    return GetOperandName() + ": " + TypeToString(type);
   }
 
   // IRInstruction
@@ -233,7 +233,7 @@ namespace IR {
 
   // IRNameInstruction
   std::string IRNameInstruction::GetOperandName() const {
-    return name;
+    return "%" + name;
   }
 
   // IRBinary
@@ -272,7 +272,7 @@ namespace IR {
 
   std::string IRBinary::DumpText() const {
     const std::string prefix = operand_type == IRType::IR_FLOAT ? "f" : "";
-    return name + " = " + prefix + OpToString(op) + " " +
+    return GetOperandName() + " = " + prefix + OpToString(op) + " " +
            operands[0]->GetOperandName() + ", " + operands[1]->GetOperandName();
   }
 
@@ -291,7 +291,7 @@ namespace IR {
   }
 
   std::string IRCast::DumpText() const {
-    return name + " = " + CastOpToString(op) + " " + operands[0]->GetOperandName();
+    return GetOperandName() + " = " + CastOpToString(op) + " " + operands[0]->GetOperandName();
   }
 
   // IRAlloc
@@ -302,9 +302,9 @@ namespace IR {
       for (auto it = array_dims.rbegin(); it != array_dims.rend(); ++it) {
         type_str = "[" + type_str + ", " + std::to_string(*it) + "]";
       }
-      return name + " = alloc " + type_str;
+      return GetOperandName() + " = alloc " + type_str;
     }
-    return name + " = alloc " + alloc_type_str;
+    return GetOperandName() + " = alloc " + alloc_type_str;
   }
 
   IRType IRAlloc::GetType() const {
@@ -343,7 +343,7 @@ namespace IR {
   }
 
   std::string IRLoad::DumpText() const {
-    return name + " = load " + operands[0]->GetOperandName();
+    return GetOperandName() + " = load " + operands[0]->GetOperandName();
   }
 
   IRType IRLoad::GetType() const {
@@ -358,7 +358,7 @@ namespace IR {
   }
 
   std::string IRGetElemPtr::DumpText() const {
-    return name + " = getelemptr " + operands[0]->GetOperandName() + ", " + operands[1]->GetOperandName();
+    return GetOperandName() + " = getelemptr " + operands[0]->GetOperandName() + ", " + operands[1]->GetOperandName();
   }
 
   IRType IRGetElemPtr::GetType() const {
@@ -373,7 +373,7 @@ namespace IR {
   }
 
   std::string IRGetPtr::DumpText() const {
-    return name + " = getptr " + operands[0]->GetOperandName() + ", " + operands[1]->GetOperandName();
+    return GetOperandName() + " = getptr " + operands[0]->GetOperandName() + ", " + operands[1]->GetOperandName();
   }
 
   IRType IRGetPtr::GetType() const {
@@ -483,7 +483,7 @@ namespace IR {
 
   // IRCall
   IRCall::IRCall(std::string name, std::shared_ptr<IRValue> func, std::vector<std::shared_ptr<IRValue>> args, IRType ret_type)
-    : IRInstruction(IRInstructionType::IR_INST_CALL), name(std::move(name)), func(std::move(func)), ret_type(ret_type) {
+    : IRInstruction(IRInstructionType::IR_INST_CALL), name(StripIRNameSigil(std::move(name))), func(std::move(func)), ret_type(ret_type) {
     operands = std::move(args);
     assert(this->func != nullptr);
   }
@@ -491,7 +491,7 @@ namespace IR {
   std::string IRCall::DumpText() const {
     std::string str;
     if (HasReturnValue()) {
-      str += name + " = ";
+      str += GetOperandName() + " = ";
     }
     str += "call " + func->GetOperandName() + "(";
     for (size_t i = 0; i < operands.size(); i++) {
@@ -506,7 +506,7 @@ namespace IR {
 
   std::string IRCall::GetOperandName() const {
     if (HasReturnValue()) {
-      return name;
+      return "%" + name;
     }
     assert(false && "Void call instruction cannot be used as an operand");
     return "";
@@ -553,7 +553,7 @@ namespace IR {
   }
 
   std::string IRBasicBlock::DumpText() const {
-    std::string text = name;
+    std::string text = GetOperandName();
     if (!params.empty()) {
       text += "(";
       for (size_t i = 0; i < params.size(); ++i) {
@@ -570,7 +570,7 @@ namespace IR {
   }
 
   std::string IRBasicBlock::GetOperandName() const {
-    return name;
+    return "%" + name;
   }
 
   IRType IRBasicBlock::GetType() const {
@@ -579,7 +579,7 @@ namespace IR {
 
   // IRFuncDecl
   IRFuncDecl::IRFuncDecl(std::string name, IRType ret_type, std::vector<IRType> param_types)
-    : IRValue(IRValueKind::IR_FUNC_DECL), name(std::move(name)), ret_type(ret_type), param_types(std::move(param_types)) {}
+    : IRValue(IRValueKind::IR_FUNC_DECL), name(StripIRNameSigil(std::move(name))), ret_type(ret_type), param_types(std::move(param_types)) {}
 
   std::string IRFuncDecl::DumpText() const {
     if (name == "getint") return "decl @getint() : i32";
